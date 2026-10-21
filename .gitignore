@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.dagster/
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+notebooks/.ipynb_checkpoints/
+.DS_Store
