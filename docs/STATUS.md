@@ -4,7 +4,7 @@ This file says where the project actually stands. It is updated by the agent tha
 
 ## Current phase and last unit
 
-Phase 0, in progress. Last unit: platform-eng, Phase 0 foundation (uv project, tooling, Makefile, Compose, dbt scaffold, Dagster Definitions, CI), PR #2. Before it: terrain-rf-eng ITM spike and ADR 0002 (accepted: option 1, the NTIA ITM library via ctypes), PR #1.
+Phase 0, in progress. Last unit: platform-eng, ITM library build stage in the Dagster image per ADR 0002, PR #6. Before it: platform-eng, Phase 0 foundation (uv project, tooling, Makefile, Compose, dbt scaffold, Dagster Definitions, CI), PR #2; terrain-rf-eng ITM spike and ADR 0002 (accepted: option 1, the NTIA ITM library via ctypes), PR #1.
 
 ## Deviations from the plan still in effect
 
