@@ -22,7 +22,7 @@ Object store stand-in:
 Warehouse version:
 
 1. Stay on PostgreSQL 16 with PostGIS 3.4 (`postgis/postgis:16-3.4`). Advantage: matches RDS for PostgreSQL 16 (16.15 ships PostGIS 3.4.6 and h3-pg 4.2.3). Cost: the image is Debian bullseye and the builder stage needs the Debian and PostgreSQL apt archive hosts; PostGIS 3.4 is the oldest line RDS still ships.
-2. PostgreSQL 17 with PostGIS 3.5 (`postgis/postgis:17-3.5`). Advantage: matches RDS for PostgreSQL 17, which ships PostGIS 3.5.1 from 17.1 through 17.9R2, 3.5.6 from 17.10 on, and h3-pg 4.2.3 from 17.6R2 (AWS extension list, https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html, read 2026-10-22). Cost: a PostgreSQL major bump from what ADR 0001 said; the Debian variant of the image is still bullseye, so the apt archive rewrite stays.
+2. PostgreSQL 17 with PostGIS 3.5 (`postgis/postgis:17-3.5`). Advantage: matches RDS for PostgreSQL 17, which ships PostGIS 3.5.x on every minor (3.5.1 from 17.4R2, 3.5.6 from 17.9R2) and h3-pg 4.2.3 from 17.7 (AWS extension list, https://docs.aws.amazon.com/AmazonRDS/latest/PostgreSQLReleaseNotes/postgresql-extensions.html, read 2026-10-22). Cost: a PostgreSQL major bump from what ADR 0001 said; the Debian variant of the image is still bullseye, so the apt archive rewrite stays.
 3. PostgreSQL 16 with PostGIS 3.5 (`postgis/postgis:16-3.5`). Advantage: a PostGIS minor bump only. Cost: no RDS for PostgreSQL 16 minor ships PostGIS 3.5, so local and cloud would diverge.
 
 ## Decision

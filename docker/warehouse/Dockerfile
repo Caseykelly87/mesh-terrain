@@ -1,8 +1,8 @@
-# PostgreSQL 17 with PostGIS 3.5 plus the h3-pg extension built from a pinned
-# commit; the pairing matches RDS for PostgreSQL 17 (ADR 0004). The Debian
-# package (postgresql-17-h3) would be quicker, but the apt repository drops
-# old builds when it publishes new ones, so a source build at a commit is the
-# only pin that holds.
+# PostgreSQL 17 with PostGIS 3.5 plus the h3-pg extension, cloned at a tag and
+# checked against a pinned commit; the pairing matches RDS for PostgreSQL 17
+# (ADR 0004). The Debian package (postgresql-17-h3) would be quicker, but the
+# apt repository drops old builds when it publishes new ones, so a source
+# build checked against a commit is the only pin that holds.
 FROM postgis/postgis:17-3.5@sha256:01a6a70e41e6c4467c8f55f6063555ed72db2d6662cd0d571040d42eadaeb6f6 AS builder
 
 ARG H3_PG_TAG=v4.2.3
