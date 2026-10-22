@@ -61,16 +61,19 @@ dbt-build: dbt-deps
 check: env lint test dbt-build
 
 # Runs inside the Dagster image, not on the host, because the library is built
-# for Linux there (ADR 0002). The first command proves the .so loads and exports
-# the point-to-point entry point; the second feeds the spike script to the
-# container on stdin (no bind mount, so MSYS path rewriting cannot break it)
-# and greps for the flat-path loss it measured, so a changed compiler or source
-# fails here.
+# for Linux there (ADR 0002). The build comes first because compose run reuses
+# whatever image exists, so an edit to the ITM stage would otherwise test the old
+# library; with nothing changed it is a cache hit. The first run proves the .so
+# loads and exports the point-to-point entry point; the second feeds the spike
+# script on stdin (no bind mount, so MSYS path rewriting cannot break it) and
+# matches the measured flat-path loss as a fixed string, so a changed compiler
+# or source fails here.
 check-itm: env
-	$(COMPOSE) run --rm --no-deps dagster-webserver python -c "import ctypes; print(ctypes.CDLL('/usr/local/lib/libitm.so').ITM_P2P_CR_Ex)"
+	$(COMPOSE) build dagster-webserver
+	$(COMPOSE) run --rm --no-deps -T dagster-webserver python -c "import ctypes; print(ctypes.CDLL('/usr/local/lib/libitm.so').ITM_P2P_CR_Ex)"
 	output=$$($(COMPOSE) run --rm --no-deps -T dagster-webserver python - < docs/adr/0002-itm-spike/check_itm.py); \
 	    echo "$$output"; \
-	    echo "$$output" | grep -q "itm basic transmission loss: 151.76 dB"
+	    echo "$$output" | grep -qF "itm basic transmission loss: 151.76 dB"
 
 fmt:
 	$(UV) ruff check --fix .
