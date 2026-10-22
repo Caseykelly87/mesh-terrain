@@ -163,7 +163,9 @@ def payload_data(mesh_packet: mesh_pb2.MeshPacket) -> tuple[mesh_pb2.Data | None
     if not mesh_packet.id or not getattr(mesh_packet, "from"):
         return None, "zero_id_or_from"
     try:
-        plaintext = decrypt_default(mesh_packet.encrypted, mesh_packet.id, getattr(mesh_packet, "from"))
+        plaintext = decrypt_default(
+            mesh_packet.encrypted, mesh_packet.id, getattr(mesh_packet, "from")
+        )
         data = mesh_pb2.Data()
         data.ParseFromString(plaintext)
     except DecodeError:
@@ -185,7 +187,22 @@ def parse_record(record: dict[str, str]) -> Packet | None:
     try:
         envelope.ParseFromString(base64.b64decode(record["payload_b64"]))
     except DecodeError:
-        return Packet(received_at, kind, topic_region(record["topic"]), "", "", 0, 0, 0, 0, 0, False, 0.0, 0, "malformed")
+        return Packet(
+            received_at,
+            kind,
+            topic_region(record["topic"]),
+            "",
+            "",
+            0,
+            0,
+            0,
+            0,
+            0,
+            False,
+            0.0,
+            0,
+            "malformed",
+        )
     mesh_packet = envelope.packet
     packet = Packet(
         received_at=received_at,
@@ -243,7 +260,9 @@ def box_half_width_m(precision_bits: int, latitude_deg: float) -> tuple[float, f
     """
     half_deg = 2 ** (31 - precision_bits) * 1e-7
     metres_per_deg_lat = 111_320.0
-    return half_deg * metres_per_deg_lat, half_deg * metres_per_deg_lat * math.cos(math.radians(latitude_deg))
+    return half_deg * metres_per_deg_lat, half_deg * metres_per_deg_lat * math.cos(
+        math.radians(latitude_deg)
+    )
 
 
 def node_id_from_gateway(gateway: str) -> int | None:
@@ -281,45 +300,69 @@ def pct(part: int, whole: int) -> str:
 
 def report_overview(capture: Capture) -> None:
     hours = capture.hours()
-    print(f"Capture window: {capture.first_at:%Y-%m-%dT%H:%M}Z to {capture.last_at:%Y-%m-%dT%H:%M}Z ({hours:.2f} h)")
+    print(
+        f"Capture window: {capture.first_at:%Y-%m-%dT%H:%M}Z to {capture.last_at:%Y-%m-%dT%H:%M}Z ({hours:.2f} h)"
+    )
     print_table(
         "Records by topic kind",
-        [(kind, str(count), f"{count / hours:.0f}") for kind, count in capture.topic_kinds.most_common()],
+        [
+            (kind, str(count), f"{count / hours:.0f}")
+            for kind, count in capture.topic_kinds.most_common()
+        ],
         ("kind", "records", "per hour"),
     )
     total = sum(capture.status_counts.values())
     print_table(
         "Decode status (ing_03 set), envelope topics only",
-        [(status, str(count), pct(count, total)) for status, count in capture.status_counts.most_common()],
+        [
+            (status, str(count), pct(count, total))
+            for status, count in capture.status_counts.most_common()
+        ],
         ("status", "packets", "share"),
     )
     print_table(
         "Decode status by reason",
-        [(reason, str(count), pct(count, total)) for reason, count in capture.reason_counts.most_common()],
+        [
+            (reason, str(count), pct(count, total))
+            for reason, count in capture.reason_counts.most_common()
+        ],
         ("status: reason", "packets", "share"),
     )
     consent = Counter(p.ok_to_mqtt for p in capture.packets if p.ok_to_mqtt is not None)
     print_table(
         "OK_TO_MQTT bit on packets that arrived with a payload",
-        [(str(flag), str(count), pct(count, sum(consent.values()))) for flag, count in consent.most_common()],
+        [
+            (str(flag), str(count), pct(count, sum(consent.values())))
+            for flag, count in consent.most_common()
+        ],
         ("ok_to_mqtt", "packets", "share"),
     )
     senders: dict[int, list[int]] = defaultdict(lambda: [0, 0])
     for packet in capture.packets:
         if packet.sender and packet.topic_kind == "e" and packet.status != "malformed":
             senders[packet.sender][0 if packet.reason == "stripped" else 1] += 1
-    mix = Counter("both" if s and f else "stripped only" if s else "payload only" for s, f in senders.values())
+    mix = Counter(
+        "both" if s and f else "stripped only" if s else "payload only" for s, f in senders.values()
+    )
     print_table(
         "Senders by whether their packets arrive stripped, with a payload, or both",
         [(kind, str(count), pct(count, len(senders))) for kind, count in mix.most_common()],
         ("sender kind", "senders", "share"),
     )
     ports = Counter(p.portnum for p in capture.packets if p.portnum is not None)
-    rows = [(portnums_pb2.PortNum.Name(port) if port in portnums_pb2.PortNum.values() else str(port), str(n)) for port, n in ports.most_common(12)]
+    rows = [
+        (
+            portnums_pb2.PortNum.Name(port) if port in portnums_pb2.PortNum.values() else str(port),
+            str(n),
+        )
+        for port, n in ports.most_common(12)
+    ]
     print_table("Decoded portnums (top 12)", rows, ("portnum", "packets"))
 
 
-def relay_candidates(packets: list[Packet]) -> tuple[dict[int, set[int]], dict[str, dict[int, set[int]]]]:
+def relay_candidates(
+    packets: list[Packet],
+) -> tuple[dict[int, set[int]], dict[str, dict[int, set[int]]]]:
     """Low id byte to node ids, over the whole capture and per gateway."""
     everywhere: dict[int, set[int]] = defaultdict(set)
     per_gateway: dict[str, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
@@ -334,7 +377,9 @@ def relay_candidates(packets: list[Packet]) -> tuple[dict[int, set[int]], dict[s
 
 def report_relay(capture: Capture) -> dict[str, int]:
     """Measurement (a): relay_node presence and how it resolves."""
-    headers = [p for p in capture.packets if p.topic_kind == "e" and p.status != "malformed" and p.sender]
+    headers = [
+        p for p in capture.packets if p.topic_kind == "e" and p.status != "malformed" and p.sender
+    ]
     with_relay = [p for p in headers if p.relay_node]
     self_relay = [p for p in with_relay if p.relay_node == (p.sender & 0xFF)]
     own_uplink = [p for p in headers if node_id_from_gateway(p.gateway) == p.sender]
@@ -348,20 +393,56 @@ def report_relay(capture: Capture) -> dict[str, int]:
             resolution[scope]["one" if count == 1 else "many" if count > 1 else "none"] += 1
     rows = [
         ("packets with a parsed header (sender set)", str(len(headers)), "100%"),
-        ("gateway's own packets (sender is the gateway)", str(len(own_uplink)), pct(len(own_uplink), len(headers))),
+        (
+            "gateway's own packets (sender is the gateway)",
+            str(len(own_uplink)),
+            pct(len(own_uplink), len(headers)),
+        ),
         ("relay_node non-zero", str(len(with_relay)), pct(len(with_relay), len(headers))),
-        ("relay_node equals the sender's low byte (heard direct from origin)", str(len(self_relay)), pct(len(self_relay), len(with_relay))),
-        ("hop_limit is zero", str(sum(1 for p in headers if p.hop_limit == 0)), pct(sum(1 for p in headers if p.hop_limit == 0), len(headers))),
-        ("hop_start non-zero", str(sum(1 for p in headers if p.hop_start)), pct(sum(1 for p in headers if p.hop_start), len(headers))),
-        ("via_mqtt set", str(sum(1 for p in headers if p.via_mqtt)), pct(sum(1 for p in headers if p.via_mqtt), len(headers))),
+        (
+            "relay_node equals the sender's low byte (heard direct from origin)",
+            str(len(self_relay)),
+            pct(len(self_relay), len(with_relay)),
+        ),
+        (
+            "hop_limit is zero",
+            str(sum(1 for p in headers if p.hop_limit == 0)),
+            pct(sum(1 for p in headers if p.hop_limit == 0), len(headers)),
+        ),
+        (
+            "hop_start non-zero",
+            str(sum(1 for p in headers if p.hop_start)),
+            pct(sum(1 for p in headers if p.hop_start), len(headers)),
+        ),
+        (
+            "via_mqtt set",
+            str(sum(1 for p in headers if p.via_mqtt)),
+            pct(sum(1 for p in headers if p.via_mqtt), len(headers)),
+        ),
     ]
-    print_table("(a) relay_node on packets from the e topics", rows, ("measure", "packets", "share"))
+    print_table(
+        "(a) relay_node on packets from the e topics", rows, ("measure", "packets", "share")
+    )
     rows = []
-    for scope, label in (("capture", "all senders in the capture"), ("gateway", "senders heard by the same gateway")):
+    for scope, label in (
+        ("capture", "all senders in the capture"),
+        ("gateway", "senders heard by the same gateway"),
+    ):
         total = sum(resolution[scope].values())
         for outcome in ("one", "many", "none"):
-            rows.append((label, outcome, str(resolution[scope][outcome]), pct(resolution[scope][outcome], total)))
-    print_table("(a) relay_node low byte resolution, excluding the gateway's own packets", rows, ("candidate set", "matches", "packets", "share"))
+            rows.append(
+                (
+                    label,
+                    outcome,
+                    str(resolution[scope][outcome]),
+                    pct(resolution[scope][outcome], total),
+                )
+            )
+    print_table(
+        "(a) relay_node low byte resolution, excluding the gateway's own packets",
+        rows,
+        ("candidate set", "matches", "packets", "share"),
+    )
     return {"headers": len(headers), "with_relay": len(with_relay)}
 
 
@@ -389,11 +470,24 @@ def report_precision(capture: Capture) -> None:
     rows = []
     for value in sorted(bits):
         ns, ew = box_half_width_m(value, ST_LOUIS_LATITUDE_DEG) if 0 < value <= 32 else (0.0, 0.0)
-        rows.append((str(value), str(bits[value]), pct(bits[value], total), f"{ns:.0f}", f"{ew:.0f}"))
-    print_table("(c) precision_bits on Position packets (half-widths at St. Louis latitude)", rows, ("precision_bits", "packets", "share", "half-width N-S m", "half-width E-W m"))
+        rows.append(
+            (str(value), str(bits[value]), pct(bits[value], total), f"{ns:.0f}", f"{ew:.0f}")
+        )
+    print_table(
+        "(c) precision_bits on Position packets (half-widths at St. Louis latitude)",
+        rows,
+        ("precision_bits", "packets", "share", "half-width N-S m", "half-width E-W m"),
+    )
     map_bits = Counter(p.map_report[2] for p in capture.packets if p.map_report)
-    rows = [(str(v), str(map_bits[v]), pct(map_bits[v], sum(map_bits.values()))) for v in sorted(map_bits)]
-    print_table("(c) position_precision on MapReport packets (map topic)", rows, ("position_precision", "packets", "share"))
+    rows = [
+        (str(v), str(map_bits[v]), pct(map_bits[v], sum(map_bits.values())))
+        for v in sorted(map_bits)
+    ]
+    print_table(
+        "(c) position_precision on MapReport packets (map topic)",
+        rows,
+        ("position_precision", "packets", "share"),
+    )
 
 
 @dataclass
@@ -414,7 +508,9 @@ class Positioned:
         return None if best is None else best[1]
 
 
-def collect_positions(capture: Capture, inside: shapely.Geometry) -> tuple[Positioned, set[int], set[str]]:
+def collect_positions(
+    capture: Capture, inside: shapely.Geometry
+) -> tuple[Positioned, set[int], set[str]]:
     """Positions of nodes inside the MSA, plus the set of MSA nodes and MSA gateways."""
     prepared = prep(inside)
     positioned = Positioned()
@@ -430,7 +526,9 @@ def collect_positions(capture: Capture, inside: shapely.Geometry) -> tuple[Posit
             if prepared.contains(shapely.Point(lon, lat)):
                 positioned.add(packet.sender, packet.received_at, lon, lat, packet.map_report[2])
                 msa_nodes.add(packet.sender)
-    msa_gateways = {p.gateway for p in capture.packets if node_id_from_gateway(p.gateway) in msa_nodes}
+    msa_gateways = {
+        p.gateway for p in capture.packets if node_id_from_gateway(p.gateway) in msa_nodes
+    }
     return positioned, msa_nodes, msa_gateways
 
 
@@ -439,9 +537,13 @@ def resolve_relayer(packet: Packet, candidates: dict[int, set[int]]) -> int | No
     return next(iter(matches)) if len(matches) == 1 else None
 
 
-def link_hours_relay(capture: Capture, positioned: Positioned, msa_gateways: set[str], min_bits: int) -> dict[str, int]:
+def link_hours_relay(
+    capture: Capture, positioned: Positioned, msa_gateways: set[str], min_bits: int
+) -> dict[str, int]:
     """Link-hours from relay_node under lnk_01 to lnk_05, relayer resolved among senders the gateway heard."""
-    headers = [p for p in capture.packets if p.topic_kind == "e" and p.sender and p.gateway in msa_gateways]
+    headers = [
+        p for p in capture.packets if p.topic_kind == "e" and p.sender and p.gateway in msa_gateways
+    ]
     _, per_gateway = relay_candidates(headers)
     windows: dict[tuple[int, int, str], list[float]] = defaultdict(list)
     receipts = 0
@@ -460,7 +562,9 @@ def link_hours_relay(capture: Capture, positioned: Positioned, msa_gateways: set
         if not MIN_DISTANCE_M <= distance_m <= MAX_DISTANCE_M:
             continue
         receipts += 1
-        windows[(relayer, gateway_node, packet.received_at.strftime("%Y-%m-%dT%H"))].append(distance_m)
+        windows[(relayer, gateway_node, packet.received_at.strftime("%Y-%m-%dT%H"))].append(
+            distance_m
+        )
     kept = {key: d for key, d in windows.items() if len(d) >= MIN_PACKETS_PER_HOUR}
     return {
         "receipts": receipts,
@@ -487,7 +591,9 @@ def link_hours_neighbor(capture: Capture, positioned: Positioned, min_bits: int)
                 continue
             distance_m = GEOD.inv(neighbor_at[0], neighbor_at[1], reporter_at[0], reporter_at[1])[2]
             if MIN_DISTANCE_M <= distance_m <= MAX_DISTANCE_M:
-                windows[(neighbor, packet.sender, packet.received_at.strftime("%Y-%m-%dT%H"))].append(distance_m)
+                windows[
+                    (neighbor, packet.sender, packet.received_at.strftime("%Y-%m-%dT%H"))
+                ].append(distance_m)
     return {
         "pair_hours_any": len(windows),
         "pair_hours_over_3km": sum(1 for d in windows.values() if d[0] >= VALIDATION_DISTANCE_M),
@@ -502,31 +608,48 @@ def report_regional_topics(capture: Capture) -> None:
     rows = []
     for segment in REGIONAL_SEGMENTS:
         packets = [p for p in capture.packets if p.region == segment and p.topic_kind == "e"]
-        relayed = sum(1 for p in packets if p.relay_node and node_id_from_gateway(p.gateway) != p.sender)
+        relayed = sum(
+            1 for p in packets if p.relay_node and node_id_from_gateway(p.gateway) != p.sender
+        )
         with_payload = sum(1 for p in packets if p.status == "ok")
         positions = sum(1 for p in packets if p.position)
-        rows.append((
-            f"msh/US/{segment}",
-            str(len(packets)),
-            f"{len(packets) / hours:.0f}",
-            str(len({p.gateway for p in packets})),
-            str(len({p.sender for p in packets if p.sender})),
-            pct(relayed, len(packets)),
-            pct(with_payload, len(packets)),
-            str(positions),
-        ))
+        rows.append(
+            (
+                f"msh/US/{segment}",
+                str(len(packets)),
+                f"{len(packets) / hours:.0f}",
+                str(len({p.gateway for p in packets})),
+                str(len({p.sender for p in packets if p.sender})),
+                pct(relayed, len(packets)),
+                pct(with_payload, len(packets)),
+                str(positions),
+            )
+        )
     print_table(
         "Regional topic segments on the public broker (e topics)",
         rows,
-        ("topic root", "packets", "per hour", "gateways", "senders", "relay_node set", "with payload", "positions"),
+        (
+            "topic root",
+            "packets",
+            "per hour",
+            "gateways",
+            "senders",
+            "relay_node set",
+            "with payload",
+            "positions",
+        ),
     )
 
 
 def report_msa(capture: Capture, msa: shapely.Geometry) -> None:
     positioned, msa_nodes, msa_gateways = collect_positions(capture, msa)
     heard_by_msa = {p.sender for p in capture.packets if p.gateway in msa_gateways and p.sender}
-    usable_nodes = {n for n, rows in positioned.by_node.items() if any(b >= USABLE_BITS for _, _, _, b in rows)}
-    coarse_nodes = {n for n, rows in positioned.by_node.items() if any(b >= COARSE_BITS for _, _, _, b in rows)}
+    usable_nodes = {
+        n for n, rows in positioned.by_node.items() if any(b >= USABLE_BITS for _, _, _, b in rows)
+    }
+    coarse_nodes = {
+        n for n, rows in positioned.by_node.items() if any(b >= COARSE_BITS for _, _, _, b in rows)
+    }
     gateway_nodes = {node_id_from_gateway(g) for g in msa_gateways}
     rows = [
         ("nodes with a position inside the MSA (any precision)", str(len(msa_nodes))),
@@ -535,22 +658,75 @@ def report_msa(capture: Capture, msa: shapely.Geometry) -> None:
         ("gateways whose own position is inside the MSA", str(len(msa_gateways))),
         ("of which with a usable position", str(len(gateway_nodes & usable_nodes))),
         ("distinct senders heard by those gateways", str(len(heard_by_msa))),
-        ("packets received by those gateways", str(sum(1 for p in capture.packets if p.gateway in msa_gateways))),
-        ("NeighborInfo packets from MSA nodes", str(sum(1 for p in capture.packets if p.portnum == portnums_pb2.NEIGHBORINFO_APP and p.sender in msa_nodes))),
+        (
+            "packets received by those gateways",
+            str(sum(1 for p in capture.packets if p.gateway in msa_gateways)),
+        ),
+        (
+            "NeighborInfo packets from MSA nodes",
+            str(
+                sum(
+                    1
+                    for p in capture.packets
+                    if p.portnum == portnums_pb2.NEIGHBORINFO_APP and p.sender in msa_nodes
+                )
+            ),
+        ),
     ]
     print_table("MSA counts (CBSA 41180)", rows, ("measure", "value"))
     hours = capture.hours()
     rows = []
-    for min_bits, label in ((USABLE_BITS, "usable, bits >= 15"), (COARSE_BITS, "coarse or better, bits >= 12")):
+    for min_bits, label in (
+        (USABLE_BITS, "usable, bits >= 15"),
+        (COARSE_BITS, "coarse or better, bits >= 12"),
+    ):
         relay = link_hours_relay(capture, positioned, msa_gateways, min_bits)
         neighbor = link_hours_neighbor(capture, positioned, min_bits)
-        rows.append((label, "relay_node", str(relay["receipts"]), str(relay["link_hours"]), str(relay["link_hours_over_3km"]), str(relay["distinct_pairs"]), f"{relay['link_hours'] / hours * 168:.0f}"))
-        rows.append((label, "NeighborInfo (any report)", "n/a", str(neighbor["pair_hours_any"]), str(neighbor["pair_hours_over_3km"]), str(neighbor["distinct_pairs"]), f"{neighbor['pair_hours_any'] / hours * 168:.0f}"))
-        rows.append((label, "NeighborInfo (3 reports)", "n/a", str(neighbor["pair_hours_3_reports"]), "n/a", "n/a", f"{neighbor['pair_hours_3_reports'] / hours * 168:.0f}"))
+        rows.append(
+            (
+                label,
+                "relay_node",
+                str(relay["receipts"]),
+                str(relay["link_hours"]),
+                str(relay["link_hours_over_3km"]),
+                str(relay["distinct_pairs"]),
+                f"{relay['link_hours'] / hours * 168:.0f}",
+            )
+        )
+        rows.append(
+            (
+                label,
+                "NeighborInfo (any report)",
+                "n/a",
+                str(neighbor["pair_hours_any"]),
+                str(neighbor["pair_hours_over_3km"]),
+                str(neighbor["distinct_pairs"]),
+                f"{neighbor['pair_hours_any'] / hours * 168:.0f}",
+            )
+        )
+        rows.append(
+            (
+                label,
+                "NeighborInfo (3 reports)",
+                "n/a",
+                str(neighbor["pair_hours_3_reports"]),
+                "n/a",
+                "n/a",
+                f"{neighbor['pair_hours_3_reports'] / hours * 168:.0f}",
+            )
+        )
     print_table(
         "Link-hours inside the MSA under lnk_01 to lnk_05 (500 m to 60 km, 30 min position window)",
         rows,
-        ("positions", "link source", "receipts", "link-hours", "over 3 km", "distinct pairs", "per week"),
+        (
+            "positions",
+            "link source",
+            "receipts",
+            "link-hours",
+            "over 3 km",
+            "distinct pairs",
+            "per week",
+        ),
     )
 
 

@@ -93,13 +93,19 @@ def build_client(topics: list[str], buffer: Buffer) -> mqtt.Client:
     client.username_pw_set(os.environ["MQTT_USER"], os.environ["MQTT_PASSWORD"])
     client.reconnect_delay_set(min_delay=1, max_delay=120)
 
-    def on_connect(client: mqtt.Client, _userdata: Any, _flags: Any, reason: Any, _props: Any) -> None:
+    def on_connect(
+        client: mqtt.Client, _userdata: Any, _flags: Any, reason: Any, _props: Any
+    ) -> None:
         log.info("connect", reason=str(reason), topics=topics)
         for topic in topics:
             client.subscribe(topic, qos=0)
 
-    def on_disconnect(_client: mqtt.Client, _userdata: Any, _flags: Any, reason: Any, _props: Any) -> None:
-        log.warning("disconnect", reason=str(reason), last_message_age_s=buffer.last_message_age_s())
+    def on_disconnect(
+        _client: mqtt.Client, _userdata: Any, _flags: Any, reason: Any, _props: Any
+    ) -> None:
+        log.warning(
+            "disconnect", reason=str(reason), last_message_age_s=buffer.last_message_age_s()
+        )
 
     def on_message(_client: mqtt.Client, _userdata: Any, message: mqtt.MQTTMessage) -> None:
         if buffer.add(message.topic, bytes(message.payload)) >= FLUSH_MAX_RECORDS:
