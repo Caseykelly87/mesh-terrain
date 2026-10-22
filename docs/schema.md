@@ -43,4 +43,4 @@ select st_contains(geom, st_setsrid(st_point(-90.1848, 38.6247), 4326)) as insid
 from staging.stg_msa_boundary;
 ```
 
-That point is the Gateway Arch and the answer is `true`. `st_point` takes longitude first, then latitude. Swapped, the point has latitude -90.18, which is past the south pole and not a real location, so the answer is `false` with no error to warn you. The tests in `dbt/tests/assert_msa_boundary_*.sql` check this exact query, that downtown Kansas City is outside, that the geometry is valid, that the SRID is 4326 and that the area is between 18,000 and 25,000 km2.
+That point is the Gateway Arch and the answer is `true`. `st_point` takes longitude first, then latitude. Swapped, the point has latitude -90.18, which is past the south pole and not a real location, so the answer is `false` with no error to warn you. The tests in `dbt/tests/assert_msa_boundary_*.sql` check this exact query, that the geometry is not null, that downtown Kansas City is outside, that the geometry is valid, that the SRID is 4326 and that the area is between 18,000 and 25,000 km2.
