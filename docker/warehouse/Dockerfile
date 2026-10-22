@@ -5,6 +5,8 @@
 FROM postgis/postgis:16-3.4 AS builder
 
 ARG H3_PG_TAG=v4.2.3
+# The commit the tag pointed at when it was pinned; a moved tag fails the build.
+ARG H3_PG_COMMIT=a26630b8353d441e6bc8065c0a8dcaa3d89ef87b
 
 # The 16-3.4 image is Debian bullseye, which both Debian and the PostgreSQL apt
 # project have moved to their archive hosts; the live mirrors return 404 for
@@ -26,6 +28,7 @@ RUN sed -i 's|http://apt.postgresql.org/pub/repos/apt/|http://apt-archive.postgr
 # cmake downloads the H3 core library tarball at configure time and verifies
 # its sha256 against the value pinned inside h3-pg, so the tag pins both.
 RUN git clone --depth 1 --branch "${H3_PG_TAG}" https://github.com/postgis/h3-pg.git /tmp/h3-pg \
+    && test "$(git -C /tmp/h3-pg rev-parse HEAD)" = "${H3_PG_COMMIT}" \
     && cmake -S /tmp/h3-pg -B /tmp/h3-pg/build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /tmp/h3-pg/build \
     && cmake --install /tmp/h3-pg/build --component h3-pg
