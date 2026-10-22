@@ -27,3 +27,16 @@ models:
     analytics:
       +schema: analytics
       +materialized: table
+
+seeds:
+  mesh_terrain:
+    +schema: staging
+    msa_boundary:
+      # Explicit text types so dbt does not infer a varchar limit from the
+      # sample or read the five-digit code as a number.
+      +column_types:
+        geoid: text
+        name: text
+        source: text
+        part: integer
+        geometry_wkt: text
