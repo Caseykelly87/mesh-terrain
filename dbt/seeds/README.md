@@ -13,7 +13,7 @@ Source: Census TIGER/Line 2025, the national CBSA shapefile.
 - sha256: `8b0424f077280caaa5e09442fd0b0aec32b3e8d7d5fa909988304663bc0a761d`
 - Downloaded 2026-10-22
 
-What the feature looks like once loaded: one MultiPolygon of one polygon, 8,269 vertices, valid as parsed (so the `st_makevalid` branch in `stg_msa_boundary` did not run), 20,943.9 km2 in EPSG:26915 (20,932.1 km2 measured on the sphere with `::geography`).
+What the feature looks like once loaded: one MultiPolygon of one polygon, 8,269 vertices, valid as parsed (`stg_msa_boundary` has no repair step, so an invalid vintage fails `assert_msa_boundary_is_valid`), 20,943.9 km2 in EPSG:26915 (20,932.1 km2 measured on the sphere with `::geography`).
 
 ### Why the WKT is split across rows
 
