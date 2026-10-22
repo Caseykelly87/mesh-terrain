@@ -1,0 +1,29 @@
+name: mesh_terrain
+version: "0.1.0"
+profile: mesh_terrain
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: target
+clean-targets:
+  - target
+  - dbt_packages
+
+models:
+  mesh_terrain:
+    # Schema names here must stay equal to the schemas the warehouse init SQL
+    # creates; the custom generate_schema_name macro makes dbt use them as-is
+    # instead of prefixing the target schema.
+    staging:
+      +schema: staging
+      +materialized: view
+    core:
+      +schema: core
+      +materialized: incremental
+    analytics:
+      +schema: analytics
+      +materialized: table
