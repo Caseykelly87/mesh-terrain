@@ -15,7 +15,8 @@ storage:
       db_name:
         env: DAGSTER_PG_DB
 
-# Runs execute inside the daemon's process space through the code server; a
+# A run launches in the code server of whichever process launched it (the
+# webserver for a manual launch, the daemon for a schedule or sensor); a
 # container-per-run launcher is not needed for a single-host deployment.
 run_launcher:
   module: dagster.core.launcher

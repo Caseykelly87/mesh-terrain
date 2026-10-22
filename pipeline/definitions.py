@@ -24,6 +24,8 @@ log = get_logger("pipeline.definitions")
 dbt_project = DbtProject(project_dir=settings.dbt_project_dir)
 
 
+# Phase 2 candidate: replace this with DbtProject.prepare_if_dev plus a manifest
+# built in the image, once models exist and parse time matters.
 def prepare_dbt_project(project: DbtProject) -> None:
     """Install dbt packages when absent, then parse the project into a manifest."""
     dbt = DbtCliResource(project_dir=project)
