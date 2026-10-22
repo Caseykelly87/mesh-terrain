@@ -1,0 +1,25 @@
+# Instance configuration shared by the webserver and the daemon.
+# Run, event and schedule storage all go to the dagster database, which is
+# separate from the warehouse database on the same Postgres server.
+storage:
+  postgres:
+    postgres_db:
+      hostname:
+        env: WAREHOUSE_HOST
+      port:
+        env: WAREHOUSE_PORT
+      username:
+        env: WAREHOUSE_USER
+      password:
+        env: WAREHOUSE_PASSWORD
+      db_name:
+        env: DAGSTER_PG_DB
+
+# Runs execute inside the daemon's process space through the code server; a
+# container-per-run launcher is not needed for a single-host deployment.
+run_launcher:
+  module: dagster.core.launcher
+  class: DefaultRunLauncher
+
+telemetry:
+  enabled: false
