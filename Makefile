@@ -20,12 +20,13 @@ UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
-.PHONY: help env up down check fmt reproduce dbt-deps dbt-build dbt-debug lint test
+.PHONY: help env up down check check-itm fmt reproduce dbt-deps dbt-build dbt-debug lint test
 
 help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
 	@echo "make down       stop the stack and remove its volumes"
 	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
+	@echo "make check-itm  load the ITM library in the Dagster image and reproduce the ADR 0002 figure"
 	@echo "make fmt        ruff format and autofix"
 	@echo "make reproduce  rebuild every asset from the raw zone (stub until Phase 1)"
 
@@ -58,6 +59,18 @@ dbt-build: dbt-deps
 	$(DBT) build $(DBT_ARGS)
 
 check: env lint test dbt-build
+
+# Runs inside the Dagster image, not on the host, because the library is built
+# for Linux there (ADR 0002). The first command proves the .so loads and exports
+# the point-to-point entry point; the second feeds the spike script to the
+# container on stdin (no bind mount, so MSYS path rewriting cannot break it)
+# and greps for the flat-path loss it measured, so a changed compiler or source
+# fails here.
+check-itm: env
+	$(COMPOSE) run --rm --no-deps dagster-webserver python -c "import ctypes; print(ctypes.CDLL('/usr/local/lib/libitm.so').ITM_P2P_CR_Ex)"
+	output=$$($(COMPOSE) run --rm --no-deps -T dagster-webserver python - < docs/adr/0002-itm-spike/check_itm.py); \
+	    echo "$$output"; \
+	    echo "$$output" | grep -q "itm basic transmission loss: 151.76 dB"
 
 fmt:
 	$(UV) ruff check --fix .

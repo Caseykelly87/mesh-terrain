@@ -76,6 +76,11 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: make up
+      # The ITM library is compiled in a build stage of the Dagster image
+      # (ADR 0002); loading it and reproducing the spike's flat-path figure
+      # here fails CI when that stage breaks, before terrain/itm.py exists.
+      - name: check the ITM library in the Dagster image
+        run: make check-itm
       - run: make check
       - if: always()
         run: docker compose logs --no-color dagster-migrate dagster-webserver dagster-daemon minio-bootstrap
