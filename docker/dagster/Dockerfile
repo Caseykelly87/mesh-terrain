@@ -78,7 +78,7 @@ RUN uv run --frozen --no-dev dbt deps --project-dir dbt --profiles-dir dbt
 ENV PATH="/opt/mesh-terrain/.venv/bin:${PATH}"
 
 # The library needs only libstdc++, which the base image already carries.
-# Copied last so an ITM change does not invalidate the package layers.
+# Copied after the package layers so an ITM change does not invalidate them.
 COPY --from=itm-build /usr/local/lib/libitm.so /usr/local/lib/libitm.so
 
 COPY docker/dagster/dagster.yaml docker/dagster/workspace.yaml ${DAGSTER_HOME}/
