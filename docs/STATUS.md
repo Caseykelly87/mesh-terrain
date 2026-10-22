@@ -4,7 +4,7 @@ This file says where the project actually stands. It is updated by the agent tha
 
 ## Current phase and last unit
 
-Phase 0, in progress. Last unit: platform-eng, ITM library build stage in the Dagster image per ADR 0002, PR #6. Before it: platform-eng, Phase 0 foundation (uv project, tooling, Makefile, Compose, dbt scaffold, Dagster Definitions, CI), PR #2; terrain-rf-eng ITM spike and ADR 0002 (accepted: option 1, the NTIA ITM library via ctypes), PR #1.
+Phase 0, in progress. Last unit: warehouse-eng, MSA boundary seed and `staging.stg_msa_boundary` view with nine dbt tests, PR #7. Before it: platform-eng, ITM library build stage in the Dagster image per ADR 0002, PR #6; platform-eng, Phase 0 foundation (uv project, tooling, Makefile, Compose, dbt scaffold, Dagster Definitions, CI), PR #2; terrain-rf-eng ITM spike and ADR 0002 (accepted: option 1, the NTIA ITM library via ctypes), PR #1.
 
 ## Deviations from the plan still in effect
 
@@ -51,6 +51,6 @@ Phase 0, in progress. Last unit: platform-eng, ITM library build stage in the Da
 
 ## Next three units of work
 
-1. warehouse-eng: MSA boundary seed (PR #7, in review).
-2. ingest-eng: Phase 1 spike, 48-hour capture running, ADR 0003 draft pending.
-3. Casey: ADR 0003 decision, after which Phase 1 ingester work starts.
+1. ingest-eng: Phase 1 spike, 48-hour capture running, ADR 0003 draft pending.
+2. Casey: ADR 0003 decision, after which Phase 1 ingester work starts.
+3. ingest-eng: spike step 7, final numbers once the capture window closes after 2026-10-24T16:11:33Z.
