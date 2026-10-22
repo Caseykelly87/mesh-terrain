@@ -4,7 +4,7 @@ This file says where the project actually stands. It is updated by the agent tha
 
 ## Current phase and last unit
 
-Phase 0, not started. No units completed.
+Phase 0, in progress. Last unit completed: terrain-rf-eng ITM spike and draft ADR 0002, PR #1.
 
 ## Deviations from the plan still in effect
 
@@ -13,6 +13,7 @@ None. Note for every agent: the plan was revised on 2026-10-21 after verifying t
 ## Known issues and skipped steps
 
 - ADR 0002 (propagation model) is `proposed`, not decided. Owner: terrain-rf-eng. Closes when Casey picks an option and the ADR status is set to accepted; platform-eng's Dagster image build stage waits on it.
+- SPLAT was exercised only in no-terrain (sea-level) mode; the SDF tile writer and a run against real terrain were never tried. Owner: terrain-rf-eng. Closes when an SDF tile written from the DEM has been run through SPLAT, or when ADR 0002 option 1 is accepted.
 
 ## Environment and configuration notes
 
@@ -23,10 +24,10 @@ None. Note for every agent: the plan was revised on 2026-10-21 after verifying t
 
 ## Interfaces agreed between agents, not yet in code
 
-- terrain-rf-eng to platform-eng: if ADR 0002 option 1 is accepted, the Dagster image gets a build stage that compiles NTIA ITM commit `183ad95b` into `/usr/local/lib/libitm.so` (recipe in `docs/adr/0002-itm-spike/Dockerfile`) and copies only that file into the runtime stage. `terrain/itm.py` will load it from that path.
+- terrain-rf-eng to platform-eng: if ADR 0002 option 1 is accepted, the Dagster image gets a build stage that compiles NTIA ITM commit `183ad95b` into `/usr/local/lib/libitm.so` (recipe in `docs/adr/0002-itm-spike/Dockerfile`) and copies only that file into the runtime stage. The 151.76 dB spike figure came from base image `python@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70` and `g++ 12.2.0-14+deb12u1`. `terrain/itm.py` will load it from that path.
 
 ## Next three units of work
 
 1. platform-eng: Phase 0 foundation (uv, Makefile, Compose, dbt, Dagster, CI).
-2. terrain-rf-eng: ITM spike done on branch `chore/itm-spike`; `docs/adr/0002-propagation-model.md` drafted, awaiting Casey's decision.
-3. ingest-eng: Phase 1 spike (48-hour capture, relay_node and precision measurement, regional broker search) and draft of `docs/adr/0003-direct-link-and-position-source.md`, after Phase 0 exit criteria pass.
+2. ingest-eng: Phase 1 spike (48-hour capture, relay_node and precision measurement, regional broker search) and draft of `docs/adr/0003-direct-link-and-position-source.md`, after Phase 0 exit criteria pass.
+3. platform-eng: add the `libitm.so` build stage to the Dagster image once Casey accepts ADR 0002 option 1.
