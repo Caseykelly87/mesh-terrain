@@ -8,7 +8,7 @@ Phase 0, in progress. Last unit: platform-eng, Phase 0 foundation (uv project, t
 
 ## Deviations from the plan still in effect
 
-- The object store is `bitnamilegacy/minio` pinned by digest, not `minio/minio`. Upstream MinIO archived the community server and client in 2026 and withdrew the images and binaries from Docker Hub, quay.io and dl.min.io; the Bitnami legacy build of the last community release is the only pullable image. It is frozen and may be removed; Casey decided to keep it (known issues below). The plan's stack table still says MinIO; nothing else in the design depends on the vendor, since the raw zone is S3-shaped.
+- The object store is `bitnamilegacy/minio` pinned by digest, not `minio/minio`. Upstream MinIO archived the community server and client in 2026 and withdrew the images and binaries from Docker Hub, quay.io and dl.min.io; the Bitnami legacy build of the last community release is the only pullable image. It is frozen and may be removed; kept by decision in ADR 0004. The plan's stack table still says MinIO; nothing else in the design depends on the vendor, since the raw zone is S3-shaped.
 - The warehouse image installs `postgis_raster` as an extension because `h3_postgis` declares it as a required dependency. No table stores rasters; the plan's rule against PostGIS raster is about storage and still holds.
 - h3-pg is built from `github.com/postgis/h3-pg` (the `zachasme/h3-pg` repository named in the plan was archived and moved there) at tag v4.2.3, commit a26630b8.
 - ADR 0001 said PostgreSQL 16; the warehouse is PostgreSQL 17 with PostGIS 3.5 per ADR 0004, and the plan's stack table already says so.
