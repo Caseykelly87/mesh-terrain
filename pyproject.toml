@@ -37,8 +37,9 @@ packages = ["pipeline", "terrain"]
 line-length = 100
 target-version = "py312"
 # Markdown is excluded so the formatter leaves the style guide's deliberately
-# long example signature alone.
-extend-exclude = ["notebooks", "dbt/dbt_packages", "dbt/target", "*.md"]
+# long example signature alone; docs/ holds ADR spike scripts, which are
+# recorded experiments rather than production code.
+extend-exclude = ["notebooks", "dbt/dbt_packages", "dbt/target", "docs", "*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "N"]
