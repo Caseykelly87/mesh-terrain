@@ -10,7 +10,6 @@ __pycache__
 dbt/target
 dbt/logs
 dbt/dbt_packages
-dbt/package-lock.yml
 notebooks
 docs
 infra
