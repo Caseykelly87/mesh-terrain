@@ -12,7 +12,7 @@ None. Note for every agent: the plan was revised on 2026-10-21 after verifying t
 
 ## Known issues and skipped steps
 
-None.
+- ArcGIS deliverable deferred: no ArcGIS Pro licence yet, so the arcpy script, layout and hosted feature layer wait until the rest of the pipeline passes its exit criteria. Owner: maps-eng, who builds the script untested against the exported GeoPackage. Closes when a licence exists and the manual smoke run is recorded.
 
 ## Environment and configuration notes
 

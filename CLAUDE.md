@@ -49,7 +49,7 @@ Never skip the reviewer. Never merge with failing CI. Never force-push `main`.
 - A contained task inside one specialty (write the tests for module X, add YAML descriptions): the specialist spawns a sub-agent; sub-agents inherit the parent's scope and cannot cross it.
 - A scoped feature inside one specialty: the specialist.
 - Work that crosses two specialties: split at the interface and run both specialists; the PR of each names the other and records what was agreed about the interface.
-- Genuinely parallel work on disjoint paths: separate worktrees. Do not use worktrees for sequential work or during Phase 0.
+- Genuinely parallel work on disjoint paths: separate worktrees. No worktrees for two units that both touch build files or schema files; otherwise allowed.
 
 ## TDD cycle and commit timing
 
