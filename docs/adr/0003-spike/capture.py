@@ -5,6 +5,11 @@ record (received_at from our clock in UTC, topic, payload as base64) and
 appends the buffer to an hourly JSON lines file once a minute. It decodes
 nothing and never logs a payload or a topic (topics end in the gateway's
 node id). It is not the production ingester and does not write Parquet.
+
+With CAPTURE_THIN=1 it keeps headers only: each record carries the parsed
+envelope header, the decode status and the payload length, and drops the
+bytes. That is the thinning rule from the brief addendum for when two
+captures together would pass the disk line; it is never the default.
 """
 
 from __future__ import annotations
@@ -33,6 +38,37 @@ log = structlog.get_logger(service="spike-capture")
 
 FLUSH_INTERVAL_S = 60.0
 FLUSH_MAX_RECORDS = 20000
+THIN = os.environ.get("CAPTURE_THIN", "") == "1"
+THIN_FIELDS = (
+    "kind",
+    "status",
+    "reason",
+    "gateway",
+    "sender",
+    "packet_id",
+    "relay",
+    "hop_limit",
+    "hop_start",
+    "via_mqtt",
+    "rx_snr",
+    "rx_rssi",
+    "portnum",
+)
+
+
+def thin_record(received_at: str, topic: str, payload: bytes) -> dict[str, Any]:
+    """Header fields and decode status of one delivery, without the bytes."""
+    import analyze
+
+    kind = analyze.topic_kind(topic)
+    record: dict[str, Any] = {"received_at": received_at, "topic": topic, "thin": True}
+    record["payload_len"] = len(payload)
+    if kind in {"e", "map"}:
+        parsed = analyze.parse_envelope(0.0, kind, analyze.topic_region(topic), payload)
+        record.update({name: getattr(parsed, name) for name in THIN_FIELDS})
+    else:
+        record["kind"] = kind
+    return record
 
 
 class Buffer:
@@ -46,11 +82,15 @@ class Buffer:
         self.last_message_at: float | None = None
 
     def add(self, topic: str, payload: bytes) -> int:
-        record = {
-            "received_at": datetime.now(UTC).isoformat(timespec="microseconds"),
-            "topic": topic,
-            "payload_b64": base64.b64encode(payload).decode("ascii"),
-        }
+        received_at = datetime.now(UTC).isoformat(timespec="microseconds")
+        if THIN:
+            record = thin_record(received_at, topic, payload)
+        else:
+            record = {
+                "received_at": received_at,
+                "topic": topic,
+                "payload_b64": base64.b64encode(payload).decode("ascii"),
+            }
         with self.lock:
             self.records.append(record)
             self.total += 1
@@ -133,7 +173,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, on_signal)
 
     host, port = os.environ["MQTT_HOST"], int(os.environ.get("MQTT_PORT", "1883"))
-    log.info("start", host=host, port=port, data_dir=str(data_dir))
+    log.info("start", host=host, port=port, data_dir=str(data_dir), thin=THIN)
     client.connect_async(host, port, keepalive=60)
     client.loop_start()
     try:

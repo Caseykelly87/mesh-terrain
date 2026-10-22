@@ -10,11 +10,12 @@ fail, a position-free diagnostic, and the (f) widening check. Output is
 aggregate only: no node id, node name or coordinate is printed. It is not the
 production decode asset and writes nothing to disk.
 
-Usage: python analyze.py DATA_DIR MSA_CSV [STATES_CSV]
+Usage: python analyze.py DATA_DIR [MSA_CSV [STATES_CSV]] [--start ISO] [--end ISO]
 """
 
 from __future__ import annotations
 
+import argparse
 import base64
 import bisect
 import csv
@@ -27,7 +28,9 @@ from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 import shapely
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -54,6 +57,21 @@ REGIONAL_SEGMENTS = ("MeshSTL", "MO", "IL")
 # (lon_min, lat_min, lon_max, lat_max) in EPSG:4326 degrees.
 KEEP_BBOX_DEG = (-96.0, 35.8, -86.9, 42.7)
 RULES = ("relay_node", "neighbor_info", "combined", "relay_node_strict")
+PRECISE_BITS = 20
+GROWTH_HOURS = (4, 8, 12, 24, 36, 48)
+FIRST_POSITION_BINS_H = (1, 2, 4, 8, 12, 24, 48)
+THIN_FIELDS = (
+    "gateway",
+    "sender",
+    "packet_id",
+    "relay",
+    "hop_limit",
+    "hop_start",
+    "via_mqtt",
+    "rx_snr",
+    "rx_rssi",
+    "portnum",
+)
 GEOD = Geod(ellps="WGS84")
 csv.field_size_limit(sys.maxsize)
 
@@ -134,8 +152,8 @@ def payload_data(mesh_packet: mesh_pb2.MeshPacket) -> tuple[mesh_pb2.Data | None
     """Return the Data message and a reason string; the message is None on failure.
 
     The public broker forwards many default-key packets with the header intact
-    and the encrypted payload removed (observed in the spike capture); that
-    case is reported as "stripped" so it is not confused with a wrong key.
+    and the encrypted payload removed; the caller records that as the
+    contract status "stripped" (ing_03), not as a wrong key.
     """
     if mesh_packet.HasField("decoded"):
         return mesh_packet.decoded, "plaintext"
@@ -208,7 +226,7 @@ def parse_envelope(at_s: float, kind: str, region: str, raw: bytes) -> Parsed:
     )
     data, parsed.reason = payload_data(packet)
     if data is None:
-        parsed.status = "decrypt_failed"
+        parsed.status = "stripped" if parsed.reason == "stripped" else "decrypt_failed"
         return parsed
     parsed.ok_to_mqtt = bool(data.bitfield & 1)
     try:
@@ -251,6 +269,12 @@ class Tally:
     positions: list[tuple[int, float, int, int, int, str]] = field(default_factory=list)
     positioned_senders: set[int] = field(default_factory=set)
     payload_senders: set[int] = field(default_factory=set)
+    precise_senders: set[int] = field(default_factory=set)
+    radio_keys: set[tuple[int, int, int]] = field(default_factory=set)
+    first_heard: dict[int, float] = field(default_factory=dict)
+    first_position: dict[int, float] = field(default_factory=dict)
+    first_usable: dict[int, float] = field(default_factory=dict)
+    boxes: dict[int, set[tuple[int, int, int]]] = field(default_factory=lambda: defaultdict(set))
     regional_sets: dict[tuple[str, str], set[int]] = field(default_factory=lambda: defaultdict(set))
 
     def add(self, parsed: Parsed) -> None:
@@ -296,9 +320,13 @@ class Tally:
 
     def add_radio_receipt(self, parsed: Parsed) -> None:
         self.heard[parsed.gateway].add(parsed.sender)
-        if not parsed.relay or parsed.gateway == parsed.sender:
+        first_at(self.first_heard, parsed.sender, parsed.at_s)
+        if parsed.gateway == parsed.sender:
             return
         key = (parsed.gateway, parsed.sender, parsed.packet_id)
+        self.radio_keys.add(key)
+        if not parsed.relay:
+            return
         if key not in self.receipts or parsed.at_s < self.receipts[key][0]:
             self.receipts[key] = (parsed.at_s, parsed.relay, signal_in_range(parsed))
 
@@ -312,6 +340,12 @@ class Tally:
                 continue
             self.positioned_senders.add(parsed.sender)
             self.counts[(f"{source}_bits", str(value[2]))] += 1
+            self.boxes[parsed.sender].add(value)
+            first_at(self.first_position, parsed.sender, parsed.at_s)
+            if value[2] >= USABLE_BITS:
+                first_at(self.first_usable, parsed.sender, parsed.at_s)
+            if value[2] >= PRECISE_BITS:
+                self.precise_senders.add(parsed.sender)
             if in_keep_bbox(value[0], value[1]):
                 row = (parsed.sender, parsed.at_s, value[0], value[1], value[2], source)
                 self.positions.append(row)
@@ -343,6 +377,17 @@ class Tally:
         self.positions.extend(other.positions)
         self.positioned_senders |= other.positioned_senders
         self.payload_senders |= other.payload_senders
+        self.precise_senders |= other.precise_senders
+        self.radio_keys |= other.radio_keys
+        for mine, theirs in (
+            (self.first_heard, other.first_heard),
+            (self.first_position, other.first_position),
+            (self.first_usable, other.first_usable),
+        ):
+            for node, at_s in theirs.items():
+                first_at(mine, node, at_s)
+        for node, boxes in other.boxes.items():
+            self.boxes[node] |= boxes
         for key, values in other.regional_sets.items():
             self.regional_sets[key] |= values
 
@@ -350,7 +395,19 @@ class Tally:
         return max((self.last_s - self.first_s) / 3600.0, 1e-9)
 
 
-def tally_file(path: str) -> Tally:
+def first_at(table: dict[int, float], node: int, at_s: float) -> None:
+    if node not in table or at_s < table[node]:
+        table[node] = at_s
+
+
+def thin_parsed(at_s: float, record: dict[str, Any]) -> Parsed:
+    """A Parsed from a headers-only capture record (CAPTURE_THIN=1); no payload fields."""
+    fields = {name: record[name] for name in THIN_FIELDS if name in record}
+    region = topic_region(record["topic"])
+    return Parsed(at_s, record["kind"], region, record["status"], record["reason"], **fields)
+
+
+def tally_file(path: str, start_s: float = -math.inf, end_s: float = math.inf) -> Tally:
     """Tally one hourly capture file; a partly written last line is counted and skipped."""
     tally = Tally()
     with open(path, encoding="ascii") as handle:
@@ -360,24 +417,32 @@ def tally_file(path: str) -> Tally:
             except json.JSONDecodeError:
                 tally.counts[("kind", "unreadable_line")] += 1
                 continue
-            kind = topic_kind(record["topic"])
+            at_s = datetime.fromisoformat(record["received_at"]).timestamp()
+            if not start_s <= at_s < end_s:
+                continue
+            kind = record["kind"] if record.get("thin") else topic_kind(record["topic"])
             tally.counts[("kind", kind)] += 1
             if kind not in {"e", "map"}:
                 continue
-            at_s = datetime.fromisoformat(record["received_at"]).timestamp()
+            if record.get("thin"):
+                tally.counts[("kind", "thin")] += 1
+                tally.add(thin_parsed(at_s, record))
+                continue
             raw = base64.b64decode(record["payload_b64"])
             tally.add(parse_envelope(at_s, kind, topic_region(record["topic"]), raw))
     tally.heard = dict(tally.heard)
+    tally.boxes = dict(tally.boxes)
     tally.regional_sets = dict(tally.regional_sets)
     return tally
 
 
-def load_capture(data_dir: Path) -> Tally:
+def load_capture(data_dir: Path, start_s: float, end_s: float) -> Tally:
     paths = sorted(str(p) for p in data_dir.glob("capture-*.jsonl"))
     total = Tally()
     workers = max(1, min(len(paths), (os.cpu_count() or 2) - 1, 8))
+    work = partial(tally_file, start_s=start_s, end_s=end_s)
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        for part in pool.map(tally_file, paths):
+        for part in pool.map(work, paths):
             total.merge(part)
     return total
 
@@ -445,21 +510,30 @@ class AreaPositions:
     coarse_nodes: set[int] = field(default_factory=set)
     usable_nodes: set[int] = field(default_factory=set)
     bits: Counter[int] = field(default_factory=Counter)
-    usable: dict[int, list[tuple[float, float, float]]] = field(
+    usable: dict[int, list[tuple[float, float, float, int]]] = field(
         default_factory=lambda: defaultdict(list)
     )
+    stationary: dict[int, tuple[float, float, int]] = field(default_factory=dict)
 
-    def near(self, node: int, at_s: float, window_s: float) -> tuple[float, float] | None:
-        """Usable (lon, lat) of node closest in time to at_s within the window, else None."""
+    def near(
+        self, node: int, at_s: float, window_s: float, stationary: bool = False
+    ) -> tuple[float, float, int] | None:
+        """Usable (lon, lat, bits) of node closest in time to at_s within the window, else None.
+
+        With stationary set, a node whose every position in the capture is the
+        same box gets that box for every receipt (addendum rule 2b).
+        """
+        if stationary and node in self.stationary:
+            return self.stationary[node]
         rows = self.usable.get(node)
         if not rows:
             return None
-        index = bisect.bisect_left(rows, (at_s, -math.inf, -math.inf))
+        index = bisect.bisect_left(rows, (at_s, -math.inf, -math.inf, 0))
         best = None
         for row in rows[max(0, index - 1) : index + 1]:
             gap = abs(row[0] - at_s)
             if gap <= window_s and (best is None or gap < best[0]):
-                best = (gap, (row[1], row[2]))
+                best = (gap, (row[1], row[2], row[3]))
         return None if best is None else best[1]
 
     def why_missing(self, node: int) -> str:
@@ -485,10 +559,28 @@ def area_positions(tally: Tally, area: Area) -> AreaPositions:
             result.coarse_nodes.add(node)
         if bits >= USABLE_BITS:
             result.usable_nodes.add(node)
-            result.usable[node].append((at_s, lon_i / 1e7, lat_i / 1e7))
-    for rows in result.usable.values():
+            result.usable[node].append((at_s, lon_i / 1e7, lat_i / 1e7, bits))
+    for node, rows in result.usable.items():
         rows.sort()
+        if len(tally.boxes.get(node, ())) == 1:
+            result.stationary[node] = (rows[0][1], rows[0][2], rows[0][3])
     return result
+
+
+def boxes_overlap(a: tuple[float, float, int], b: tuple[float, float, int]) -> bool:
+    """Whether two position boxes (lon, lat, bits) share any ground.
+
+    A box at N bits spans 2 ** (32 - N) units of 1e-7 degrees on each axis,
+    so two boxes overlap when the centres differ by less than the sum of the
+    half-widths on both axes.
+    """
+    reach_deg = (2 ** (31 - a[2]) + 2 ** (31 - b[2])) * 1e-7
+    return abs(a[0] - b[0]) < reach_deg and abs(a[1] - b[1]) < reach_deg
+
+
+def box_diagonal_m(bits: int) -> float:
+    north_south_m, east_west_m = box_half_width_m(bits, ST_LOUIS_LATITUDE_DEG)
+    return 2.0 * math.hypot(north_south_m, east_west_m)
 
 
 def by_low_byte(nodes: set[int]) -> dict[int, set[int]]:
@@ -535,6 +627,9 @@ class RuleResult:
     funnel: Counter[str] = field(default_factory=Counter)
     windows: dict[tuple[int, int, int], list[float]] = field(default_factory=dict)
     unpositioned_relayers: set[int] = field(default_factory=set)
+    resolved_relayers: set[int] = field(default_factory=set)
+    overlap_diagonals_m: list[float] = field(default_factory=list)
+    gateway_only: dict[tuple[int, int, int], int] = field(default_factory=dict)
 
     def add(self, relayer: int, gateway: int, at_s: float, distance_m: float) -> None:
         key = (relayer, gateway, int(at_s // 3600))
@@ -574,13 +669,17 @@ def area_resolutions(
 
 
 def apply_rules(
-    tally: Tally, positions: AreaPositions, window_s: float = POSITION_WINDOW_S
+    tally: Tally,
+    positions: AreaPositions,
+    window_s: float = POSITION_WINDOW_S,
+    stationary: bool = False,
 ) -> dict[str, RuleResult]:
     """Run lnk_06, lnk_01, lnk_03, lnk_02 and lnk_05 for each rule; lnk_04 is applied on output."""
     results = {rule: RuleResult() for rule in RULES}
     for at_s, gateway, signal_ok, resolved in area_resolutions(tally, positions):
         for rule, relayer in resolved.items():
-            check_receipt(results[rule], positions, (relayer, gateway, at_s, signal_ok), window_s)
+            receipt = (relayer, gateway, at_s, signal_ok)
+            check_receipt(results[rule], positions, receipt, (window_s, stationary))
     return results
 
 
@@ -588,9 +687,10 @@ def check_receipt(
     result: RuleResult,
     positions: AreaPositions,
     receipt: tuple[int, int, float, bool],
-    window_s: float,
+    window: tuple[float, bool],
 ) -> None:
     relayer, gateway, at_s, signal_ok = receipt
+    window_s, stationary = window
     funnel = result.funnel
     funnel["1 radio receipts with relay_node at area gateways"] += 1
     if not signal_ok:
@@ -605,9 +705,13 @@ def check_receipt(
         funnel["3x lnk_03 fail: relayer is the gateway"] += 1
         return
     funnel["4 lnk_03 different nodes"] += 1
-    found: list[tuple[float, float]] = []
+    result.resolved_relayers.add(relayer)
+    if positions.near(gateway, at_s, window_s, stationary) is not None:
+        group = (relayer, gateway, int(at_s // 3600))
+        result.gateway_only[group] = result.gateway_only.get(group, 0) + 1
+    found: list[tuple[float, float, int]] = []
     for role, node in (("relayer", relayer), ("gateway", gateway)):
-        location = positions.near(node, at_s, window_s)
+        location = positions.near(node, at_s, window_s, stationary)
         if location is None:
             funnel[f"4x lnk_02 fail: {role}, {positions.why_missing(node)}"] += 1
             if role == "relayer" and node not in positions.positioned_anywhere:
@@ -621,13 +725,19 @@ def check_receipt(
 def check_distance(
     result: RuleResult,
     link: tuple[int, int, float],
-    relayer_at: tuple[float, float],
-    gateway_at: tuple[float, float],
+    relayer_at: tuple[float, float, int],
+    gateway_at: tuple[float, float, int],
 ) -> None:
-    """lnk_05 on the WGS84 geodesic distance between two box centres, (lon, lat) degrees."""
+    """lnk_05 on the WGS84 geodesic distance between two box centres, (lon, lat, bits).
+
+    Overlapping boxes have no single distance: it lies between 0 and the
+    larger box's diagonal. They get their own funnel row and never a
+    link-hour, since any minimum distance rule fails on the lower bound.
+    """
     distance_m = GEOD.inv(relayer_at[0], relayer_at[1], gateway_at[0], gateway_at[1])[2]
-    if distance_m == 0.0:
-        result.funnel["5x lnk_05 fail: 0 m, same box"] += 1
+    if boxes_overlap(relayer_at, gateway_at):
+        result.funnel["5x lnk_05 fail: boxes overlap, distance 0 m to the box diagonal"] += 1
+        result.overlap_diagonals_m.append(box_diagonal_m(min(relayer_at[2], gateway_at[2])))
     elif distance_m < MIN_DISTANCE_M:
         result.funnel["5x lnk_05 fail: under 500 m"] += 1
     elif distance_m > MAX_DISTANCE_M:
@@ -689,14 +799,35 @@ def report_senders_and_ports(tally: Tally) -> None:
     rows = [(kind, str(n), pct(n, total)) for kind, n in mix.most_common()]
     print_table("Senders by payload arrival", rows, ("sender kind", "senders", "share"))
     ports = counts_of(tally, "port")
+    total_ports = sum(ports.values())
     rows = []
     for port, n in ports.most_common():
         number = int(port)
         known = number in portnums_pb2.PortNum.values()
-        rows.append((portnums_pb2.PortNum.Name(number) if known else port, str(n)))
+        name = portnums_pb2.PortNum.Name(number) if known else port
+        rows.append((name, str(n), pct(n, total_ports)))
     unknown = tally.counts[("status", "unknown_port")]
     title = f"Decoded portnums: {len(ports)} distinct, unknown_port {unknown}"
-    print_table(title, rows, ("portnum", "packets"))
+    print_table(title, rows, ("portnum", "packets", "share of decoded"))
+    report_receipt_definitions(tally)
+
+
+def report_receipt_definitions(tally: Tally) -> None:
+    """The counts behind each reading of 'radio receipt' (addendum item 1)."""
+    rf = counts_of(tally, "mode", "rf")
+    rows = [
+        ("radio deliveries (envelopes with via_mqtt false)", str(rf["envelopes"])),
+        ("radio deliveries, gateway's own packets excluded", str(rf["envelopes"] - rf["own"])),
+        (
+            "distinct radio receipts (gateway, sender, packet id), own excluded",
+            str(len(tally.radio_keys)),
+        ),
+        (
+            "of which with relay_node set (the receipts every later figure uses)",
+            str(len(tally.receipts)),
+        ),
+    ]
+    print_table("Radio receipt definitions", rows, ("definition", "count"))
 
 
 def report_modes(tally: Tally) -> None:
@@ -821,6 +952,11 @@ def report_precision(tally: Tally) -> None:
     ):
         bits = Counter({int(k): n for k, n in counts_of(tally, prefix).items()})
         print_table(title, precision_rows(bits), header)
+    precise = sum(n for k, n in counts_of(tally, "position_bits").items() if int(k) >= PRECISE_BITS)
+    print(
+        f"\nPosition packets with precision_bits >= {PRECISE_BITS} (pos_04 precise_source):"
+        f" {precise}, from {len(tally.precise_senders)} distinct nodes (Position or MapReport)"
+    )
 
 
 def report_regional_topics(tally: Tally) -> None:
@@ -882,41 +1018,56 @@ def report_area_counts(tally: Tally, area: Area, positions: AreaPositions) -> No
     )
 
 
+def group_cells(keys: list[tuple[int, int, int]], scale: float) -> list[str]:
+    """Observed count, weekly extrapolation, distinct relayers, gateways and pairs."""
+    pairs = {(k[0], k[1]) for k in keys}
+    return [
+        str(len(keys)),
+        f"{len(keys) * scale:.0f}",
+        str(len({p[0] for p in pairs})),
+        str(len({p[1] for p in pairs})),
+        str(len(pairs)),
+    ]
+
+
+YIELD_HEADER = (
+    "500 m observed",
+    "500 m per week",
+    "relayers",
+    "gateways",
+    "pairs",
+    "3 km observed",
+    "3 km per week",
+    "relayers",
+    "gateways",
+    "pairs",
+)
+
+
 def yield_cells(
     result: RuleResult, scale: float, min_packets: int = MIN_PACKETS_PER_HOUR
 ) -> list[str]:
-    cells = []
+    cells: list[str] = []
     for minimum in (MIN_DISTANCE_M, VALIDATION_DISTANCE_M):
-        keys = result.link_hours(minimum, min_packets)
-        cells += [
-            str(len(keys)),
-            f"{len(keys) * scale:.0f}",
-            str(len({k[0] for k in keys})),
-            str(len({k[1] for k in keys})),
-        ]
+        cells += group_cells(result.link_hours(minimum, min_packets), scale)
     return cells
+
+
+def gateway_only_cells(result: RuleResult, scale: float) -> list[str]:
+    """Link-hours when only the gateway is positioned: no distance, so one set of cells."""
+    keys = [key for key, n in result.gateway_only.items() if n >= MIN_PACKETS_PER_HOUR]
+    return group_cells(keys, scale) + ["n/a"] * 5
 
 
 def report_yield(tally: Tally, area: Area, results: dict[str, RuleResult]) -> float:
     """Measurement (e): link-hours per week per rule; returns the combined 3 km weekly figure."""
     scale = HOURS_PER_WEEK / tally.hours()
     rows = [(rule, *yield_cells(results[rule], scale)) for rule in RULES]
-    header = (
-        "rule",
-        "500 m observed",
-        "500 m per week",
-        "500 m relayers",
-        "500 m gateways",
-        "3 km observed",
-        "3 km per week",
-        "3 km relayers",
-        "3 km gateways",
-    )
     title = (
         f"(e) Link-hours inside {area.name}, {tally.hours():.2f} h observed,"
-        f" extrapolated x{scale:.2f} to a week, 3 km on the median distance"
+        f" extrapolated x{scale:.2f} to a week, 30-minute position rule, 3 km on the median"
     )
-    print_table(title, rows, header)
+    print_table(title, rows, ("rule", *YIELD_HEADER))
     steps = sorted(set().union(*(results[r].funnel for r in RULES)))
     funnel_rows = [(step, *[str(results[r].funnel[step]) for r in RULES]) for step in steps]
     print_table(
@@ -930,20 +1081,143 @@ def report_unpositioned(tally: Tally, combined: RuleResult) -> None:
     relayers = combined.unpositioned_relayers
     other_payload = relayers & tally.payload_senders
     print(
-        "\nCombined rule, relayers failing lnk_02 with no position in the capture:"
+        "\nCombined rule, relayers failing lnk_02 with no decodable position in the capture:"
         f" {len(relayers)}, of which sent other decoded packets"
         f" (NodeInfo, Telemetry, Routing and so on): {len(other_payload)}"
     )
+    diagonals = sorted(combined.overlap_diagonals_m)
+    if diagonals:
+        print(
+            f"Overlapping-box receipts: {len(diagonals)}; distance range upper bound (the larger"
+            f" box's diagonal) min {diagonals[0]:.0f} m, median"
+            f" {statistics.median(diagonals):.0f} m, max {diagonals[-1]:.0f} m"
+        )
 
 
-def report_position_free(tally: Tally, area: Area, positions: AreaPositions) -> None:
-    """Diagnostic: link-hour groups if lnk_02 and lnk_05 were ignored, combined rule."""
+def report_position_rules(tally: Tally, area: Area, positions: AreaPositions) -> None:
+    """The three position rule options of ADR 0003, combined link rule, one row each."""
+    scale = HOURS_PER_WEEK / tally.hours()
+    thirty = apply_rules(tally, positions)["combined"]
+    stationary = apply_rules(tally, positions, stationary=True)["combined"]
+    rows = [
+        ("keep 30 minutes (lnk_02 as written)", *yield_cells(thirty, scale)),
+        (
+            "stationarity window (one box all capture, else 30 minutes)",
+            *yield_cells(stationary, scale),
+        ),
+        (
+            "gateway-only fallback (relayer unpositioned, no distance)",
+            *gateway_only_cells(thirty, scale),
+        ),
+    ]
+    print_table(
+        f"Position rule options inside {area.name}, combined link rule, extrapolated x{scale:.2f}",
+        rows,
+        ("position rule", *YIELD_HEADER),
+    )
+    print(
+        f"Stationary usable nodes inside {area.name}: {len(positions.stationary)} of"
+        f" {len(positions.usable_nodes)} usable (one box for every position in the capture)"
+    )
+    report_growth(tally, area, thirty, positions)
+
+
+def cumulative_groups(keys: list[tuple[int, int, int]], first_s: float) -> list[tuple[str, ...]]:
+    rows = []
+    for hours in GROWTH_HOURS:
+        cutoff = [k for k in keys if (k[2] + 1) * 3600 - first_s <= hours * 3600]
+        pairs = {(k[0], k[1]) for k in cutoff}
+        rows.append(
+            (
+                str(hours),
+                str(len(cutoff)),
+                str(len({p[0] for p in pairs})),
+                str(len({p[1] for p in pairs})),
+                str(len(pairs)),
+            )
+        )
+    return rows
+
+
+def report_growth(tally: Tally, area: Area, combined: RuleResult, positions: AreaPositions) -> None:
+    """Addendum 2d: cumulative distinct groups at hours 4, 8, 12, 24, 36, 48."""
+    header = ("hours", "link-hours", "relayers", "gateways", "pairs")
+    contract = combined.link_hours(MIN_DISTANCE_M)
+    print_table(
+        f"Group growth inside {area.name}, contract rules at 500 m, cumulative",
+        cumulative_groups(contract, tally.first_s),
+        header,
+    )
+    free = position_free_groups(tally, positions)
+    print_table(
+        f"Group growth inside {area.name}, lnk_02 and lnk_05 ignored, cumulative",
+        cumulative_groups(free, tally.first_s),
+        header,
+    )
+
+
+def report_first_position(tally: Tally, area: Area, relayers: set[int]) -> None:
+    """Addendum 2a: time from a relayer's first radio receipt to its first usable position."""
+    columns = {
+        f"relayers resolved inside {area.name}": relayers & set(tally.first_heard),
+        "all senders heard by radio": set(tally.first_heard),
+    }
+    table: dict[str, list[str]] = defaultdict(list)
+    for nodes in columns.values():
+        never = [n for n in nodes if n not in tally.first_position]
+        coarse_only = [
+            n for n in nodes if n in tally.first_position and n not in tally.first_usable
+        ]
+        waits_h = sorted(
+            max(0.0, tally.first_usable[n] - tally.first_heard[n]) / 3600.0
+            for n in nodes
+            if n in tally.first_usable
+        )
+        before = sum(
+            1
+            for n in nodes
+            if n in tally.first_usable and tally.first_usable[n] < tally.first_heard[n]
+        )
+        table["nodes"].append(str(len(nodes)))
+        none = f"{len(never)} ({pct(len(never), len(nodes))})"
+        table["no decodable position in the capture"].append(none)
+        table["sent positions only below 15 bits"].append(
+            f"{len(coarse_only)} ({pct(len(coarse_only), len(nodes))})"
+        )
+        table["reached a usable position"].append(
+            f"{len(waits_h)} ({pct(len(waits_h), len(nodes))})"
+        )
+        table["of which before their first radio receipt"].append(str(before))
+        for label, q in (("p25", 0.25), ("p50", 0.5), ("p75", 0.75), ("p90", 0.9), ("max", 1.0)):
+            value = waits_h[min(len(waits_h) - 1, int(q * len(waits_h)))] if waits_h else None
+            table[f"hours to first usable, {label}"].append(
+                f"{value:.1f}" if value is not None else "n/a"
+            )
+        lower = 0.0
+        for upper in FIRST_POSITION_BINS_H:
+            count = sum(1 for w in waits_h if lower <= w < upper)
+            table[f"histogram, {lower:g} to {upper} h"].append(str(count))
+            lower = float(upper)
+    rows = [(label, *cells) for label, cells in table.items()]
+    print_table(
+        f"(2a) Time to first usable position, {tally.hours():.2f} h of capture",
+        rows,
+        ("measure", *columns.keys()),
+    )
+
+
+def position_free_groups(tally: Tally, positions: AreaPositions) -> list[tuple[int, int, int]]:
     groups: Counter[tuple[int, int, int]] = Counter()
     for at_s, gateway, signal_ok, resolved in area_resolutions(tally, positions):
         relayer = resolved["combined"]
         if signal_ok and relayer and relayer != gateway:
             groups[(relayer, gateway, int(at_s // 3600))] += 1
-    keys = [key for key, n in groups.items() if n >= MIN_PACKETS_PER_HOUR]
+    return [key for key, n in groups.items() if n >= MIN_PACKETS_PER_HOUR]
+
+
+def report_position_free(tally: Tally, area: Area, positions: AreaPositions) -> None:
+    """Diagnostic: link-hour groups if lnk_02 and lnk_05 were ignored, combined rule."""
+    keys = position_free_groups(tally, positions)
     pairs = {(relayer, gateway) for relayer, gateway, _ in keys}
     usable = positions.usable_nodes
     rows = [
@@ -953,7 +1227,7 @@ def report_position_free(tally: Tally, area: Area, positions: AreaPositions) -> 
         ("distinct relayers", str(len({p[0] for p in pairs}))),
         ("distinct gateways", str(len({p[1] for p in pairs}))),
         (
-            "pairs whose relayer never sent a position",
+            "pairs whose relayer sent no decodable position in the capture",
             str(sum(1 for r, _ in pairs if r not in positions.positioned_anywhere)),
         ),
         (
@@ -978,18 +1252,7 @@ def report_sensitivity(tally: Tally, area: Area, positions: AreaPositions) -> No
             rows.append(
                 (window_label, str(min_packets), *yield_cells(combined, scale, min_packets))
             )
-    header = (
-        "position window",
-        "min packets",
-        "500 m observed",
-        "500 m per week",
-        "500 m relayers",
-        "500 m gateways",
-        "3 km observed",
-        "3 km per week",
-        "3 km relayers",
-        "3 km gateways",
-    )
+    header = ("position window", "min packets", *YIELD_HEADER)
     title = f"Sensitivity, combined rule inside {area.name}, extrapolated (not contract rules)"
     print_table(title, rows, header)
 
@@ -997,15 +1260,32 @@ def report_sensitivity(tally: Tally, area: Area, positions: AreaPositions) -> No
 def report_area(tally: Tally, area: Area) -> float:
     positions = area_positions(tally, area)
     report_area_counts(tally, area, positions)
-    combined_3km = report_yield(tally, area, apply_rules(tally, positions))
+    results = apply_rules(tally, positions)
+    combined_3km = report_yield(tally, area, results)
+    report_first_position(tally, area, results["combined"].resolved_relayers)
+    report_position_rules(tally, area, positions)
     report_position_free(tally, area, positions)
     report_sensitivity(tally, area, positions)
     return combined_3km
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("data_dir", type=Path)
+    parser.add_argument("msa_csv", type=Path, nargs="?")
+    parser.add_argument("states_csv", type=Path, nargs="?")
+    parser.add_argument("--start", help="ISO 8601 UTC; records before it are skipped")
+    parser.add_argument("--end", help="ISO 8601 UTC; records at or after it are skipped")
+    return parser.parse_args()
+
+
+def bound_s(value: str | None, default: float) -> float:
+    return datetime.fromisoformat(value).timestamp() if value else default
+
+
 def main() -> None:
-    data_dir = Path(sys.argv[1])
-    tally = load_capture(data_dir)
+    args = parse_args()
+    tally = load_capture(args.data_dir, bound_s(args.start, -math.inf), bound_s(args.end, math.inf))
     if not tally.counts:
         print("no capture records found")
         return
@@ -1015,8 +1295,8 @@ def main() -> None:
     report_neighbor(tally)
     report_precision(tally)
     report_regional_topics(tally)
-    if len(sys.argv) > 2:
-        msa = Area("the MSA (CBSA 41180)", load_area(Path(sys.argv[2]), {"41180"}))
+    if args.msa_csv is not None:
+        msa = Area("the MSA (CBSA 41180)", load_area(args.msa_csv, {"41180"}))
         combined_3km = report_area(tally, msa)
         triggered = combined_3km < WIDEN_THRESHOLD_PER_WEEK
         print(
@@ -1024,8 +1304,8 @@ def main() -> None:
             f" link-hours per week against a threshold of {WIDEN_THRESHOLD_PER_WEEK};"
             f" triggered: {triggered}"
         )
-        if len(sys.argv) > 3:
-            states = Area("Missouri plus Illinois", load_area(Path(sys.argv[3]), {"29", "17"}))
+        if args.states_csv is not None:
+            states = Area("Missouri plus Illinois", load_area(args.states_csv, {"29", "17"}))
             report_area(tally, states)
 
 
