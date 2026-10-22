@@ -28,7 +28,7 @@ Why chunks: the WKT is 179,994 characters and dbt cannot load a CSV field over 1
 
 - Grain: one row, the St. Louis metropolitan statistical area. A test fails the build if the count is anything else.
 - Owner: warehouse-eng. Consumers: ingest-eng (the Phase 1 spike clips positions with it) and, through rule `pos_02` of the data-quality contract, every `core` model that carries a position.
-- Source: `msa_boundary`, chunks joined with `string_agg`, parsed with `st_geomfromtext(..., 4326)`, forced to MultiPolygon. `st_makevalid` runs only if the parsed geometry is invalid; the 2025 feature is valid, so it did not run.
+- Source: `msa_boundary`, chunks joined with `string_agg`, parsed with `st_geomfromtext(..., 4326)`, forced to MultiPolygon. There is no repair step: the 2025 feature is valid as published, and a future vintage that is not fails `assert_msa_boundary_is_valid` instead of being fixed silently.
 
 | Column | Type | Meaning |
 | --- | --- | --- |

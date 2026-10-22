@@ -1,8 +1,8 @@
 -- The seed carries the boundary as WKT because dbt seeds are CSV, split into
 -- chunks because a CSV field is capped at 131072 characters when dbt reads
 -- it. This view joins the chunks and parses them once so no later model
--- handles text. st_makevalid runs only when the parsed geometry is invalid;
--- the 2025 TIGER feature parses valid, so that branch guards a future vintage.
+-- handles text. There is no repair step: an invalid future vintage must fail
+-- assert_msa_boundary_is_valid rather than be silently fixed here.
 
 with wkt_chunks as (
     select
@@ -20,29 +20,10 @@ wkt_text as (
         string_agg(geometry_wkt, '' order by part) as geometry_wkt
     from wkt_chunks
     group by geoid, name
-),
-
-parsed as (
-    select
-        geoid,
-        name,
-        st_geomfromtext(geometry_wkt, 4326) as raw_geom
-    from wkt_text
-),
-
-repaired as (
-    select
-        geoid,
-        name,
-        case
-            when st_isvalid(raw_geom) then raw_geom
-            else st_collectionextract(st_makevalid(raw_geom), 3)
-        end as valid_geom
-    from parsed
 )
 
 select
     geoid,
     name,
-    st_multi(valid_geom)::geometry(multipolygon, 4326) as geom
-from repaired
+    st_multi(st_geomfromtext(geometry_wkt, 4326))::geometry(multipolygon, 4326) as geom
+from wkt_text
