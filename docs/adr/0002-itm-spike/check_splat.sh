@@ -3,6 +3,5 @@
 # so SPLAT assumes sea level; -olditm selects Longley-Rice over ITWOM and -N is
 # deliberately absent because it suppresses the path loss report.
 set -e
-cd /opt/spike
 splat -t tx.qth -r rx.qth -metric -olditm -d /opt/spike
 cat tx-to-rx.txt
