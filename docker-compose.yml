@@ -1,0 +1,126 @@
+# Local stack: PostGIS with h3-pg, an S3-compatible object store, and Dagster.
+# Values come from .env (copied from .env.example by `make up`).
+
+# Fixed so image, network and volume names do not depend on the checkout folder.
+name: mesh-terrain
+
+x-dagster-environment: &dagster-environment
+  # Inside the Compose network the containers reach the warehouse and the
+  # object store by service name on the internal ports, not the host ports.
+  WAREHOUSE_HOST: warehouse
+  WAREHOUSE_PORT: "5432"
+  WAREHOUSE_USER: ${WAREHOUSE_USER}
+  WAREHOUSE_PASSWORD: ${WAREHOUSE_PASSWORD}
+  WAREHOUSE_DB: ${WAREHOUSE_DB}
+  DAGSTER_PG_DB: ${DAGSTER_PG_DB}
+  S3_ENDPOINT_URL: http://minio:9000
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+  RAW_BUCKET: ${RAW_BUCKET}
+  LOG_FORMAT: json
+
+services:
+  warehouse:
+    build:
+      context: docker/warehouse
+    environment:
+      POSTGRES_USER: ${WAREHOUSE_USER}
+      POSTGRES_PASSWORD: ${WAREHOUSE_PASSWORD}
+      POSTGRES_DB: ${WAREHOUSE_DB}
+      DAGSTER_PG_DB: ${DAGSTER_PG_DB}
+    ports:
+      - "${WAREHOUSE_PORT}:5432"
+    volumes:
+      - warehouse-data:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready answers before the init scripts finish on first start, so the
+      # check also queries the h3 extension, which the last init script creates.
+      test:
+        [
+          "CMD-SHELL",
+          "psql -U ${WAREHOUSE_USER} -d ${WAREHOUSE_DB} -tAc \"select 1 from pg_extension where extname = 'h3'\" | grep -q 1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  minio:
+    # Upstream MinIO archived its community images in 2026 and withdrew them
+    # from Docker Hub; this is the last Bitnami build of the final community
+    # release, pinned by digest because the repository is frozen and may be
+    # removed. See docs/STATUS.md for the open decision on a replacement.
+    image: bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_API_PORT_NUMBER: "9000"
+      MINIO_CONSOLE_PORT_NUMBER: "9001"
+    ports:
+      - "${MINIO_API_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+    volumes:
+      - minio-data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  minio-bootstrap:
+    image: bitnamilegacy/minio-client:2025.7.21-debian-12-r3@sha256:73bd39f7899a0cef12b8dd5df13aa93a3ed1aaa44236542442e9ac76819ac158
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      RAW_BUCKET: ${RAW_BUCKET}
+    volumes:
+      - ./docker/minio/bootstrap.sh:/bootstrap.sh:ro
+    entrypoint: ["/bin/bash", "/bootstrap.sh"]
+    restart: "no"
+
+  dagster-webserver:
+    build:
+      context: .
+      dockerfile: docker/dagster/Dockerfile
+    command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/opt/dagster/home/workspace.yaml"]
+    environment: *dagster-environment
+    ports:
+      - "${DAGSTER_PORT}:3000"
+    depends_on:
+      warehouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      # The image has no curl; urllib is already there.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:3000/server_info', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  dagster-daemon:
+    build:
+      context: .
+      dockerfile: docker/dagster/Dockerfile
+    command: ["dagster-daemon", "run", "-w", "/opt/dagster/home/workspace.yaml"]
+    environment: *dagster-environment
+    depends_on:
+      warehouse:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+volumes:
+  warehouse-data:
+  minio-data:
