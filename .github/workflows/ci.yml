@@ -19,7 +19,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      # setup-uv stopped publishing major tags after v7, so the exact tag is pinned.
+      - uses: astral-sh/setup-uv@v10.3.1
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -33,7 +34,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.1
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -49,7 +50,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.1
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
@@ -69,7 +70,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.1
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
