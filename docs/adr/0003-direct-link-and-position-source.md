@@ -1,66 +1,82 @@
-# ADR 0003: Resolve links from relay_node per gateway and take positions from the public broker, pending a MeshSTL broker check
+# ADR 0003: Resolve links from relay_node per gateway, and test the MeshSTL broker before fixing the position source and area
 
 Date: 2026-10-22
 Status: proposed
 Proposed by: ingest-eng
 Decided by: Casey
 
-Every number marked "interim" comes from the first part of a 48-hour capture that started 2026-10-22T16:11Z and is replaced when the capture completes. The capture, decoder and commands are in `docs/adr/0003-spike/`.
+Every number below is interim: it comes from the first 3.47 hours of a 48-hour capture of `msh/US/#` that started 2026-10-22T16:11:33Z, and it is replaced when the capture ends. Every weekly figure is extrapolated: observed count x 168 / 3.47 = observed x 48.48. Capture, decoder, commands and the full output tables are in `docs/adr/0003-spike/`.
 
 ## Context
 
-The plan (section "Two constraints of the public broker") needs two choices before Phase 1 and 2 can be built: how to identify the last radio hop into a gateway, and where endpoint positions come from. Terms used below:
+The plan (section "Two constraints of the public broker") needs three answers before Phase 1 and 2 are built: how to identify the last radio hop into a gateway, where endpoint positions come from, and, because the interim yield is under 300 link-hours a week, whether to widen the area of interest. Terms:
 
-- relay_node: one byte in each packet header, the low byte of the id of the node that last transmitted the packet over radio (firmware 2.6 and later); a packet heard straight from its sender carries the sender's own low byte.
-- NeighborInfo: a packet a node broadcasts listing the nodes it heard directly, each with a signal-to-noise ratio.
-- precision_bits: how many of the 32 bits of a position's integer latitude and longitude a node keeps; 16 bits places a node inside a box of about plus or minus 365 m north-south at St. Louis, 13 bits about plus or minus 2.9 km.
-- link-hour: the unit of analysis, one (relayer, gateway) pair in one clock hour with at least 3 packets and both ends positioned (contract rules `lnk_01` to `lnk_05`).
-- gateway: a node connected to the internet that uploads the packets it hears to an MQTT broker; the broker's `rx_snr` and `rx_rssi` are measured by the gateway on the last hop.
+- relay_node: one byte in each packet header, the low byte of the id of the node that last transmitted the packet by radio; a packet heard straight from its sender carries the sender's own low byte.
+- NeighborInfo: a packet a node broadcasts listing the nodes it hears directly, each with a signal-to-noise ratio (SNR).
+- precision_bits: how many of the 32 bits of a position's integer latitude and longitude the node keeps; at St. Louis 16 bits is a box of plus or minus 365 m north-south, 13 bits plus or minus 2.9 km.
+- link-hour: one (relayer, gateway) pair in one clock hour that passes contract rules `lnk_01` to `lnk_05`: relayer resolved to exactly one node, both ends with a `usable` position (15 bits or more) within 30 minutes, different nodes, at least 3 packets, 500 m to 60 km apart.
+- gateway: a node connected to the internet that uploads what it hears to an MQTT broker; the `rx_snr` and `rx_rssi` it reports describe the last hop.
 
-The spike found a third constraint the plan did not list. The public broker forwards the header of nearly every default-key packet but removes the payload unless the sender set the "OK to MQTT" bit (interim: 95.8 percent of envelopes arrive with no payload; of the senders seen, 82.8 percent arrive stripped only, 14.4 percent with payload only). Headers keep `from`, `id`, `rx_snr`, `rx_rssi`, `hop_start`, `hop_limit` (rewritten to 0) and `relay_node`, so link observations exist for every packet; positions exist only for opted-in nodes. NeighborInfo payloads were not seen at all (interim: 0 of 6200 decoded packets nationally), which fits the docs' statement that only certain portnums pass the public broker.
+The spike found a constraint the plan did not list. The public broker forwards the header of nearly every default-key packet but removes the payload unless the sender set the "OK to MQTT" bit: 96.2 percent of envelopes arrive header-only. `relay_node` survives on 1.5 percent of header-only envelopes and on 74.5 percent of envelopes with a payload, so in practice the link source exists only for opted-in senders. NeighborInfo never arrives.
 
-## Measurements
+## Measurements (interim)
 
-| Measure | Interim value (capture of 0.4 h, national unless stated) |
+| Measure | Value |
 | --- | --- |
-| (a) packets with non-zero `relay_node` | 4.2 percent of 240 864 headers; 50.5 percent of those equal the sender's own low byte (heard direct) |
-| (a) `relay_node` resolves to one sender heard by the same gateway | one: 48.4 percent, more than one: 18.3 percent, none: 33.3 percent; against all senders in the capture it always matches many |
-| (b) NeighborInfo | 0 packets, 0 pairs; median SNR not available |
-| (c) `precision_bits` on Position packets | 13: 40.1 percent, 14: 19.4 percent, 15: 30.7 percent, 16: 6.0 percent, 12 and below: 3.7 percent; nothing between 17 and 31 |
-| (c) MapReport `position_precision` | 14: 53.9 percent, 13: 21.6 percent, 15 to 19: 14.7 percent, 32: 8.7 percent |
-| (d) regional broker | MeshSTL (`https://meshstl.org`) runs `mqtt.meshstl.org:1883` with posted credentials, root topic `msh/US/MeshSTL`, LongFast and LongTurbo on the default key, a secondary MeshSTL channel with a published key, and a Meshview at `meshview.meshstl.org`. Precision not measured: connecting to a broker outside the plan is a decision for Casey. |
-| (d) regional topics on the public broker | `msh/US/MeshSTL`: 657 packets per hour from 20 gateways, 12.5 percent with `relay_node`; `msh/US/MO`: 197 per hour, 9 gateways; `msh/US/IL` (includes Chicago): 487 per hour, 31 gateways |
-| MSA counts (CBSA 41180) | 13 nodes positioned inside, 5 of them usable (15 bits or more); 7 gateways positioned inside, 3 usable; 0 link-hours yet under `lnk_01` to `lnk_05` |
+| (a) envelopes with non-zero `relay_node` | 3.8 percent nationally; 50.9 percent of those carry the sender's own low byte |
+| (a) relayed receipts whose byte matches senders heard by the same gateway | one: 57.4 percent, more than one: 10.8 percent, none: 31.8 percent; against every sender in the capture it always matches many |
+| (b) NeighborInfo | 0 packets, 0 pairs, no SNR to report |
+| (c) `precision_bits`, national Position packets | 13: 40.2 percent, 14: 19.3, 15: 30.6, 16: 6.0, 12 or less: 3.8; nothing from 17 to 31 |
+| (c) `precision_bits`, MSA Position packets | 13: 30.9 percent, 14: 18.6, 15: 27.1, 16: 11.2, 12 or less: 12.2 |
+| (d) regional broker | MeshSTL (`https://meshstl.org`) publishes its own broker, `mqtt.meshstl.org:1883`, root topic `msh/US/MeshSTL`, with posted credentials, LongFast and LongTurbo on the default key and a MeshSTL channel with a published key. Precision not measured: subscribing to a broker outside the plan is Casey's call. |
+| (d) regional topics on the public broker | `msh/US/MeshSTL` 702 packets per hour from 52 gateways; `msh/US/MO` 278 from 12; `msh/US/IL` 410 from 69 |
+| MSA counts (CBSA 41180, seed from PR #7) | 69 nodes positioned inside, 31 usable; 33 gateways positioned inside, 16 usable; 243 relayed receipts at those gateways |
 
-The half-widths at St. Louis latitude (38.63 N): 16 bits 365 m north-south and 285 m east-west; 15 bits 730 and 570 m; 14 bits 1459 and 1140 m; 13 bits 2918 and 2280 m.
+## Yield (interim, extrapolated)
+
+Rows are link rules: (i) `relay_node` matched among senders the gateway heard, with the sender's own byte taken as a direct hop; (ii) NeighborInfo, where the byte must match exactly one of the gateway's reported neighbours; (iii) either, counted once, dropped when they disagree.
+
+| Area | Rule | Per week, 500 m | Relayers | Gateways | Per week, 3 km | Relayers | Gateways |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| MSA | (i) relay_node | 0 | 0 | 0 | 0 | 0 | 0 |
+| MSA | (ii) NeighborInfo | 0 | 0 | 0 | 0 | 0 | 0 |
+| MSA | (iii) combined | 0 | 0 | 0 | 0 | 0 | 0 |
+| Missouri plus Illinois | (i) relay_node | 0 | 0 | 0 | 0 | 0 | 0 |
+| Missouri plus Illinois | (ii) NeighborInfo | 0 | 0 | 0 | 0 | 0 | 0 |
+| Missouri plus Illinois | (iii) combined | 0 | 0 | 0 | 0 | 0 | 0 |
+
+Arithmetic for the MSA, combined rule: 243 relayed receipts, 180 resolved, 180 between different nodes, 11 with both ends usable within 30 minutes, 1 at 500 m to 60 km, 0 hours with 3 such receipts. 0 x 48.48 = 0 link-hours per week. Missouri plus Illinois follows the same path: 656, 436, 436, 15, 1, 0.
+
+The (f) widening check triggers (0 against the 300 threshold), and widening does not help: the losses happen at the position rule, and Missouri plus Illinois loses them the same way. Without the position rule, the MSA has 17 (relayer, gateway, hour) groups with 3 or more resolved receipts in 3.47 hours, about 820 a week, across 9 pairs, 8 relayers and 7 gateways. Only 1 of those 9 pairs has both ends ever reporting 15 bits. Relaxing the window to 24 hours does not change the 3-packet result (sensitivity table in the spike README). The binding constraint is the public broker's position precision, not link resolution and not area size.
 
 ## Options
 
 Link source:
 
-1. `relay_node` matched against the senders the same gateway has heard. Advantage: present on every header, stripped or not, so it covers all traffic. Cost: one byte is ambiguous (interim 18 percent of relayed packets match two or more candidates and are dropped), and a relayer never heard as a sender by that gateway cannot be resolved (interim 33 percent).
-2. NeighborInfo pairs. Advantage: an explicit list of direct neighbours with SNR measured by the reporter. Cost: the public broker does not forward it; it is only available from a broker that keeps payloads, and NeighborInfo is sent at most every 15 minutes, so `lnk_04` (3 packets an hour) rarely holds.
-3. Both, with `link_source` in {`relay_node`, `neighbor_info`} on `fct_rx_observation`. Advantage: the warehouse model already provides for it and the two sources check each other where both exist. Cost: two code paths; only worth it if option 2 has a feed.
-4. Unknown-relayer fallback (plan Risks table): treat every receipt as a link of unknown origin and model gateway-side terrain only. Advantage: no resolution step. Cost: no path, so no terrain profile; a weaker project.
+1. `relay_node` matched among senders the same gateway heard. Advantage: carried by every opted-in packet. Cost: about 11 percent of receipts are ambiguous and 32 percent have no candidate.
+2. NeighborInfo pairs. Advantage: explicit neighbour lists with SNR. Cost: absent from the public broker; usable only from a broker that keeps payloads.
+3. Both, with `link_source` on `fct_rx_observation`. Advantage: matches the planned model and lets a second broker add NeighborInfo later. Cost: a second code path that is idle until such a broker exists.
+4. Unknown-relayer fallback (plan Risks table): every receipt becomes a link of unknown origin; model gateway-side terrain only. Advantage: no resolution or relayer position needed. Cost: no path, so no terrain profile, and a much weaker result.
 
 Position source:
 
-- A. Public broker default-key positions. Advantage: already captured; 10 to 16 bits exactly as the plan assumed, with 15 and 16 bits on 36.7 percent of position packets (interim). Cost: only opted-in nodes report positions, and the box half-width is 365 m at best.
-- B. MeshSTL broker (`mqtt.meshstl.org`, published credentials). Advantage: a private broker does not rewrite `hop_limit`, strip payloads or cap precision, so it may carry NeighborInfo and positions at the nodes' own precision (often 32 bits), which `pos_04` already provides for as `precise_source`. Cost: outside the plan's data sources; someone else's infrastructure with no uptime promise; full-precision positions of identifiable nodes raise the privacy bar on everything downstream.
+- A. Public broker positions only. Advantage: no new source. Cost: interim yield is zero under the contract.
+- B. MeshSTL broker. Advantage: a private broker does not strip payloads or cap precision, so it may carry NeighborInfo and positions at 32 bits, which `pos_04` already provides for. Cost: outside the plan's sources, someone else's server with no uptime promise, and full-precision positions of identifiable people raise the privacy stakes downstream.
 - C. Both, with the source recorded per position row.
+
+Area of interest:
+
+- MSA as planned. Advantage: terrain, land cover and building work stay metro-sized. Cost: none extra; the yield is zero either way at present.
+- Missouri plus Illinois. Advantage: 2.2 times the gateways and 2.7 times the relayed receipts. Cost: rasters and OSM for two states, and no gain in link-hours, because the position rule removes the same receipts.
 
 ## Decision
 
-Proposed: option 1 for the link source now, with the `relay_node` candidate set scoped to senders heard by the same gateway in the trailing 24 hours, and option A for positions, plus a read-only 24-hour capture of the MeshSTL broker approved by Casey to measure its precision and NeighborInfo volume before choosing between A and C. If the MeshSTL capture shows NeighborInfo and full-precision positions, the proposal becomes option 3 and C.
-
-## Expected yield (interim arithmetic)
-
-Regional packets per hour on the public broker (MeshSTL, MO, IL segments): 657 + 197 + 487 = 1341, about 225 000 per week. Chain of shares, each interim: `relay_node` set and not the gateway's own packet 28 percent (weighted across the three segments), resolves to exactly one candidate 48 percent, both ends with a usable position within 30 minutes 15 percent (proxy: 5 of 13 MSA nodes usable, squared), distance between 500 m and 60 km 80 percent (assumed). 225 000 x 0.28 x 0.48 x 0.15 x 0.80 = about 3 600 receipts per week. At roughly 6 receipts per active link-hour that is about 600 link-hours per week before `lnk_04`, perhaps 400 after it, and an unknown share over 3 km. The plan's risk line is 300 link-hours after two weeks; this estimate clears it on paper but rests on 25 minutes of data and a squared proxy for the position window, so it should be read as an order of magnitude only.
+Proposed: link source option 3 (`relay_node` per gateway now, `link_source` column kept for NeighborInfo); position source C, conditional on Casey approving a read-only 24-hour capture of the MeshSTL broker that measures its precision and NeighborInfo volume before Phase 1 is built; area stays the MSA. If the 48-hour numbers and the MeshSTL capture both leave the yield near zero, the remaining choices are a change to `lnk_02` or `pos_01` (a contract change), or option 4 for the link source. Both go back to Casey with numbers.
 
 ## Consequences
 
-- `lnk_01` is finalised as: relayer resolved from `relay_node` against the senders the gateway heard in the trailing 24 hours; a packet whose `relay_node` equals the sender's own low byte is a direct link from the sender. `hop_limit` stays unused.
-- The decode status set in `ing_03` has no value for a payload removed by the broker; the spike reports it under `decrypt_failed` with a reason. Casey decides whether to add `stripped` to the set (a contract change).
-- `raw.decoded_packet` must keep header-only rows: they carry the link observation even without a payload.
-- If the MeshSTL broker becomes a source, the ingester gets a second subscription, the position row gets a `source` column, and `pos_04` applies; the privacy rules in the contract (`prv_01` to `prv_03`) need no change but their enforcement matters more.
-- NeighborInfo as a link source is off the table unless a payload-preserving broker is used.
+- `lnk_01` reads: relayer resolved from `relay_node` among senders that gateway heard in the trailing 24 hours, with the sender's own byte taken as a direct hop; `hop_limit` stays unused. The strict reading without the direct-hop shortcut loses 3 percent of resolved receipts.
+- `raw.decoded_packet` keeps header-only rows: they still count receipts per gateway for the funnel, even though they rarely carry `relay_node`.
+- `ing_03` has no status for a payload removed by the broker; the spike reports it as `decrypt_failed` with reason `stripped`. Adding `stripped` is a contract change for Casey.
+- A second broker means a second subscription, a `source` column on positions and `pos_04` in force; the privacy rules `prv_01` to `prv_03` stay as written and matter more.
+- The write-up's data funnel gains a step the plan did not expect: header-only envelopes.
