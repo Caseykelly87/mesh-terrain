@@ -2,10 +2,16 @@
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
 .dagster/
 dbt/target/
 dbt/logs/
 dbt/dbt_packages/
+dbt/package-lock.yml
 notebooks/.ipynb_checkpoints/
 .DS_Store
 .claude/worktrees/

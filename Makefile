@@ -1,0 +1,70 @@
+# Run from Git Bash on Windows or any POSIX shell. SHELL is forced to bash so
+# that the same recipes work when make is invoked from PowerShell or cmd.
+SHELL := bash
+.SHELLFLAGS := -eu -o pipefail -c
+.DEFAULT_GOAL := help
+
+# .env is exported into every recipe so dbt and pytest on the host see the same
+# variables Compose uses. The file is created from .env.example by `make up`.
+-include .env
+export
+
+# Some Windows hosts run antivirus or a proxy that re-signs HTTPS traffic; uv's
+# bundled root store then rejects PyPI with "invalid peer certificate". The
+# system store carries the interceptor's root, and on Linux and macOS the system
+# store is the same set of roots, so this is safe everywhere.
+export UV_SYSTEM_CERTS := true
+
+COMPOSE := docker compose
+UV := uv run --frozen
+DBT := $(UV) dbt
+DBT_ARGS := --project-dir dbt --profiles-dir dbt
+
+.PHONY: help env up down check fmt reproduce dbt-deps dbt-build dbt-debug lint test
+
+help:
+	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
+	@echo "make down       stop the stack and remove its volumes"
+	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
+	@echo "make fmt        ruff format and autofix"
+	@echo "make reproduce  rebuild every asset from the raw zone (stub until Phase 1)"
+
+env:
+	@test -f .env || cp .env.example .env
+
+up: env
+	$(COMPOSE) up --build --detach --wait --wait-timeout 300
+
+down:
+	$(COMPOSE) down --volumes --remove-orphans
+
+lint:
+	$(UV) ruff check .
+	$(UV) ruff format --check .
+	$(UV) mypy
+
+test:
+	$(UV) pytest --cov --cov-report=term-missing
+
+dbt-deps:
+	$(DBT) deps $(DBT_ARGS)
+
+dbt-debug: dbt-deps
+	$(DBT) debug $(DBT_ARGS)
+
+dbt-build: dbt-deps
+	$(DBT) build $(DBT_ARGS)
+
+check: env lint test dbt-build
+
+fmt:
+	$(UV) ruff check --fix .
+	$(UV) ruff format .
+
+# Stub until Phase 1 lands the raw loader. It will then materialise every
+# Dagster asset from the raw zone in dependency order through the dbt and
+# features layers, equivalent to a full rebuild from Parquet.
+reproduce:
+	@echo "reproduce: nothing to rebuild yet. From Phase 1 this target runs"
+	@echo "  dagster asset materialize --select '*' -m pipeline.definitions"
+	@echo "to rebuild every asset from the raw zone."

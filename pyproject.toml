@@ -1,0 +1,60 @@
+[project]
+name = "mesh-terrain"
+version = "0.1.0"
+description = "Terrain-aware validation of Meshtastic LoRa link quality across the St. Louis metro"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+dependencies = [
+    "dagster==1.13.26",
+    "dagster-dbt==0.29.26",
+    "dagster-postgres==0.29.26",
+    "dagster-webserver==1.13.26",
+    "dbt-core==1.12.6",
+    "dbt-postgres==1.11.0",
+    "psycopg[binary]==3.3.6",
+    "pydantic-settings==2.16.1",
+    "structlog==26.1.0",
+]
+
+[dependency-groups]
+dev = [
+    "mypy==2.4.0",
+    "pre-commit==4.7.0",
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.17.1",
+]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pipeline", "terrain"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# Markdown is excluded so the formatter leaves the style guide's deliberately
+# long example signature alone.
+extend-exclude = ["notebooks", "dbt/dbt_packages", "dbt/target", "*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "N"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pipeline", "terrain", "ingester"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["pipeline", "terrain"]
+strict = true
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["pipeline", "terrain", "ingester"]
