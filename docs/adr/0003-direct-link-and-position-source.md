@@ -1,92 +1,75 @@
-# ADR 0003: Resolve links from relay_node on radio receipts, and measure MeshSTL before fixing the position source
+# ADR 0003: Resolve links from relay_node on radio receipts, pick the position rule from the final yield table, and keep the MSA
 
 Date: 2026-10-22
 Status: proposed
 Proposed by: ingest-eng
 Decided by: Casey
 
-Every number here is interim: it comes from the first 4.05 hours of a 48-hour capture that started 2026-10-22T16:11:33Z, and it is replaced when the capture ends. Every weekly figure is extrapolated: observed count x 168 / 4.05 = observed x 41.47. Full tables, rule definitions and commands are in `docs/adr/0003-spike/README.md`.
+Every number here is interim: it comes from the first 4.38 hours of a 48-hour capture that started 2026-10-22T16:11:33Z, and it is replaced when the capture ends. Every weekly figure is extrapolated: observed count x 168 / 4.38 = observed x 38.32. Commands and definitions are in `docs/adr/0003-spike/README.md`, the tables in `docs/adr/0003-spike/results.md`.
 
 ## Context
 
-The plan (section "Two constraints of the public broker") needs a link source and a position source before Phase 1 and 2 are built. The interim capture triggered the widening check, so the area of interest is a third question. It finds zero link-hours a week under the contract rules, in the MSA and in Missouri plus Illinois. The main cause is that most relayers never send a position at all; position precision and area size come second.
+The plan (section "Two constraints of the public broker") needs a link source and a position rule before Phase 1 and 2 are built, and the widening check in the brief adds the area of interest. The capture gives zero link-hours a week under the contract rules in the MSA and in Missouri plus Illinois. Of 239 resolved receipts in the MSA, 157 fail because the relayer sent no decodable position in the first 4.4 hours (21 relayers, 19 of which sent NodeInfo, Telemetry or Routing), 50 because an end is below 15 bits, 11 on the 30-minute window, and 20 of the 21 survivors sit in overlapping position boxes. Ignoring positions, the MSA has about 920 groups a week with 3 or more resolved receipts across 12 pairs. Casey approved a 24-hour capture of the MeshSTL broker to see whether those relayers report positions there.
 
 Terms:
 
 - envelope: one MQTT message from the broker, a `ServiceEnvelope` wrapping one radio packet and the id of the gateway that uploaded it.
-- header-only: an envelope whose packet header (sender, packet id, signal, `relay_node`) arrives but whose payload the broker removed.
-- via_mqtt: a header flag set when the gateway got the packet over MQTT, not by radio. Such a copy says nothing about a radio hop.
-- default key: the publicly documented encryption key of the default channel, which anyone can decrypt.
-- OK to MQTT bit: a flag a node sets in each packet to say it consents to its packets being uploaded.
+- header-only: an envelope whose packet header arrives but whose payload the broker removed. Its decode status is `stripped` (contract `ing_03`, approved 2026-10-22).
+- via_mqtt: a header flag set when the gateway got the packet over MQTT, not by radio. Such a copy says nothing about a radio hop. They are 95 percent of all envelopes and are all header-only.
+- radio delivery: an envelope that parses, has a sender, and has via_mqtt false. The reviewer's 82 812 and my 271 208 are the same definition: one clock hour (the hour-18 file, the gateway's own packets included) against 3.68 hours. `analyze.py` reproduces both.
+- radio receipt: a distinct (gateway, sender, packet id) among radio deliveries, the gateway's own packets excluded. Every link figure below uses the radio receipts that carry `relay_node`: 32 051 of 37 672 so far.
+- default key: the publicly documented key of the default channel, which anyone can decrypt.
+- OK to MQTT bit: a flag a node sets in each packet to say it consents to uploading. 24.5 percent of packets that keep a payload lack it, so the bit alone does not explain which radio deliveries arrive header-only.
 - relay_node: the low byte of the id of the node that last transmitted the packet by radio. A packet heard straight from its sender carries the sender's own low byte.
-- NeighborInfo: a packet a node broadcasts listing the nodes it hears directly, each with its signal-to-noise ratio (SNR).
-- precision_bits: how many of the 32 bits of a position's integer latitude and longitude the node keeps. At St. Louis, 16 bits is a box of plus or minus 365 m north-south and 13 bits plus or minus 2.9 km.
+- NeighborInfo: a packet a node broadcasts listing the nodes it hears directly, with a signal-to-noise ratio (SNR) each. None arrived: only 7 portnums ever decode and none is unknown, which points to the broker's port allowlist ("only specific portnums are prioritized", `https://meshtastic.org/docs/software/integrations/mqtt/`).
+- precision_bits: how many of the 32 bits of a position's integer latitude and longitude the node keeps. At St. Louis, 16 bits is a box of plus or minus 365 m north-south, 13 bits plus or minus 2.9 km. A position box is that square; two boxes overlap when they share ground, and then the distance is a range from 0 m to the larger box's diagonal.
+- stationary node: a node whose every position in the capture is the same box. The 48-hour capture stands in for the 7-day window production would use.
 - gateway: a node connected to the internet that uploads what it hears. Its `rx_snr` and `rx_rssi` describe the last radio hop.
-- link-hour: one (relayer, gateway) pair in one clock hour that passes `lnk_01` to `lnk_06`: relayer resolved, both ends with a usable position (15 bits or more) within 30 minutes, different nodes, at least 3 packets, 500 m to 60 km apart, signal in range.
-- MSA and CBSA: a metropolitan statistical area is a Census grouping of counties around a city. Its core-based statistical area (CBSA) code for St. Louis is 41180, and the boundary is the merged seed `dbt/seeds/msa_boundary.csv`.
+- link-hour: one (relayer, gateway) pair in one clock hour that passes `lnk_01` to `lnk_06`: relayer resolved, both ends with a usable position (15 bits or more) within the position rule, different nodes, at least 3 packets, 500 m to 60 km on the median distance, signal in range.
+- MSA and CBSA: a metropolitan statistical area is a Census grouping of counties around a city, identified by a core-based statistical area code; St. Louis is 41180, and the boundary is the merged seed `dbt/seeds/msa_boundary.csv`.
 
-## Evidence (interim)
-
-| Measure | Value |
-| --- | --- |
-| (a) radio envelopes, gateway's own packets excluded | 176 841; 49.5 percent header-only; `relay_node` set on 85.5 percent, and on 93.8 percent of header-only ones |
-| (a) via_mqtt copies | 5 838 465, 95 percent of all envelopes; all header-only; `relay_node` set on 0.02 percent |
-| (a) byte resolution on distinct radio receipts | one sender heard by the same gateway: 59.3 percent; several: 9.7; none: 31.1 |
-| (b) NeighborInfo | 0 packets. Only 7 portnums ever arrived decoded and none was unknown, which points to a broker-side port allowlist (the docs say "only specific portnums are prioritized"), not to low NeighborInfo adoption |
-| (c) precision_bits, MSA Position packets | 13: 31.5 percent; 14: 17.1; 15 or 16: 40.0; 12 or less: 11.4 |
-| (d) regional source | MeshSTL (`https://meshstl.org`) runs `mqtt.meshstl.org:1883`, root topic `msh/US/MeshSTL`, posted credentials, and a channel with a published key. Not measured, see Options |
-| MSA counts | 70 nodes positioned (32 usable), 33 gateways positioned (16 usable), 278 radio receipts with `relay_node` |
-
-Why a radio envelope arrives header-only is not established. 24.5 percent of the packets that keep a payload lack the OK to MQTT bit, so the bit alone does not decide it.
-
-Yield, link-hours per week (relayers, gateways):
-
-| Rule | MSA, 500 m | MSA, 3 km | MO plus IL, 500 m | MO plus IL, 3 km |
-| --- | --- | --- | --- | --- |
-| (i) relay_node | 0 (0, 0) | 0 (0, 0) | 0 (0, 0) | 0 (0, 0) |
-| (ii) NeighborInfo | 0 (0, 0) | 0 (0, 0) | 0 (0, 0) | 0 (0, 0) |
-| (iii) combined | 0 (0, 0) | 0 (0, 0) | 0 (0, 0) | 0 (0, 0) |
-
-Arithmetic, MSA, combined rule: 278 radio receipts, 277 with signal in range, 207 with the relayer resolved and not the gateway, 13 with both ends usable within 30 minutes, 1 at 500 m to 60 km, 0 hours with 3 packets; 0 x 41.47 = 0. Missouri plus Illinois: 755, 750, 496, 18, 1, 0.
-
-Where the 207 resolved MSA receipts fail:
-
-- 140: the relayer never sent a decodable position. These are 21 relayers, and 19 of them did send NodeInfo, Telemetry or Routing packets.
-- 44: an end is below 15 bits (33 relayer, 11 gateway).
-- 10: usable positions exist but fall outside the 30-minute window.
-- 12 of the 13 survivors: the two ends are 0 m apart, the same position box, and `lnk_05` removes them.
-
-Ignoring positions, the MSA has 20 (relayer, gateway, hour) groups with 3 or more receipts, about 829 a week, across 9 pairs. For 6 of those pairs the relayer never sent a position.
+Evidence in brief, interim: `relay_node` is set on 85.5 percent of radio deliveries (gateway's own excluded) and resolves to one sender heard by the same gateway for 59.7 percent of radio receipts. MSA Position packets: 15 or 16 bits on 40.6 percent. The MeshSTL broker (`https://meshstl.org`, sections `#mqtt-settings` and `#channels`) publishes its server, credentials and a channel key; the credentials live outside the repo and the key is not used.
 
 ## Options
 
 Link source:
 
-1. `relay_node` matched among senders the same gateway heard by radio. Advantage: set on 85.5 percent of radio receipts, payload or not. Cost: 9.7 percent ambiguous and 31.1 percent with no candidate.
-2. NeighborInfo pairs. Advantage: explicit neighbour lists with SNR. Cost: the public broker does not forward them.
-3. Both, with `link_source` on `fct_rx_observation`. Advantage: matches the planned model and leaves room for a second broker. Cost: one idle code path for now.
-4. Unknown-relayer fallback (plan Risks table): model gateway-side terrain only. Advantage: needs no relayer position, which is the main loss. Cost: no path, so no terrain profile.
+1. `relay_node` matched among senders the same gateway heard by radio. Advantage: set on 85.5 percent of radio deliveries, payload or not. Cost: 9.7 percent of radio receipts match several candidates and 30.6 percent none.
+2. NeighborInfo pairs. Advantage: explicit neighbour lists with SNR. Cost: the public broker does not forward them; MeshSTL may.
+3. Both, with `link_source` on `fct_rx_observation`. Advantage: matches the planned model and takes NeighborInfo from MeshSTL if it arrives. Cost: one idle code path until then.
+4. Unknown-relayer fallback (plan Risks table): model gateway-side terrain only. Advantage: needs no relayer position. Cost: no path, so no terrain profile.
 
-Position source:
+Position rule, with the yield table (link-hours per week, relayers, gateways, pairs; MeshSTL cells pending its capture):
 
-- A. Public broker positions, including MapReports. Advantage: no new source. Cost: zero yield at present.
-- B. MeshSTL broker and its published-key channel. Advantage: may carry positions that relayers share only there, and at full precision. Cost: outside the plan, and someone else's server. Decrypting a non-default channel is a stop condition in the brief. More precision cannot fix a node that never sends a position, or two nodes at the same site.
-- C. Both, with the source recorded per position row.
+| Position rule | Public MSA, 500 m | Public MSA, 3 km | Public MO plus IL, 500 m | Public MO plus IL, 3 km | MeshSTL, 500 m | MeshSTL, 3 km |
+| --- | --- | --- | --- | --- | --- | --- |
+| keep 30 minutes (`lnk_02` as written) | 0 (0, 0, 0) | 0 (0, 0, 0) | 0 (0, 0, 0) | 0 (0, 0, 0) | pending | pending |
+| stationarity window | 0 (0, 0, 0) | 0 (0, 0, 0) | 0 (0, 0, 0) | 0 (0, 0, 0) | pending | pending |
+| gateway-only fallback | 575 (8, 6, 8) | n/a, no distance | 1 035 (13, 11, 13) | n/a, no distance | pending | pending |
+
+- Keep 30 minutes. Advantage: the contract as written, and positions near the receipt in time. Cost: zero yield so far; 11 MSA receipts fail on the window alone.
+- Stationarity window. Advantage: 24 of the 32 usable MSA nodes are stationary, so their one box covers every receipt. Cost: no gain so far, because the loss is upstream: relayers with no position at all, and overlapping boxes.
+- Gateway-only fallback. Advantage: 575 link-hours a week in the MSA already, 8 relayers and 6 gateways. Cost: no path length and no terrain profile between the ends; the write-up models gateway-side terrain only.
+
+Arithmetic, MSA, combined rule, 30 minutes: 316 radio receipts, 315 with signal in range, 239 resolved and not the gateway, 21 with both ends usable, 20 in overlapping boxes, 1 at 500 m to 60 km, 0 hours with 3 packets; 0 x 38.32 = 0. Gateway-only: 15 (relayer, gateway, hour) groups with 3 or more receipts and the gateway usable; 15 x 38.32 = 575.
 
 Area of interest:
 
 - MSA as planned. Advantage: metro-sized terrain and land-cover work. Cost: none beyond the plan.
-- Missouri plus Illinois. Advantage: 2.7 times the receipts. Cost: two states of rasters and OSM, and still zero, because it fails at the same rules.
+- Missouri plus Illinois. Advantage: 2.7 times the receipts and 1.8 times the gateway-only link-hours. Cost: two states of rasters and OSM, and zero under the contract rules, because it fails at the same rules.
 
 ## Decision
 
-- Link source, proposed: option 3, `relay_node` on radio receipts, with `link_source` kept.
-- Position source, proposed: A now, plus a read-only 24-hour MeshSTL measurement approved by Casey before choosing C.
-- Area, proposed: the MSA.
+Proposed, one bullet per question; Casey decides all three when the 48-hour and MeshSTL numbers are in.
+
+- Link source: option 3, `relay_node` on radio receipts, with `link_source` kept for NeighborInfo.
+- Position rule: decided from the final yield table above; if the first two rows stay at zero on both brokers, the gateway-only fallback.
+- Area: the MSA.
 
 ## Consequences
 
 - `lnk_01` reads: relayer resolved from `relay_node` among senders the gateway heard by radio in the trailing 24 hours, with the sender's own byte taken as a direct hop. via_mqtt envelopes are never receipts, and `hop_limit` stays unused.
-- `ing_03` has no status for a payload the broker removed. The spike reports it as `decrypt_failed` with reason `stripped`. Adding `stripped` would change the contract, so Casey decides.
-- If the 48-hour numbers and MeshSTL still leave relayers unpositioned, the remaining routes are option 4 or a change to `lnk_02`. Both are contract-level and go to Casey with numbers.
-- The write-up's funnel gains two steps the plan did not expect: via_mqtt copies, and relayers with no position.
+- `ing_03` gains the status `stripped`, approved by Casey on 2026-10-22 and merged into the contract; `analyze.py` and the Phase 1 decoder keep it as its own status.
+- Step 7 reports the time to first usable position and the count of relayers with no decodable position over the full 48 hours, so "not yet" and "not at all" are told apart before the position rule is chosen.
+- If the gateway-only fallback is chosen, `int_link_window` has no `distance_m` for those rows and the features and validation marts need a gateway-only variant; that is a contract change for Casey.
+- The write-up's funnel gains three steps the plan did not expect: via_mqtt copies, header-only envelopes, and relayers with no position.
