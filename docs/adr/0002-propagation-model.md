@@ -1,7 +1,7 @@
 # ADR 0002: Call the NTIA ITM library through ctypes for the terrain propagation model
 
-Date: 2026-10-21
-Status: proposed
+Date: 2026-10-22
+Status: accepted
 Proposed by: terrain-rf-eng
 Decided by: Casey
 
@@ -26,7 +26,7 @@ Third-party Python ports (`itmlogic`, `pyitm`) were seen and not pursued: they a
 
 ## Decision
 
-Proposed: option 1, because the library builds in seconds, matches SPLAT's own Longley-Rice to 0.4 dB and has no licence friction.
+Option 1, because the library builds in seconds, matches SPLAT's own Longley-Rice to 0.4 dB and has no licence friction.
 
 ## Consequences
 
