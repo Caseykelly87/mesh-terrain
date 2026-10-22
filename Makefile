@@ -32,8 +32,12 @@ help:
 env:
 	@test -f .env || cp .env.example .env
 
+# The bucket bootstrap is a one-shot container; older Compose releases count
+# its clean exit as a failure under --wait, so it runs as a separate step.
 up: env
-	$(COMPOSE) up --build --detach --wait --wait-timeout 300
+	$(COMPOSE) up --build --detach --wait --wait-timeout 300 \
+		warehouse minio dagster-webserver dagster-daemon
+	$(COMPOSE) run --rm minio-bootstrap
 
 down:
 	$(COMPOSE) down --volumes --remove-orphans
