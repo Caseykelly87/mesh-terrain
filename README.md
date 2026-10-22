@@ -47,7 +47,8 @@ HTTPS interception: antivirus products that scan TLS (Norton Web Shield is one) 
 # PowerShell, once
 $c = Get-ChildItem Cert:\CurrentUser\Root | Where-Object { $_.Subject -like "*Norton*" } | Select-Object -First 1
 Export-Certificate -Cert $c -FilePath "$env:USERPROFILE\.certs\norton-root.cer" -Type CERT
-# Git Bash, once
+# Git Bash, once (uv sync first so the certifi bundle exists)
+uv sync
 openssl x509 -inform der -in ~/.certs/norton-root.cer -out ~/.certs/norton-root.pem
 cat .venv/Lib/site-packages/certifi/cacert.pem ~/.certs/norton-root.pem > ~/.certs/ca-bundle.pem
 ```
