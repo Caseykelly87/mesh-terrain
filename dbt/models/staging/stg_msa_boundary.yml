@@ -1,0 +1,21 @@
+version: 2
+
+models:
+  - name: stg_msa_boundary
+    description: >
+      The St. Louis, MO-IL metropolitan statistical area boundary as one PostGIS
+      geometry, parsed from the WKT in the msa_boundary seed. Every later model
+      clips positions against this polygon.
+    columns:
+      - name: geoid
+        description: Census CBSA code. Always 41180 for this project.
+        tests:
+          - unique
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["41180"]
+      - name: name
+        description: The Census name of the area, "St. Louis, MO-IL".
+      - name: geom
+        description: The boundary as geometry(MultiPolygon, 4326).
