@@ -31,6 +31,8 @@ To run the pre-commit hooks on every commit: `uv run pre-commit install`.
 
 Orchestration is Dagster rather than Airflow; ADR 0001 records the trade-off (asset lineage and a light local footprint over the more common line on job postings).
 
+The Dagster image also carries the Irregular Terrain Model (ITM), the radio propagation model the project tests in Phase 3, as a shared library at `/usr/local/lib/libitm.so`. It is compiled in a build stage of `docker/dagster/Dockerfile` from the reference C++ sources published by NTIA (the National Telecommunications and Information Administration), which are public domain; NTIA asks to be acknowledged and for modifications to be recorded, and the two build-time edits are listed in that Dockerfile and in `docs/adr/0002-itm-spike/README.md`. `terrain/itm.py` (Phase 3) loads the library through `ctypes` from the path in the `ITM_LIBRARY_PATH` setting, and `make check-itm` proves the library in the built image still gives the figure the spike measured. ADR 0002 records why the library was chosen over SPLAT.
+
 ## Running on Windows
 
 Install Git for Windows, Docker Desktop with the WSL 2 backend, GNU Make (`choco install make`) and uv (`winget install astral-sh.uv`). Run every command from Git Bash, not PowerShell: the Makefile forces `SHELL := bash` and the recipes use POSIX syntax. Use `uv run <tool>`, never `.venv/Scripts/<tool>` directly, so the lock file is respected.
