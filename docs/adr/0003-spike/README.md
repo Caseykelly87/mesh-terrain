@@ -1,22 +1,22 @@
 # Phase 1 spike for ADR 0003
 
-Evidence for `docs/adr/0003-direct-link-and-position-source.md`: a 48-hour capture of the public Meshtastic broker, a decoder, and the measurements the plan's Phase 1 spike asks for. Nothing here is production code; the ingester is built separately in Phase 1.
+Evidence for `docs/adr/0003-direct-link-and-position-source.md`: a 48-hour capture of the public Meshtastic broker, a 24-hour capture of the MeshSTL broker, a decoder, and the measurements the plan's Phase 1 spike and its addendum ask for. Nothing here is production code; the ingester is built separately in Phase 1.
 
-## Broker and topics
+## Brokers and topics
 
-From the Meshtastic docs (`https://meshtastic.org/docs/software/integrations/mqtt/` and `https://meshtastic.org/docs/configuration/module/mqtt/`): host `mqtt.meshtastic.org`, port 1883, username `meshdev`, password `large4cats`. Gateways publish protobuf `ServiceEnvelope` messages to `msh/REGION/2/e/CHANNELNAME/!gatewayid`. The default root for the United States is `msh/US`, and many communities insert a state or group segment (`msh/US/MO/2/e/...`, `msh/US/MeshSTL/2/e/...`). JSON copies go to `.../2/json/...`, map reports to `.../2/map/`, and status strings to `.../2/stat/`.
+Public broker, from the Meshtastic docs (`https://meshtastic.org/docs/software/integrations/mqtt/` and `https://meshtastic.org/docs/configuration/module/mqtt/`): host `mqtt.meshtastic.org`, port 1883, username `meshdev`, password `large4cats`. Gateways publish protobuf `ServiceEnvelope` messages to `msh/REGION/2/e/CHANNELNAME/!gatewayid`. The default root for the United States is `msh/US`, and many communities insert a state or group segment (`msh/US/MO/2/e/...`, `msh/US/MeshSTL/2/e/...`). JSON copies go to `.../2/json/...`, map reports to `.../2/map/`, and status strings to `.../2/stat/`. The capture subscribes to `msh/US/#`. Measured over the first 4.4 hours: about 1.5 million messages and 270 MB of JSON lines an hour, about 13 GB for 48 hours.
 
-The capture subscribes to `msh/US/#`. Measured over the first 4 hours: about 1.5 million messages and 270 MB of JSON lines an hour, about 13 GB for 48 hours. That is under the 20 GB line in the brief, so nothing was narrowed. Free space on C: was 34 GB on 2026-10-22.
+MeshSTL broker, from `https://meshstl.org` (section `#mqtt-settings` for the server and credentials, `#channels` for the channel keys): host `mqtt.meshstl.org`, port 1883, no TLS, root topic `msh/US/MeshSTL`. The username and password are posted on that page and are not copied here or anywhere in the repo; the container reads them from `C:/Users/Casey/mesh-terrain-data/meshstl.env` (outside the repo). The MeshSTL channel key on the same page is never used: the analysis decrypts the default key only, so MeshSTL-channel packets show as `decrypt_failed: wrong_key`.
 
 ## Files
 
-- `capture.py`: subscribes, buffers, and appends one JSON line per delivery (`received_at` in UTC from our clock, `topic`, `payload_b64`) to `capture-YYYY-MM-DDTHH.jsonl`. It flushes every 60 seconds or 20 000 records and reconnects with backoff from 1 to 120 seconds. JSON lines rather than Parquet, for three reasons: an append-only text file survives a crash mid-hour with every flushed record readable, it needs no writer state, and the landing format belongs to the ingester, not the spike. It decodes nothing and logs no payload or topic.
-- `analyze.py`: tallies each hourly file in its own worker process and decrypts default-key packets. The cipher is AES-128-CTR with key `1PG7OiApB1nwvP+rz05pAQ==`; the nonce is the packet id as 8 bytes little-endian, then the sender id as 4 bytes little-endian, then 4 zero bytes. It decodes Position, NodeInfo, Telemetry, NeighborInfo and MapReport, then prints for each area: (a) split by via_mqtt, (b), (c), regional topics, counts, the (e) yield with a funnel that names each loss, a position-free diagnostic, a sensitivity table and the (f) check. Output is aggregates only; no node id, name or coordinate is printed.
+- `capture.py`: subscribes, buffers, and appends one JSON line per delivery (`received_at` in UTC from our clock, `topic`, `payload_b64`) to `capture-YYYY-MM-DDTHH.jsonl`. It flushes every 60 seconds or 20 000 records and reconnects with backoff from 1 to 120 seconds. JSON lines rather than Parquet: an append-only text file survives a crash mid-hour with every flushed record readable, needs no writer state, and the landing format belongs to the ingester. It never logs a payload or a topic. With `CAPTURE_THIN=1` it writes headers only (parsed header fields, decode status, payload length, no bytes); that is the thinning rule below and is never the default.
+- `analyze.py`: tallies each hourly file in its own worker process, decrypts default-key packets (AES-128-CTR, key `1PG7OiApB1nwvP+rz05pAQ==`, nonce = packet id as 8 bytes little-endian, sender id as 4 bytes little-endian, 4 zero bytes), decodes Position, NodeInfo, Telemetry, NeighborInfo and MapReport, and prints every table below. It reads thin records too. `--start` and `--end` (ISO 8601 UTC) restrict it to a window, which is how the two brokers are compared on the same hours. Aggregates only; no node id, name or coordinate is printed.
 - `Dockerfile`: one image for both scripts, with spike-only pins.
 
 ## Commands
 
-Build the image and start the capture (from the repository root, Git Bash):
+Build the image and start the public capture (from the repository root, Git Bash):
 
 ```
 docker build -t mesh-spike docs/adr/0003-spike
@@ -28,21 +28,51 @@ docker run -d --name mesh-spike-capture --restart unless-stopped \
   -e "MQTT_TOPICS=msh/US/#" mesh-spike
 ```
 
-Check that it is alive: one `flush` line a minute with `count`, `bytes`, `path`, `duration_s` and `last_message_age_s`, and one new file an hour.
+Start the MeshSTL capture (only when the lead says Casey has posted his courtesy note). The env file holds `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER`, `MQTT_PASSWORD`, `MQTT_TOPICS=msh/US/MeshSTL/#` and `DATA_DIR=/data`:
 
 ```
-docker ps --filter name=mesh-spike-capture
+mkdir -p C:/Users/Casey/mesh-terrain-data/meshstl-capture
+docker run -d --name mesh-meshstl-capture --restart unless-stopped \
+  --env-file C:/Users/Casey/mesh-terrain-data/meshstl.env \
+  -v C:/Users/Casey/mesh-terrain-data/meshstl-capture:/data mesh-spike
+```
+
+Ten-minute rate check, after the container has run ten minutes. The `total` field of the last flush line divided by the minutes elapsed is the message rate; the file size divided by the minutes elapsed times 1 440 is the daily volume:
+
+```
+docker logs mesh-meshstl-capture 2>&1 | grep '"flush"' | tail -1
+ls -la C:/Users/Casey/mesh-terrain-data/meshstl-capture
+```
+
+Disk check and the thinning rule. Free space on C: was 34 GB at 20:29Z on 2026-10-22, the public capture was at 1.2 GB after 4.3 hours and runs about 270 MB an hour, so about 12 GB more by its end. Both captures together must stay under the 20 GB line. If the MeshSTL ten-minute projection plus 12 GB passes 20 GB, do not skip MeshSTL: restart the public capture in headers-only mode for its remaining hours and record the time in `docs/STATUS.md`. The thin file keeps the header fields and decode status, so every link measurement still works; positions are lost for those hours.
+
+```
+df -h /c
+du -sh C:/Users/Casey/mesh-terrain-data/spike-capture C:/Users/Casey/mesh-terrain-data/meshstl-capture
+docker stop mesh-spike-capture && docker rm mesh-spike-capture
+docker run -d --name mesh-spike-capture --restart unless-stopped \
+  -v C:/Users/Casey/mesh-terrain-data/spike-capture:/data \
+  -e MQTT_HOST=mqtt.meshtastic.org -e MQTT_PORT=1883 \
+  -e MQTT_USER=meshdev -e MQTT_PASSWORD=large4cats \
+  -e "MQTT_TOPICS=msh/US/#" -e CAPTURE_THIN=1 mesh-spike
+```
+
+Check either capture is alive: one `flush` line a minute with `count`, `bytes`, `path`, `duration_s` and `last_message_age_s`, and one new file an hour.
+
+```
+docker ps --filter name=mesh-
 docker logs --since 5m mesh-spike-capture
-ls -la C:/Users/Casey/mesh-terrain-data/spike-capture
+docker logs --since 5m mesh-meshstl-capture
 ```
 
-Stop it. SIGTERM flushes the buffer first, and the data stays on disk.
+Stop a capture. SIGTERM flushes the buffer first, and the data stays on disk.
 
 ```
 docker stop mesh-spike-capture
+docker stop mesh-meshstl-capture
 ```
 
-Run the analysis. The committed scripts are mounted over the image's copies, so the image the capture runs from never needs a rebuild. `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting `/data` into a Windows path. It takes about 70 seconds for 4 hours of data on 12 cores.
+Run the analysis. The committed scripts are mounted over the image's copies, so the image a capture runs from never needs a rebuild. `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting `/data` into a Windows path. About 70 seconds for 4 hours of public data on 12 cores.
 
 ```
 MSYS_NO_PATHCONV=1 docker run --rm \
@@ -53,77 +83,27 @@ MSYS_NO_PATHCONV=1 docker run --rm \
   mesh-spike python /spike/analyze.py /data /seeds/msa_boundary.csv /bounds/states_mo_il.csv
 ```
 
+The MeshSTL capture: the same command with `meshstl-capture` as `/data`. To compare the two brokers on the same hours, add `--start` and `--end` with the MeshSTL window to the public run.
+
 ## Boundaries
 
 - MSA: the merged seed `dbt/seeds/msa_boundary.csv`, sha256 `711054e1cfc2962a26db8e6c4b385468d759ff81172fd905f57c60e916925aea`, the value warehouse-eng recorded in PR #7. The seed splits the WKT over two rows by `part`, and `analyze.py` joins the chunks in `part` order. The view `staging.stg_msa_boundary` gives the same polygon, but the spike container does not connect to the warehouse.
-- Missouri (GEOID 29) and Illinois (GEOID 17) come from `https://www2.census.gov/geo/tiger/TIGER2025/STATE/tl_2025_us_state.zip`, sha256 `59a220888a8d9be8117c4fcd38f542bd02d81abf0d198c78113595ad540dd957`. They were converted with pyshp 2.3.1 and shapely 2.2.0 in a throwaway `python:3.12-slim-bookworm` container, the same way the CBSA seed was made. The output is `C:/Users/Casey/mesh-terrain-data/states_mo_il.csv` (columns `geoid`, `name`, `source`, `geometry_wkt`), sha256 `8c0749d467869d9a5a4b71898958b006edc78bf15b6984b1b0e997bfc43da45b`. Both MultiPolygons are valid. The file stays outside the repo.
+- Missouri (GEOID 29) and Illinois (GEOID 17) come from `https://www2.census.gov/geo/tiger/TIGER2025/STATE/tl_2025_us_state.zip`, sha256 `59a220888a8d9be8117c4fcd38f542bd02d81abf0d198c78113595ad540dd957`, converted with pyshp 2.3.1 and shapely 2.2.0 in a throwaway `python:3.12-slim-bookworm` container, the same way the CBSA seed was made. The output is `C:/Users/Casey/mesh-terrain-data/states_mo_il.csv` (columns `geoid`, `name`, `source`, `geometry_wkt`), sha256 `8c0749d467869d9a5a4b71898958b006edc78bf15b6984b1b0e997bfc43da45b`. Both MultiPolygons are valid. The file stays outside the repo.
 
-## Rule definitions used for (e)
+## Definitions
 
-- Receipts are radio envelopes only (via_mqtt false), the gateway's own packets excluded, with `relay_node` set. Each distinct (gateway, sender, packet id) counts once. Candidates for the relayer are the senders the receiving gateway heard by radio anywhere in the capture; the ADR proposes the trailing 24 hours for production.
+- Radio delivery: an envelope on an `e` topic that parses, has a sender, and has `via_mqtt` false. The reviewer's 82 812 is the radio deliveries in the file `capture-2026-10-22T18.jsonl` alone, the gateway's own packets included; `analyze.py` reproduces it on that file (53 406 without the gateway's own). The 271 208 at 3.68 hours is the same definition over 3.68 hours.
+- Radio receipt: a distinct (gateway, sender, packet id) among radio deliveries, the gateway's own packets excluded. Every link figure uses the radio receipts that carry `relay_node`. Candidates for the relayer are the senders the receiving gateway heard by radio anywhere in the capture; the ADR proposes the trailing 24 hours for production.
 - `lnk_06`: `rx_rssi` set and in [-140, 0] dBm, `rx_snr` in [-25, 15] dB.
 - (i) `relay_node`: if the byte equals the sender's own low byte, the relayer is the sender. Otherwise it is the one candidate with that low byte, or unresolved when there are none or several. `relay_node_strict` drops the own-byte shortcut.
 - (ii) NeighborInfo: the candidates are the neighbours listed in the gateway's own NeighborInfo reports, matched the same way.
 - (iii) combined: (i) or (ii), dropped when both resolve and disagree.
-- `lnk_02`: the usable position closest in time for each end, within 30 minutes. A failure is attributed to the relayer first, then the gateway, under one of four causes: no position in the capture, a position only outside the area, below 15 bits, or usable but outside the window.
-- `lnk_05`: the geodesic distance on WGS84 between the two box centres, in degrees as sent. 0 m means both ends are in the same quantised box.
+- `lnk_02`, 30-minute rule: the usable position (15 bits or more) closest in time for each end, within 30 minutes. A failure is attributed to the relayer first, then the gateway, under: no position in the capture, a position only outside the area, below 15 bits, or usable but outside the window.
+- Stationarity rule (addendum 2b): a node whose every position in the capture is one box (same quantised latitude, longitude and bits) gets that box for every receipt; other nodes fall back to the 30-minute rule. The capture window stands in for the 7-day window production would use.
+- Gateway-only fallback: the relayer is resolved and the gateway is positioned; no relayer position and no distance. The 500 m and 3 km columns do not apply.
+- Overlapping boxes (addendum 2c): two position boxes that share ground have no single distance, only a range from 0 m to the larger box's diagonal (926 m at 16 bits, 1 852 m at 15 bits). They get their own funnel row and never a link-hour.
 - `lnk_04` and the 3 km test: at least 3 receipts in the (relayer, gateway, clock hour) group, tested on the median distance of the group.
 
-## Interim results (4.05 hours, weekly figures extrapolated x41.47)
+## Results
 
-(a) Envelopes by via_mqtt:
-
-| measure | radio | gateway's own excluded | via_mqtt true |
-| --- | --- | --- | --- |
-| envelopes | 294 581 | 176 841 | 5 838 465 |
-| header-only | 33.2% | 49.5% | 100.0% |
-| `relay_node` set | 77.7% | 85.5% | 0.02% |
-| `relay_node` set, among header-only | 84.0% | 93.8% | 0.02% |
-| own low byte, among relayed | 52.3% | 27.9% | 0.4% |
-| `hop_limit` zero | 88.5% | 92.7% | 99.9% |
-
-Decode status on radio envelopes: ok 51.3 percent (default key 42.7, plaintext 8.6), header-only 33.2, wrong key 8.9, PKI 6.6. Every via_mqtt copy is header-only.
-
-Funnel, distinct radio receipts, combined rule:
-
-| step | MSA | MO plus IL |
-| --- | --- | --- |
-| radio receipts with `relay_node` at area gateways | 278 | 755 |
-| `lnk_06` fail: signal missing or out of range | 1 | 5 |
-| `lnk_01` fail: relayer not resolved | 70 | 254 |
-| `lnk_01` and `lnk_03` pass | 207 | 496 |
-| `lnk_02` fail: relayer, no position in capture | 140 | 305 |
-| `lnk_02` fail: relayer, below 15 bits | 33 | 139 |
-| `lnk_02` fail: relayer, usable but outside the window | 5 | 5 |
-| `lnk_02` fail: gateway, below 15 bits | 11 | 24 |
-| `lnk_02` fail: gateway, usable but outside the window | 5 | 5 |
-| `lnk_02` pass | 13 | 18 |
-| `lnk_05` fail: 0 m, same box | 12 | 12 |
-| `lnk_05` fail: under 500 m | 0 | 5 |
-| `lnk_05` pass | 1 | 1 |
-| link-hours with 3 or more receipts | 0 | 0 |
-
-Relayers that failed `lnk_02` because they never sent a position: 21 in the MSA, 19 of them sent other decoded packets. In Missouri plus Illinois: 45, of which 43.
-
-Position-free diagnostic (`lnk_02` and `lnk_05` ignored, combined rule):
-
-| measure | MSA | MO plus IL |
-| --- | --- | --- |
-| (relayer, gateway, hour) groups with 3 or more receipts | 20 | 47 |
-| per week | 829 | 1 949 |
-| distinct pairs, relayers, gateways | 9, 8, 7 | 22, 20, 19 |
-| pairs whose relayer never sent a position | 6 | 15 |
-| pairs with both ends ever usable | 1 | 1 |
-
-Sensitivity, combined rule, MSA (not the contract rules), per week at 500 m:
-
-| position window | min packets 3 | min packets 1 |
-| --- | --- | --- |
-| 30 min (contract) | 0 | 41 (1 pair) |
-| 24 h | 0 | 124 (1 pair) |
-
-Other observations:
-
-- Senders by payload arrival: 52.4 percent arrive header-only, 40.4 percent with a payload, 7.2 percent both.
-- MapReport packets on the `map` topic carry `position_precision` up to 32 bits (8.9 percent at 32); they count as positions at their own precision.
-- The regional topic segments (`msh/US/MeshSTL`, `MO`, `IL`) carry radio envelopes only, so every via_mqtt copy arrives under some other part of `msh/US`.
+The measurement tables are in `results.md` beside this file, interim until the captures end.
