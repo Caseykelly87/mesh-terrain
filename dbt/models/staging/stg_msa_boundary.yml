@@ -19,3 +19,5 @@ models:
         description: The Census name of the area, "St. Louis, MO-IL".
       - name: geom
         description: The boundary as geometry(MultiPolygon, 4326).
+        tests:
+          - not_null
