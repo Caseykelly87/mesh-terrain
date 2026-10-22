@@ -56,6 +56,4 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return the process-wide Settings, built on first call."""
-    # pydantic-settings fills the required fields from the environment; mypy
-    # only sees a constructor call with missing arguments.
-    return Settings()  # type: ignore[call-arg]
+    return Settings()

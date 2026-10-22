@@ -36,10 +36,10 @@ packages = ["pipeline", "terrain"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# Markdown is excluded so the formatter leaves the style guide's deliberately
-# long example signature alone; docs/ holds ADR spike scripts, which are
-# recorded experiments rather than production code.
-extend-exclude = ["notebooks", "dbt/dbt_packages", "dbt/target", "docs", "*.md"]
+# ADR spike scripts are recorded experiments, not production code. ruff 0.17
+# formats Python code fences inside Markdown, and the style guide's example
+# signature is deliberately wider than the line limit.
+extend-exclude = ["notebooks", "dbt/dbt_packages", "dbt/target", "docs/adr", "*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "N"]
@@ -52,6 +52,7 @@ python_version = "3.12"
 files = ["pipeline", "terrain"]
 strict = true
 warn_unreachable = true
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
