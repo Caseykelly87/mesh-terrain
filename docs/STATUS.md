@@ -26,6 +26,7 @@ Phase 0, in progress. Last unit: platform-eng, Phase 0 foundation (uv project, t
 
 ## Environment and configuration notes
 
+- Phase 1 spike capture: container `mesh-spike-capture`, restart policy `unless-stopped` (survives a Docker Desktop restart), subscribed to `msh/US/#`, writing hourly JSON lines files to `C:\Users\Casey\mesh-terrain-data\spike-capture\` (mounted at `/data`). The 48-hour window runs from 2026-10-22 16:11:33 UTC to 2026-10-24 16:11:33 UTC. Check it with `docker ps --filter name=mesh-spike-capture` and `docker logs --tail 20 mesh-spike-capture`; stop it after the window with `docker stop mesh-spike-capture`. The data stays on the host and never enters the repo. Owner: ingest-eng.
 - Git identity: Casey Kelly, set at repo level. Automatic co-author trailers are off.
 - Run `make` targets from Git Bash on Windows. The Makefile exports `.env` into every recipe and sets `UV_SYSTEM_CERTS=true`. `make up` waits through `docker/wait-for-stack.sh`, which fails when a long-running service exited or restarted or a one-shot (`dagster-migrate`, `minio-bootstrap`) exited non-zero.
 - The Compose project name is fixed to `mesh-terrain`; `docker compose -p mesh-terrain ...` from any folder reaches the same containers and volumes.
