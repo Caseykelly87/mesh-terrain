@@ -52,6 +52,10 @@ class Settings(BaseSettings):
 
     dbt_project_dir: Path = REPO_ROOT / "dbt"
 
+    # Where the Dagster image puts the NTIA ITM shared library (ADR 0002).
+    # terrain/itm.py loads it through ctypes; override for a host-side build.
+    itm_library_path: Path = Path("/usr/local/lib/libitm.so")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
