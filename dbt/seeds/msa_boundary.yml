@@ -1,0 +1,23 @@
+version: 2
+
+seeds:
+  - name: msa_boundary
+    description: >
+      The St. Louis, MO-IL metropolitan statistical area boundary from Census
+      TIGER/Line 2025 as WKT text. The WKT is longer than the 131072 characters
+      a CSV field may hold when dbt reads it, so it is stored in ordered chunks,
+      one per row; stg_msa_boundary joins them back together. The recipe that
+      produced the file is in seeds/README.md.
+    columns:
+      - name: geoid
+        description: Census CBSA code, 41180 on every row.
+      - name: name
+        description: The Census name of the area.
+      - name: source
+        description: The TIGER/Line file name and vintage the row came from.
+      - name: part
+        description: Order of this chunk within the WKT, starting at 1.
+      - name: geometry_wkt
+        description: >
+          One chunk of the boundary WKT (a MultiPolygon in EPSG:4326, longitude
+          first). Concatenate the chunks in part order to get the full text.
