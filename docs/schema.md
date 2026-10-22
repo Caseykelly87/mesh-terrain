@@ -4,7 +4,7 @@ Every table and view in the warehouse that another agent or a person reads, with
 
 Schemas, in pipeline order: `raw` (loaders write it, documented by ingest-eng in `ingester/README.md`), `staging` (views and seeds), `core` (incremental tables at the link-hour grain), `features` (terrain per link-hour), `analytics` (marts). Sections for `core`, `features` and `analytics` are added here as their tables appear.
 
-Conventions that hold everywhere below: geometry columns are stored in SRID 4326 (longitude and latitude in degrees) and any area, distance or azimuth is computed after casting to EPSG:26915 (UTM zone 15N, metres) or to `geography`. Names are `snake_case`.
+Conventions that hold everywhere below: geometry columns are stored in SRID 4326 (longitude and latitude in degrees) and any area, distance or azimuth is computed after reprojecting to EPSG:26915 (UTM zone 15N, metres) with `st_transform`, or after casting to `geography`. Names are `snake_case`.
 
 ## staging
 
@@ -43,4 +43,4 @@ select st_contains(geom, st_setsrid(st_point(-90.1848, 38.6247), 4326)) as insid
 from staging.stg_msa_boundary;
 ```
 
-That point is the Gateway Arch and the answer is `true`. `st_point` takes longitude first, then latitude; swapping them puts the point in the Indian Ocean and the answer becomes `false`. The tests in `dbt/tests/assert_msa_boundary_*.sql` check this exact query, that downtown Kansas City is outside, that the geometry is valid, that the SRID is 4326 and that the area is between 18,000 and 25,000 km2.
+That point is the Gateway Arch and the answer is `true`. `st_point` takes longitude first, then latitude. Swapped, the point has latitude -90.18, which is past the south pole and not a real location, so the answer is `false` with no error to warn you. The tests in `dbt/tests/assert_msa_boundary_*.sql` check this exact query, that downtown Kansas City is outside, that the geometry is valid, that the SRID is 4326 and that the area is between 18,000 and 25,000 km2.

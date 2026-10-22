@@ -12,6 +12,7 @@ Phase 0, in progress. Last unit: warehouse-eng, MSA boundary seed and `staging.s
 - The warehouse image installs `postgis_raster` as an extension because `h3_postgis` declares it as a required dependency. No table stores rasters; the plan's rule against PostGIS raster is about storage and still holds.
 - h3-pg is built from `github.com/postgis/h3-pg` (the `zachasme/h3-pg` repository named in the plan was archived and moved there) at tag v4.2.3, commit a26630b8.
 - ADR 0001 said PostgreSQL 16; the warehouse is PostgreSQL 17 with PostGIS 3.5 per ADR 0004, and the plan's stack table already says so.
+- `staging.stg_msa_boundary` rejoins two WKT chunks with `string_agg(geometry_wkt, '' order by part)`, beyond the staging rule of casting and renaming only, because dbt cannot load a seed field over 131,072 characters and the boundary WKT is 179,994. The lead decided to keep the two exact chunks rather than simplify the polygon to one row. No ADR: the grain is unchanged and it is not a stop item. PR #7.
 - Note for every agent: the plan was revised on 2026-10-21 after verifying two public-broker behaviours (hop_limit rewritten to 0; positions limited to 10 to 16 bits). The link is relayer to gateway, the 1 m DEM is out of scope, and ADR 0003 is pending the Phase 1 spike. Read the section "Two constraints of the public broker" in docs/PLAN.md before any Phase 1 or Phase 2 work.
 
 ## Known issues and skipped steps
