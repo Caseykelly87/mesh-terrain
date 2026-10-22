@@ -24,7 +24,7 @@ Both constraints and the funnel they create are stated plainly in the write-up. 
 | Language, env | Python 3.12, uv |
 | Orchestration | Dagster 1.x with dagster-dbt, dagster-postgres, dagster-webserver |
 | Transforms | dbt-core 1.8+ with dbt-postgres, dbt-utils, dbt-expectations |
-| Warehouse | PostgreSQL 16 + PostGIS 3.5 (`postgis/postgis:16-3.5`) |
+| Warehouse | PostgreSQL 17 + PostGIS 3.5 (`postgis/postgis:17-3.5`), matching RDS for PostgreSQL 17; see ADR 0004 |
 | Raw landing | MinIO locally, S3 in cloud; Parquet via pyarrow |
 | MQTT ingest | paho-mqtt 2.x, meshtastic protobufs, cryptography |
 | Raster | rasterio, rio-cogeo, numpy, py3dep or direct National Map downloads |
