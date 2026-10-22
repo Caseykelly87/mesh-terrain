@@ -126,6 +126,7 @@ When a deviation is resolved or a known issue closed, its line is removed, not s
 3. Run the reviewer.
 4. Summarise for Casey in five lines or fewer: outcome, deviations, what the reviewer flagged, decisions waiting, next unit.
 5. The next brief you write starts by quoting the "Configuration the next agent needs" lines from the previous report that apply.
+6. In the same summary message, not in the repo, write a plain-language note of at most two paragraphs on what the unit built and why it is shaped that way, defining any term on first use, and give Casey one hands-on exercise he can do against the running stack in under 15 minutes to see it work.
 
 ## Commits, pull requests and merging
 
