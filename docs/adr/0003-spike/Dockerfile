@@ -9,9 +9,8 @@
 #     -v C:/Users/Casey/mesh-terrain-data/spike-capture:/data \
 #     -e MQTT_HOST=mqtt.meshtastic.org -e MQTT_USER=meshdev \
 #     -e MQTT_PASSWORD=large4cats -e MQTT_TOPICS=msh/US/# mesh-spike
-#   docker run --rm -v C:/Users/Casey/mesh-terrain-data/spike-capture:/data \
-#     -v "$PWD/dbt/seeds/msa_boundary.csv:/opt/spike/msa_boundary.csv:ro" \
-#     mesh-spike python analyze.py /data /opt/spike/msa_boundary.csv
+#   The analysis mounts the committed scripts over the image's copies; the
+#   full command and the boundary files are in README.md.
 
 FROM python:3.12-slim-bookworm
 
