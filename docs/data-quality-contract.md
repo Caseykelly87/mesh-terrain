@@ -10,7 +10,7 @@ Identifiers are stable. Tests are named `assert_<identifier>` (dbt singular) or 
 | --- | --- | --- |
 | `ing_01` | Every raw MQTT delivery is stored once, keyed by `sha256(topic || payload_bytes)`. | unique test on `raw.mqtt_message.key` |
 | `ing_02` | Raw rows are never updated or deleted. | no `UPDATE` or `DELETE` statement in any loader; reviewer checks |
-| `ing_03` | Every raw row has a decode row with a status in {`ok`, `unknown_port`, `decrypt_failed`, `malformed`}. | relationship + accepted_values on `raw.decoded_packet` |
+| `ing_03` | Every raw row has a decode row with a status in {`ok`, `unknown_port`, `decrypt_failed`, `stripped`, `malformed`}. `stripped` means the broker forwarded the envelope header with no payload, so there was nothing to decode. | relationship + accepted_values on `raw.decoded_packet` |
 | `ing_04` | Decode success rate over the trailing 24 hours is at least 90 percent. | Dagster asset check `decode_rate` |
 | `ing_05` | The newest raw file is less than 15 minutes old while the ingester is expected to be running. | Dagster asset check `raw_freshness` |
 | `ing_06` | Ordering uses `received_at` (our clock). `rx_time` is stored but never used as a key. | reviewer checks; `rx_time` absent from any `ORDER BY` or window |
