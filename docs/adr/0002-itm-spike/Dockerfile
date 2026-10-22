@@ -31,7 +31,7 @@ RUN curl -fsSL -o itm.tar.gz "https://codeload.github.com/NTIA/itm/tar.gz/${ITM_
 # modification, as the NTIA licence asks us to record). itm.h defines
 # DLLEXPORT as extern "C" __declspec(dllexport) with no non-Windows branch;
 # defining __declspec away on the compiler line keeps the extern "C" linkage.
-RUN sed -i 's|#include "..\\include\\\([A-Za-z]*\.h\)"|#include "\1"|' src/*.cpp \
+RUN sed -i 's|#include "..\\include\\\([A-Za-z0-9_]*\.h\)"|#include "\1"|' src/*.cpp \
     && g++ -O2 -fPIC -shared -std=c++17 '-D__declspec(x)=' -Iinclude src/*.cpp \
     -o /usr/local/lib/libitm.so \
     && nm -D /usr/local/lib/libitm.so | grep -c ' T ITM_P2P'
@@ -47,4 +47,5 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/spike
-CMD ["splat"]
+COPY tx.qth rx.qth tx.lrp check_splat.sh ./
+CMD ["sh", "check_splat.sh"]

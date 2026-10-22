@@ -59,7 +59,7 @@ The 40 dB above free space is what two antennas 2 m above flat ground should sho
 
 ## SPLAT output
 
-Inputs: two `.qth` site files at 38.6 N, 90.2 W and 90.08506 W (SPLAT reports 9.99 km), 2 m antennas, one `.lrp` file with the same ground, climate, frequency, polarisation and 50 percent fractions. No `.sdf` tile in the directory. Command: `splat -t tx.qth -r rx.qth -metric -olditm -d /tmp`.
+Inputs, committed beside the Dockerfile: `tx.qth` and `rx.qth`, site files at 38.6 N, 90.2 W and 90.08506 W (SPLAT reports 9.99 km) with 2 m antennas, and `tx.lrp` with the same ground, climate, frequency, polarisation and 50 percent fractions. No `.sdf` tile is present. `check_splat.sh` runs `splat -t tx.qth -r rx.qth -metric -olditm -d /opt/spike` and prints the report; `docker run --rm splat-spike` reproduces it.
 
 SPLAT printed `Region "38:39:90:91" assumed as sea-level` and wrote `tx-to-rx.txt`:
 
