@@ -1,0 +1,20 @@
+# Install once with: uv run pre-commit install
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Keep equal to the ruff version in pyproject.toml so the hook and make check agree.
+    rev: v0.17.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+  - repo: local
+    hooks:
+      # mypy runs from the project environment rather than the mirrors-mypy hook
+      # because strict mode needs the real dagster and pydantic packages on the
+      # path, and duplicating that list as additional_dependencies drifts.
+      - id: mypy
+        name: mypy
+        entry: uv run --frozen mypy
+        language: system
+        types: [python]
+        pass_filenames: false
