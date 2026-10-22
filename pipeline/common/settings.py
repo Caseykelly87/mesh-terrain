@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     Field names map to upper-case environment variables (warehouse_host is
     WAREHOUSE_HOST). A .env file at the repository root is read when present;
     real environment variables win over it.
+
+    Raises:
+        pydantic.ValidationError: at construction when a required variable is
+            missing or has the wrong type.
     """
 
     model_config = SettingsConfigDict(
@@ -29,18 +33,20 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    warehouse_host: str = "localhost"
+    # Connection and credential fields have no defaults so a missing variable
+    # fails at startup instead of silently pointing at the wrong place.
+    warehouse_host: str
     warehouse_port: int = 5433
-    warehouse_user: str = "mesh"
-    warehouse_password: SecretStr = SecretStr("mesh")
-    warehouse_db: str = "mesh_terrain"
+    warehouse_user: str
+    warehouse_password: SecretStr
+    warehouse_db: str
 
-    dagster_pg_db: str = "dagster"
+    dagster_pg_db: str
 
-    s3_endpoint_url: str = "http://localhost:9000"
-    minio_root_user: str = "minio"
-    minio_root_password: SecretStr = SecretStr("minio12345")
-    raw_bucket: str = "mesh-terrain-raw"
+    s3_endpoint_url: str
+    minio_root_user: str
+    minio_root_password: SecretStr
+    raw_bucket: str
 
     log_format: Literal["console", "json"] = "console"
 
@@ -50,4 +56,6 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Return the process-wide Settings, built on first call."""
-    return Settings()
+    # pydantic-settings fills the required fields from the environment; mypy
+    # only sees a constructor call with missing arguments.
+    return Settings()  # type: ignore[call-arg]
