@@ -42,10 +42,14 @@ GEOD = Geod(ellps="WGS84")
 csv.field_size_limit(sys.maxsize)
 
 
+REGIONAL_SEGMENTS = ("MeshSTL", "MO", "IL")
+
+
 @dataclass
 class Packet:
     received_at: datetime
     topic_kind: str
+    region: str
     gateway: str
     channel: str
     sender: int
@@ -87,6 +91,12 @@ def topic_kind(topic: str) -> str:
         if part in {"e", "c", "json", "map", "stat"}:
             return "e" if part == "c" else part
     return "other"
+
+
+def topic_region(topic: str) -> str:
+    """The regional segment after msh/US when it is one we treat as St. Louis, else empty."""
+    parts = topic.split("/")
+    return parts[2] if len(parts) > 2 and parts[2] in REGIONAL_SEGMENTS else ""
 
 
 def nonce(packet_id: int, sender: int) -> bytes:
@@ -175,11 +185,12 @@ def parse_record(record: dict[str, str]) -> Packet | None:
     try:
         envelope.ParseFromString(base64.b64decode(record["payload_b64"]))
     except DecodeError:
-        return Packet(received_at, kind, "", "", 0, 0, 0, 0, 0, False, 0.0, 0, "malformed")
+        return Packet(received_at, kind, topic_region(record["topic"]), "", "", 0, 0, 0, 0, 0, False, 0.0, 0, "malformed")
     mesh_packet = envelope.packet
     packet = Packet(
         received_at=received_at,
         topic_kind=kind,
+        region=topic_region(record["topic"]),
         gateway=envelope.gateway_id,
         channel=envelope.channel_id,
         sender=getattr(mesh_packet, "from"),
@@ -485,6 +496,32 @@ def link_hours_neighbor(capture: Capture, positioned: Positioned, min_bits: int)
     }
 
 
+def report_regional_topics(capture: Capture) -> None:
+    """Traffic under the St. Louis, Missouri and Illinois topic segments of the public broker."""
+    hours = capture.hours()
+    rows = []
+    for segment in REGIONAL_SEGMENTS:
+        packets = [p for p in capture.packets if p.region == segment and p.topic_kind == "e"]
+        relayed = sum(1 for p in packets if p.relay_node and node_id_from_gateway(p.gateway) != p.sender)
+        with_payload = sum(1 for p in packets if p.status == "ok")
+        positions = sum(1 for p in packets if p.position)
+        rows.append((
+            f"msh/US/{segment}",
+            str(len(packets)),
+            f"{len(packets) / hours:.0f}",
+            str(len({p.gateway for p in packets})),
+            str(len({p.sender for p in packets if p.sender})),
+            pct(relayed, len(packets)),
+            pct(with_payload, len(packets)),
+            str(positions),
+        ))
+    print_table(
+        "Regional topic segments on the public broker (e topics)",
+        rows,
+        ("topic root", "packets", "per hour", "gateways", "senders", "relay_node set", "with payload", "positions"),
+    )
+
+
 def report_msa(capture: Capture, msa: shapely.Geometry) -> None:
     positioned, msa_nodes, msa_gateways = collect_positions(capture, msa)
     heard_by_msa = {p.sender for p in capture.packets if p.gateway in msa_gateways and p.sender}
@@ -528,6 +565,7 @@ def main() -> None:
     report_relay(capture)
     report_neighbor(capture)
     report_precision(capture)
+    report_regional_topics(capture)
     if msa_path is not None:
         report_msa(capture, load_msa(msa_path))
 
