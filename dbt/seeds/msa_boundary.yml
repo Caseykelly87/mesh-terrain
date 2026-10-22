@@ -8,6 +8,12 @@ seeds:
       a CSV field may hold when dbt reads it, so it is stored in ordered chunks,
       one per row; stg_msa_boundary joins them back together. The recipe that
       produced the file is in seeds/README.md.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - geoid
+              - part
     columns:
       - name: geoid
         description: Census CBSA code, 41180 on every row.
@@ -17,7 +23,11 @@ seeds:
         description: The TIGER/Line file name and vintage the row came from.
       - name: part
         description: Order of this chunk within the WKT, starting at 1.
+        tests:
+          - not_null
       - name: geometry_wkt
         description: >
           One chunk of the boundary WKT (a MultiPolygon in EPSG:4326, longitude
           first). Concatenate the chunks in part order to get the full text.
+        tests:
+          - not_null
