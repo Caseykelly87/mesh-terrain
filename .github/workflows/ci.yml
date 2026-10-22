@@ -78,6 +78,6 @@ jobs:
       - run: make up
       - run: make check
       - if: always()
-        run: docker compose logs --no-color dagster-webserver dagster-daemon
+        run: docker compose logs --no-color dagster-migrate dagster-webserver dagster-daemon minio-bootstrap
       - if: always()
         run: make down

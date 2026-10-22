@@ -82,6 +82,20 @@ services:
     entrypoint: ["/bin/bash", "/bootstrap.sh"]
     restart: "no"
 
+  dagster-migrate:
+    # Creates or upgrades the Dagster storage tables once. Without this the
+    # webserver and the daemon both run create_all against an empty database
+    # at the same time and one of them dies on a duplicate table.
+    build:
+      context: .
+      dockerfile: docker/dagster/Dockerfile
+    command: ["dagster", "instance", "migrate"]
+    environment: *dagster-environment
+    depends_on:
+      warehouse:
+        condition: service_healthy
+    restart: "no"
+
   dagster-webserver:
     build:
       context: .
@@ -90,7 +104,10 @@ services:
     environment: *dagster-environment
     ports:
       - "${DAGSTER_PORT}:3000"
+    restart: unless-stopped
     depends_on:
+      dagster-migrate:
+        condition: service_completed_successfully
       warehouse:
         condition: service_healthy
       minio:
@@ -115,11 +132,21 @@ services:
       dockerfile: docker/dagster/Dockerfile
     command: ["dagster-daemon", "run", "-w", "/opt/dagster/home/workspace.yaml"]
     environment: *dagster-environment
+    restart: unless-stopped
     depends_on:
+      dagster-migrate:
+        condition: service_completed_successfully
       warehouse:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      # The daemon writes heartbeats to storage; the check reads them back.
+      test: ["CMD", "dagster-daemon", "liveness-check"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+      start_period: 40s
 
 volumes:
   warehouse-data:

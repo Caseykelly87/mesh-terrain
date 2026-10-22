@@ -32,12 +32,10 @@ help:
 env:
 	@test -f .env || cp .env.example .env
 
-# The bucket bootstrap is a one-shot container; older Compose releases count
-# its clean exit as a failure under --wait, so it runs as a separate step.
+# Health waiting is a script rather than compose --wait; the script says why.
 up: env
-	$(COMPOSE) up --build --detach --wait --wait-timeout 300 \
-		warehouse minio dagster-webserver dagster-daemon
-	$(COMPOSE) run --rm minio-bootstrap
+	$(COMPOSE) up --build --detach
+	bash docker/wait-for-stack.sh
 
 down:
 	$(COMPOSE) down --volumes --remove-orphans
