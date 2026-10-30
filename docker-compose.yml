@@ -19,10 +19,15 @@ x-dagster-environment: &dagster-environment
   RAW_BUCKET: ${RAW_BUCKET}
   LOG_FORMAT: json
 
+# Every service sets restart: "no", so nothing in this project starts unless
+# `make up` starts it. Docker Desktop restarts unless-stopped and always
+# services whenever its engine starts, even when it was opened for something
+# unrelated, and unless-stopped also restarts a container after a clean exit 0.
 services:
   warehouse:
     build:
       context: docker/warehouse
+    restart: "no"
     environment:
       POSTGRES_USER: ${WAREHOUSE_USER}
       POSTGRES_PASSWORD: ${WAREHOUSE_PASSWORD}
@@ -51,6 +56,7 @@ services:
     # release, pinned by digest because the repository is frozen and may be
     # removed. See docs/STATUS.md for the open decision on a replacement.
     image: bitnamilegacy/minio:2025.7.23-debian-12-r5@sha256:6dabb4a2088c9a79908de3bc05f4586c23ad2182c8908e7e3acbf61c1467fb20
+    restart: "no"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -104,7 +110,7 @@ services:
     environment: *dagster-environment
     ports:
       - "${DAGSTER_PORT}:3000"
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       dagster-migrate:
         condition: service_completed_successfully
@@ -132,7 +138,7 @@ services:
       dockerfile: docker/dagster/Dockerfile
     command: ["dagster-daemon", "run", "-w", "/opt/dagster/home/workspace.yaml"]
     environment: *dagster-environment
-    restart: unless-stopped
+    restart: "no"
     depends_on:
       dagster-migrate:
         condition: service_completed_successfully
