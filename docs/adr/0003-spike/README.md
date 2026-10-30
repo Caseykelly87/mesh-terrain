@@ -90,12 +90,13 @@ MSYS_NO_PATHCONV=1 docker run --rm \
   mesh-spike python /spike/analyze.py /data /seeds/msa_boundary.csv /bounds/states_mo_il.csv
 ```
 
-The runs behind `results.md`, all with the command above plus:
+The seven runs behind `results.md`, all with the command above plus:
 
 | run | `/data` | extra arguments |
 | --- | --- | --- |
 | public, full capture | `spike-capture` | none |
 | public, regional roots only | `spike-capture` | `--roots MO,IL,MeshSTL` |
+| public, the roots ADR 0005 subscribes | `spike-capture` | `--roots MO,MeshSTL` (MSA only: omit the states file) |
 | public, shared 24 hours | `spike-capture` | `--start 2026-10-23T22:08:59+00:00 --end 2026-10-24T22:08:59+00:00` |
 | MeshSTL, its 24 hours | `meshstl-capture` | the same `--start` and `--end` |
 | public with MeshSTL positions | `spike-capture` | the same window plus `--positions-from /bounds/meshstl-capture` |
