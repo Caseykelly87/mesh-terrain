@@ -12,6 +12,8 @@ make check   # ruff, mypy, pytest, dbt deps and dbt build against the local stac
 make down    # stops the stack and removes its volumes
 ```
 
+`make up` and `make down` are the only way to start and stop the stack. Every Compose service has `restart: "no"`, so opening Docker Desktop or restarting the machine starts nothing; run `make up` again. Do not start or stop the services with `docker compose up`, `docker start` or the Docker Desktop buttons: they skip the health and exit-code checks in `docker/wait-for-stack.sh`.
+
 `make up` copies `.env.example` to `.env` if it is missing. Dagster is at http://localhost:3000, the warehouse at localhost:5433 (database `mesh_terrain`, user `mesh`), the object store API at localhost:9000 and its console at localhost:9001 (user `minio`). `make fmt` formats; `make reproduce` will rebuild every asset from the raw zone once Phase 1 lands the loader.
 
 To run the pre-commit hooks on every commit: `uv run pre-commit install`.
