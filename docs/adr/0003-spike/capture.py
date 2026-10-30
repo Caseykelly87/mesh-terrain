@@ -10,6 +10,13 @@ With CAPTURE_THIN=1 it keeps headers only: each record carries the parsed
 envelope header, the decode status and the payload length, and drops the
 bytes. That is the thinning rule from the brief addendum for when two
 captures together would pass the disk line; it is never the default.
+
+It stops itself. At END_AT (ISO 8601 with an offset, optional) or once the
+capture files in DATA_DIR reach MAX_RAW_BYTES (default 10 GB, measured after
+each flush) it flushes, writes HALTED.json with the reason and byte count,
+logs at error and exits 0. With `--restart on-failure` Docker leaves it
+stopped. A start that finds HALTED.json exits 0 at once, so restarting the
+container never resumes a capture; deleting the marker does.
 """
 
 from __future__ import annotations
@@ -39,6 +46,9 @@ log = structlog.get_logger(service="spike-capture")
 FLUSH_INTERVAL_S = 60.0
 FLUSH_MAX_RECORDS = 20000
 THIN = os.environ.get("CAPTURE_THIN", "") == "1"
+MAX_RAW_BYTES = int(os.environ.get("MAX_RAW_BYTES", str(10 * 10**9)))
+END_AT = os.environ.get("END_AT", "")
+HALT_MARKER = "HALTED.json"
 THIN_FIELDS = (
     "kind",
     "status",
@@ -74,15 +84,20 @@ def thin_record(received_at: str, topic: str, payload: bytes) -> dict[str, Any]:
 class Buffer:
     """Thread-safe list of records with an append-to-hourly-file flush."""
 
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, end_at: datetime | None = None) -> None:
         self.data_dir = data_dir
+        self.end_at = end_at
         self.records: list[dict[str, Any]] = []
         self.lock = threading.Lock()
         self.total = 0
         self.last_message_at: float | None = None
 
     def add(self, topic: str, payload: bytes) -> int:
-        received_at = datetime.now(UTC).isoformat(timespec="microseconds")
+        now = datetime.now(UTC)
+        if self.end_at is not None and now >= self.end_at:
+            # The main loop halts within a second of END_AT; nothing after it lands.
+            return 0
+        received_at = now.isoformat(timespec="microseconds")
         if THIN:
             record = thin_record(received_at, topic, payload)
         else:
@@ -157,11 +172,64 @@ def build_client(topics: list[str], buffer: Buffer) -> mqtt.Client:
     return client
 
 
+def parse_end_at(value: str) -> datetime | None:
+    if not value:
+        return None
+    end_at = datetime.fromisoformat(value)
+    if end_at.tzinfo is None:
+        raise ValueError(f"END_AT needs an offset, for example {value}+00:00")
+    return end_at
+
+
+def landing_bytes(data_dir: Path) -> int:
+    return sum(path.stat().st_size for path in data_dir.glob("capture-*.jsonl*"))
+
+
+def halt_reason(data_dir: Path, end_at: datetime | None) -> str | None:
+    if end_at is not None and datetime.now(UTC) >= end_at:
+        return "end_at"
+    if landing_bytes(data_dir) >= MAX_RAW_BYTES:
+        return "max_raw_bytes"
+    return None
+
+
+def write_halt_marker(data_dir: Path, reason: str, total: int) -> None:
+    size = landing_bytes(data_dir)
+    marker = {
+        "reason": reason,
+        "halted_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "landing_bytes": size,
+        "max_raw_bytes": MAX_RAW_BYTES,
+        "end_at": END_AT or None,
+        "records_this_run": total,
+    }
+    path = data_dir / HALT_MARKER
+    path.write_text(json.dumps(marker) + "\n", encoding="ascii")
+    log.error("halt", reason=reason, landing_bytes=size, marker=str(path), total=total)
+
+
+def wait_s(end_at: datetime | None) -> float:
+    """Seconds to the next flush, cut short so END_AT is met to the second."""
+    if end_at is None:
+        return FLUSH_INTERVAL_S
+    remaining = (end_at - datetime.now(UTC)).total_seconds()
+    return max(0.0, min(FLUSH_INTERVAL_S, remaining))
+
+
 def main() -> None:
     data_dir = Path(os.environ.get("DATA_DIR", "/data"))
     data_dir.mkdir(parents=True, exist_ok=True)
+    marker = data_dir / HALT_MARKER
+    if marker.exists():
+        log.error("halted", marker=str(marker), detail="delete the marker to resume")
+        return
+    end_at = parse_end_at(END_AT)
+    halted = halt_reason(data_dir, end_at)
+    if halted is not None:
+        write_halt_marker(data_dir, halted, 0)
+        return
     topics = [topic.strip() for topic in os.environ["MQTT_TOPICS"].split(",") if topic.strip()]
-    buffer = Buffer(data_dir)
+    buffer = Buffer(data_dir, end_at)
     client = build_client(topics, buffer)
     stop = threading.Event()
 
@@ -173,16 +241,29 @@ def main() -> None:
     signal.signal(signal.SIGINT, on_signal)
 
     host, port = os.environ["MQTT_HOST"], int(os.environ.get("MQTT_PORT", "1883"))
-    log.info("start", host=host, port=port, data_dir=str(data_dir), thin=THIN)
+    log.info(
+        "start",
+        host=host,
+        port=port,
+        data_dir=str(data_dir),
+        thin=THIN,
+        end_at=END_AT or None,
+        max_raw_bytes=MAX_RAW_BYTES,
+    )
     client.connect_async(host, port, keepalive=60)
     client.loop_start()
     try:
-        while not stop.wait(FLUSH_INTERVAL_S):
+        while not stop.wait(wait_s(end_at)):
             buffer.flush()
+            halted = halt_reason(data_dir, end_at)
+            if halted is not None:
+                break
     finally:
         client.loop_stop()
         client.disconnect()
         buffer.flush()
+        if halted is not None:
+            write_halt_marker(data_dir, halted, buffer.total)
         log.info("stop", total=buffer.total)
 
 

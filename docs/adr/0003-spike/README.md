@@ -1,41 +1,47 @@
 # Phase 1 spike for ADR 0003
 
-Evidence for `docs/adr/0003-direct-link-and-position-source.md`: a 48-hour capture of the public Meshtastic broker, a 24-hour capture of the MeshSTL broker, a decoder, and the measurements the plan's Phase 1 spike and its addendum ask for. Nothing here is production code; the ingester is built separately in Phase 1.
+Evidence for `docs/adr/0003-direct-link-and-position-source.md`: a capture of the public Meshtastic broker (planned for 48 hours, observed 63.594 hours because the container had no end time), a 24-hour capture of the MeshSTL broker, a decoder, and the measurements the plan's Phase 1 spike and its addendum ask for. Nothing here is production code; the ingester is built separately in Phase 1.
 
 ## Brokers and topics
 
-Public broker, from the Meshtastic docs (`https://meshtastic.org/docs/software/integrations/mqtt/` and `https://meshtastic.org/docs/configuration/module/mqtt/`): host `mqtt.meshtastic.org`, port 1883, username `meshdev`, password `large4cats`. Gateways publish protobuf `ServiceEnvelope` messages to `msh/REGION/2/e/CHANNELNAME/!gatewayid`. The default root for the United States is `msh/US`, and many communities insert a state or group segment (`msh/US/MO/2/e/...`, `msh/US/MeshSTL/2/e/...`). JSON copies go to `.../2/json/...`, map reports to `.../2/map/`, and status strings to `.../2/stat/`. The capture subscribes to `msh/US/#`. Measured over the first 4.4 hours: about 1.5 million messages and 270 MB of JSON lines an hour, about 13 GB for 48 hours.
+Public broker, from the Meshtastic docs (`https://meshtastic.org/docs/software/integrations/mqtt/` and `https://meshtastic.org/docs/configuration/module/mqtt/`): host `mqtt.meshtastic.org`, port 1883, username `meshdev`, password `large4cats`. Gateways publish protobuf `ServiceEnvelope` messages to `msh/REGION/2/e/CHANNELNAME/!gatewayid`. The default root for the United States is `msh/US`, and many communities insert a state or group segment (`msh/US/MO/2/e/...`, `msh/US/MeshSTL/2/e/...`). JSON copies go to `.../2/json/...`, map reports to `.../2/map/`, and status strings to `.../2/stat/`. The capture subscribes to `msh/US/#`. Measured over 63.594 observed hours: 1.28 million messages and 232 MB of JSON lines an hour, 5.57 GB a day, 88.6 percent of it header-only via_mqtt copies. The hourly files were gzipped in place after the capture (64 files, 2.6 GB) and are read directly; a verified zstd Parquet copy of each hour sits in `C:/Users/Casey/mesh-terrain-data/spike-parquet/` (columns `received_at`, `topic`, `payload` as bytes).
 
 MeshSTL broker, from `https://meshstl.org` (section `#mqtt-settings` for the server and credentials, `#channels` for the channel keys): host `mqtt.meshstl.org`, port 1883, no TLS, root topic `msh/US/MeshSTL`. The username and password are posted on that page and are not copied here or anywhere in the repo; the container reads them from `C:/Users/Casey/mesh-terrain-data/meshstl.env` (outside the repo). The MeshSTL channel key on the same page is never used: the analysis decrypts the default key only, so MeshSTL-channel packets show as `decrypt_failed: wrong_key`.
 
 ## Files
 
 - `capture.py`: subscribes, buffers, and appends one JSON line per delivery (`received_at` in UTC from our clock, `topic`, `payload_b64`) to `capture-YYYY-MM-DDTHH.jsonl`. It flushes every 60 seconds or 20 000 records and reconnects with backoff from 1 to 120 seconds. JSON lines rather than Parquet: an append-only text file survives a crash mid-hour with every flushed record readable, needs no writer state, and the landing format belongs to the ingester. It never logs a payload or a topic. With `CAPTURE_THIN=1` it writes headers only (parsed header fields, decode status, payload length, no bytes); that is the thinning rule below and is never the default.
-- `analyze.py`: tallies each hourly file in its own worker process, decrypts default-key packets (AES-128-CTR, key `1PG7OiApB1nwvP+rz05pAQ==`, nonce = packet id as 8 bytes little-endian, sender id as 4 bytes little-endian, 4 zero bytes), decodes Position, NodeInfo, Telemetry, NeighborInfo and MapReport, and prints every table below. It reads thin records too. `--start` and `--end` (ISO 8601 UTC) restrict it to a window, which is how the two brokers are compared on the same hours. Aggregates only; no node id, name or coordinate is printed.
+- `analyze.py`: tallies each hourly file (`.jsonl` or `.jsonl.gz`) in its own worker process, decrypts default-key packets (AES-128-CTR, key `1PG7OiApB1nwvP+rz05pAQ==`, nonce = packet id as 8 bytes little-endian, sender id as 4 bytes little-endian, 4 zero bytes), decodes Position, NodeInfo, Telemetry, NeighborInfo and MapReport, and prints every table in `results.md`. It reads thin records too. `--start` and `--end` (ISO 8601 UTC) restrict it to a window, which is how the two brokers are compared on the same hours. `--roots MO,IL,MeshSTL` keeps only topics under those roots, which is what a subscription to those prefixes would have received. `--positions-from DIR` adds another capture's positions (same window) so a relayer silent on one broker can be placed from the other. Aggregates only; no node id, name or coordinate is printed.
+- Denominators: every rate divides by observed hours, the sum of the capture's segments. A segment is a run of records with no gap over 15 minutes; a gap is not observed time. Weekly figures are weighted: the weekday hourly rate times 120 plus the weekend hourly rate times 48, with weekday and weekend taken as local days (CDT, UTC minus 5, for the whole capture). The flat figure (overall hourly rate times 168) is printed beside it.
 - `Dockerfile`: one image for both scripts, with spike-only pins.
 
 ## Commands
+
+Both captures are finished. These are the commands for a rerun. Every capture gets an `END_AT` and `--restart on-failure`. The script halts itself at `END_AT` or at `MAX_RAW_BYTES` (default 10 GB of capture files in the folder, checked after each flush): it flushes, writes `HALTED.json` (reason, time, bytes), logs `halt` at error and exits 0, so `on-failure` leaves it stopped. A start that finds `HALTED.json` exits 0 at once; deleting the marker is the only way to resume. Never use `--restart unless-stopped` or `always`: Docker restarts those whenever Docker Desktop starts, and `unless-stopped` restarts a clean exit too. That is how both captures restarted on 2026-10-28 (ADR 0003, Consequences).
 
 Build the image and start the public capture (from the repository root, Git Bash):
 
 ```
 docker build -t mesh-spike docs/adr/0003-spike
 mkdir -p C:/Users/Casey/mesh-terrain-data/spike-capture
-docker run -d --name mesh-spike-capture --restart unless-stopped \
+docker run -d --name mesh-spike-capture --restart on-failure \
   -v C:/Users/Casey/mesh-terrain-data/spike-capture:/data \
   -e MQTT_HOST=mqtt.meshtastic.org -e MQTT_PORT=1883 \
   -e MQTT_USER=meshdev -e MQTT_PASSWORD=large4cats \
-  -e "MQTT_TOPICS=msh/US/#" mesh-spike
+  -e "MQTT_TOPICS=msh/US/#" -e END_AT=2026-10-24T16:11:33+00:00 mesh-spike
 ```
 
 Start the MeshSTL capture (only when the lead says Casey has posted his courtesy note). The env file holds `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER`, `MQTT_PASSWORD`, `MQTT_TOPICS=msh/US/MeshSTL/#` and `DATA_DIR=/data`:
 
 ```
 mkdir -p C:/Users/Casey/mesh-terrain-data/meshstl-capture
-docker run -d --name mesh-meshstl-capture --restart unless-stopped \
+docker run -d --name mesh-meshstl-capture --restart on-failure \
   --env-file C:/Users/Casey/mesh-terrain-data/meshstl.env \
+  -e END_AT=2026-10-24T22:08:59+00:00 \
   -v C:/Users/Casey/mesh-terrain-data/meshstl-capture:/data mesh-spike
 ```
+
+Check a halt: `cat C:/Users/Casey/mesh-terrain-data/spike-capture/HALTED.json` and `docker inspect -f '{{.State.ExitCode}} {{.RestartCount}}' mesh-spike-capture` (expect `0 0`).
 
 Ten-minute rate check, after the container has run ten minutes. The `total` field of the last flush line divided by the minutes elapsed is the message rate; the file size divided by the minutes elapsed times 1 440 is the daily volume:
 
@@ -50,11 +56,12 @@ Disk check and the thinning rule. Free space on C: was 34 GB at 20:29Z on 2026-1
 df -h /c
 du -sh C:/Users/Casey/mesh-terrain-data/spike-capture C:/Users/Casey/mesh-terrain-data/meshstl-capture
 docker stop mesh-spike-capture && docker rm mesh-spike-capture
-docker run -d --name mesh-spike-capture --restart unless-stopped \
+docker run -d --name mesh-spike-capture --restart on-failure \
   -v C:/Users/Casey/mesh-terrain-data/spike-capture:/data \
   -e MQTT_HOST=mqtt.meshtastic.org -e MQTT_PORT=1883 \
   -e MQTT_USER=meshdev -e MQTT_PASSWORD=large4cats \
-  -e "MQTT_TOPICS=msh/US/#" -e CAPTURE_THIN=1 mesh-spike
+  -e "MQTT_TOPICS=msh/US/#" -e END_AT=2026-10-24T16:11:33+00:00 \
+  -e CAPTURE_THIN=1 mesh-spike
 ```
 
 Check either capture is alive: one `flush` line a minute with `count`, `bytes`, `path`, `duration_s` and `last_message_age_s`, and one new file an hour.
@@ -72,7 +79,7 @@ docker stop mesh-spike-capture
 docker stop mesh-meshstl-capture
 ```
 
-Run the analysis. The committed scripts are mounted over the image's copies, so the image a capture runs from never needs a rebuild. `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting `/data` into a Windows path. About 70 seconds for 4 hours of public data on 12 cores.
+Run the analysis. The committed scripts are mounted over the image's copies, so the image a capture runs from never needs a rebuild. `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting `/data` into a Windows path. It reads the gzipped hours directly.
 
 ```
 MSYS_NO_PATHCONV=1 docker run --rm \
@@ -83,7 +90,16 @@ MSYS_NO_PATHCONV=1 docker run --rm \
   mesh-spike python /spike/analyze.py /data /seeds/msa_boundary.csv /bounds/states_mo_il.csv
 ```
 
-The MeshSTL capture: the same command with `meshstl-capture` as `/data`. To compare the two brokers on the same hours, add `--start` and `--end` with the MeshSTL window to the public run.
+The runs behind `results.md`, all with the command above plus:
+
+| run | `/data` | extra arguments |
+| --- | --- | --- |
+| public, full capture | `spike-capture` | none |
+| public, regional roots only | `spike-capture` | `--roots MO,IL,MeshSTL` |
+| public, shared 24 hours | `spike-capture` | `--start 2026-10-23T22:08:59+00:00 --end 2026-10-24T22:08:59+00:00` |
+| MeshSTL, its 24 hours | `meshstl-capture` | the same `--start` and `--end` |
+| public with MeshSTL positions | `spike-capture` | the same window plus `--positions-from /bounds/meshstl-capture` |
+| MeshSTL with public positions | `meshstl-capture` | the same window plus `--positions-from /bounds/spike-capture` |
 
 ## Boundaries
 
@@ -106,4 +122,4 @@ The MeshSTL capture: the same command with `meshstl-capture` as `/data`. To comp
 
 ## Results
 
-The measurement tables are in `results.md` beside this file, interim until the captures end.
+The measurement tables are in `results.md` beside this file. They are final.
