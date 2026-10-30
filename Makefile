@@ -25,6 +25,7 @@ DBT_ARGS := --project-dir dbt --profiles-dir dbt
 help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
 	@echo "make down       stop the stack and remove its volumes"
+	@echo "                (up and down are the only start and stop; no service restarts on its own)"
 	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
 	@echo "make check-itm  load the ITM library in the Dagster image and reproduce the ADR 0002 figure"
 	@echo "make fmt        ruff format and autofix"
