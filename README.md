@@ -12,7 +12,7 @@ make check   # ruff, mypy, pytest, dbt deps and dbt build against the local stac
 make down    # stops the stack and removes its volumes
 ```
 
-`make up` and `make down` are the only way to start and stop the stack. Every Compose service has `restart: "no"`, so opening Docker Desktop or restarting the machine starts nothing; run `make up` again. Do not start or stop the services with `docker compose up`, `docker start` or the Docker Desktop buttons: they skip the health and exit-code checks in `docker/wait-for-stack.sh`.
+`make up` and `make down` are the only way to start and stop the stack. Every Compose service has `restart: "no"`, so opening Docker Desktop or restarting the machine starts nothing; run `make up` again. Start with `make up`, not `docker compose up`, `docker start` or the Docker Desktop buttons, which skip the health and exit-code checks in `docker/wait-for-stack.sh`. Stop with `make down`, which removes the containers so the next `make up` starts clean. While the Norton build issue in `docs/STATUS.md` (Known issues) is open, Casey's machine starts the stack with `docker compose up --no-build --detach` followed by `bash docker/wait-for-stack.sh`.
 
 `make up` copies `.env.example` to `.env` if it is missing. Dagster is at http://localhost:3000, the warehouse at localhost:5433 (database `mesh_terrain`, user `mesh`), the object store API at localhost:9000 and its console at localhost:9001 (user `minio`). `make fmt` formats; `make reproduce` will rebuild every asset from the raw zone once Phase 1 lands the loader.
 
@@ -57,4 +57,4 @@ openssl x509 -inform der -in ~/.certs/norton-root.cer -out ~/.certs/norton-root.
 cat .venv/Lib/site-packages/certifi/cacert.pem ~/.certs/norton-root.pem > ~/.certs/ca-bundle.pem
 ```
 
-Then in `.env`: `SSL_CERT_FILE=C:/Users/<you>/.certs/ca-bundle.pem` and `REQUESTS_CA_BUNDLE=C:/Users/<you>/.certs/ca-bundle.pem`. Container builds are unaffected.
+Then in `.env`: `SSL_CERT_FILE=C:/Users/<you>/.certs/ca-bundle.pem` and `REQUESTS_CA_BUNDLE=C:/Users/<you>/.certs/ca-bundle.pem`. Running containers are unaffected, but an image build that downloads packages is not: see the Norton build issue under Known issues in `docs/STATUS.md`.
