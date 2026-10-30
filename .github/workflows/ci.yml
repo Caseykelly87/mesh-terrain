@@ -75,6 +75,13 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --frozen
+      # Casey decided that nothing in this project starts on its own (PR #12),
+      # so a restart policy other than "no" fails here. The Phase 1 ingester
+      # will use on-failure; exclude it from this check when it lands.
+      - name: check that no service restarts on its own
+        run: |
+          make env
+          docker compose config --format json | jq -e '[.services[].restart] | all(. == "no")'
       - run: make up
       # The ITM library is compiled in a build stage of the Dagster image
       # (ADR 0002); loading it and reproducing the spike's flat-path figure
