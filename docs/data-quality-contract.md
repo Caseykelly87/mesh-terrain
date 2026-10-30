@@ -41,7 +41,7 @@ Identifiers are stable. Tests are named `assert_<identifier>` (dbt singular) or 
 
 | Id | Rule | Enforced by |
 | --- | --- | --- |
-| `prv_01` | No raw node id exists in any table outside `raw` and `staging`. | singular test scanning information_schema for `node_id` columns in `core`, `features`, `analytics` |
+| `prv_01` | No real identifier exists on disk (ADR 0005). | ingester test that every node, gateway and neighbour id is written as its HMAC pseudonym; singular test scanning information_schema for `node_id` columns in every schema |
 | `prv_02` | Public exports contain pseudonymised ids only and no node names. | export asset test |
 | `prv_03` | Hex cells with fewer than 5 link-hours are null in public outputs. | singular test on `analytics.mart_hex` |
 
