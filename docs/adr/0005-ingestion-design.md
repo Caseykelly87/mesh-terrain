@@ -28,11 +28,20 @@ Evidence, public broker, full capture, 63.594 observed hours, uncompressed JSON 
 | internet copies (via_mqtt, header-only) | 74 314 521 | 4.936 | 88.6% |
 | radio deliveries | 4 262 147 | 0.376 | 6.7% |
 | regional roots MO, IL and MeshSTL only | 158 099 | 0.017 | |
+| regional roots MO and MeshSTL only | 116 260 | 0.013 | |
 | MeshSTL broker, its 24 hours | 23 946 | 0.006 | |
 
-The full capture was 14.755 GB, 232 MB an hour. Under the regional roots there were only 9 internet copies in 63.594 hours, and the MeshSTL broker sends none.
+The full capture was 14.755 GB, 232 MB an hour. Under the MO, IL and MeshSTL roots there were only 9 internet copies in 63.594 hours, so at most 9 under MO and MeshSTL, and the MeshSTL broker sends none.
 
-Parquet compression of the spike's raw records: pending, filled by the lead.
+Parquet compression of the spike's raw records (results.md, "Volume"): the 64 gzipped public hours of the main segment, 2026-10-22T16 to 2026-10-25T07, 63.527 observed hours, each converted on its own to zstd Parquet with pyarrow 21.0.0 (columns `received_at` as a UTC timestamp, `topic`, `payload` as bytes), then read back and checked against its gzip file on row count and an order-preserving sha256; all 64 match. That is 81 251 409 rows; the 2 lines not converted are truncated JSON at the 07:43Z stop.
+
+| form | GB | GB per day |
+| --- | --- | --- |
+| JSON lines | 14.728 | 5.564 |
+| gzip | 2.740 | 1.035 |
+| Parquet, zstd | 0.583 | 0.220 |
+
+JSON lines to Parquet is 25.27 times smaller, JSON lines to gzip 5.37 times, gzip to Parquet 4.70 times; one hour of Parquet is 7.0 to 13.9 MB. These rows keep the payload bytes, the spike's shape, so they are an upper bound for the allowlisted, payload-free rows of decision 2, not the production size.
 
 Text messages: 142 003 decoded TEXT_MESSAGE_APP packets on the public broker over the capture (5.3 percent of decoded packets) and 38 on the MeshSTL broker in 24 hours. Decoding: wrong-key noise occasionally parses with a negative portnum (3 packets in 63.594 hours). Restarts: the spike containers ran past their windows under `--restart unless-stopped`, and Docker Desktop restarted them on 2026-10-28 (ADR 0003, Consequences).
 
@@ -46,7 +55,7 @@ Subscription scope, from results.md, "Subscription scope". Each row counts the r
 | `msh/US/2` (default root) | 151 | 2.6% | 0 of 320 | 0.0% | 0 of 447 | 0.0% |
 | MeshSTL and MO together | 5 609 | 97.4% | 320 of 320 | 100.0% | 447 of 447 | 100.0% |
 
-A simulated subscription to the regional roots only (`analyze.py --roots MO,IL,MeshSTL`, so positions and relayer candidates also come only from those roots) gives MSA weekly figures against the full subscription of 104 against 110 (keep 30 minutes, 500 m), 185 against 168 (stationarity window, 500 m) and 852 against 852 (gateway-only), and cuts volume from 5.568 GB a day to 0.017 GB a day.
+A simulated subscription to the regional roots only (`analyze.py --roots MO,IL,MeshSTL`, so positions and relayer candidates also come only from those roots) gives MSA weekly figures against the full subscription of 104 against 110 (keep 30 minutes, 500 m), 185 against 168 (stationarity window, 500 m) and 852 against 852 (gateway-only), and cuts volume from 5.568 GB a day to 0.017 GB a day. Rerun with MO and MeshSTL only (`--roots MO,MeshSTL`), it gives the same MSA figures in every row: keep 30 minutes 104 at 500 m and 101 at 3 km, stationarity 185 and 178, gateway-only 852, positions ignored 1 194, from 116 260 records, 34.7 MB, 0.013 GB a day. Dropping IL loses nothing in the metro.
 
 ## Options
 
@@ -75,7 +84,7 @@ A simulated subscription to the regional roots only (`analyze.py --roots MO,IL,M
    - Parquet per flush with hourly compaction. Advantage: one file an hour once compacted. Cost: compaction rewrites files.
 7. Subscription scope on the public broker.
    - `msh/US/#`. Advantage: everything. Cost: 5.568 GB a day for no extra metro link-hour.
-   - MO, IL and MeshSTL. Advantage: every metro link-hour. Cost: IL adds volume and no metro receipt.
+   - MO, IL and MeshSTL. Advantage: every metro link-hour. Cost: IL adds 0.004 GB a day (0.017 against 0.013) and no metro receipt or link-hour.
    - MeshSTL and MO. Advantage: every metro link-hour (320 of 320 and 447 of 447). Cost: drops the default root's 2.6 percent of relayed metro receipts, which carry no link-hour.
    - MeshSTL only. Advantage: the smallest feed. Cost: loses 1.2 and 0.9 percent of the link-hours.
 8. Modem preset.
@@ -84,7 +93,7 @@ A simulated subscription to the regional roots only (`analyze.py --roots MO,IL,M
 
 ## Decision
 
-1. Continuous ingestion from Phase 1. The ingester runs until MAX_RAW_BYTES (default 10 GB, measured on the landing folder at each flush) or an optional END_AT, then flushes, writes a halt marker with the reason and byte count, logs at error and exits 0. Its restart policy is on-failure, so a crash restarts it and a halt does not. A Dagster asset check surfaces the halt marker, and a make target resumes. Worked example: at the `msh/US/#` rate in JSON lines, 5.568 GB a day, 10 GB trips in about 43 hours. At the decided scope in the same JSON lines terms, 0.017 GB a day from the public regional roots (which still include IL) plus 0.006 from the MeshSTL broker, it takes about 435 days, well over a year; Parquet of allowlisted fields is smaller still.
+1. Continuous ingestion from Phase 1. The ingester runs until MAX_RAW_BYTES (default 10 GB, measured on the landing folder at each flush) or an optional END_AT, then flushes, writes a halt marker with the reason and byte count, logs at error and exits 0. Its restart policy is on-failure, so a crash restarts it and a halt does not. A Dagster asset check surfaces the halt marker, and a make target resumes. Worked example: at the `msh/US/#` rate in JSON lines, 5.568 GB a day, 10 GB trips in about 43 hours; as zstd Parquet with payloads, 0.220 GB a day, in about 45 days. At the decided scope in JSON lines terms, 0.013 GB a day from the public MO and MeshSTL roots plus 0.006 from the MeshSTL broker, it takes about 526 days, well over a year; Parquet of allowlisted fields is smaller still.
 2. No raw bytes are stored for any packet type. Each row carries decoder_version and schema_version. Replayability comes from committed fixtures per packet type, not from an archive. The decoder rejects a portnum of 0 or below.
 3. Node and gateway ids pass through HMAC-SHA-256 with a key from the environment before landing. No real id, long name, short name or public key is ever written. Hardware model and role are kept. The dbt-side hash is removed, and contract rule `prv_01` is restated as "no real identifier exists on disk".
 4. Only allowlisted fields land.
@@ -124,7 +133,6 @@ Ingester (ingest-eng unless stated):
 - Fixtures per packet type under `tests/fixtures/mqtt/` are the replay mechanism, a text message included so the contract test has something to catch. Under the restated `prv_01` they are built, not recorded as they are: made-up node and gateway ids, invented text, re-encrypted with the default key (the nonce uses packet id and sender id, so a changed sender means re-encrypting). A decoder change bumps decoder_version; a change to the landed columns bumps schema_version. Rows from a faulty decoder cannot be corrected, only found by decoder_version and excluded.
 - How the allowlisted fields split into Parquet tables (one wide table or one per packet type) and their names are open; ingest-eng proposes them with warehouse-eng in the Phase 1 brief. On the object store the landing folder for MAX_RAW_BYTES is the bucket prefix.
 - Modem preset: in `msh/US/MeshSTL/2/e/LongFast/!gatewayid` the channel segment is the channel name, which equals the preset name only on default channels (seen: LongFast, LongTurbo; custom names seen: NerdStuff, secure). The parser maps known preset names and leaves the preset null for custom names. The validation model treats null as its own level or excludes it; analytics-eng decides in Phase 4.
-- The scope simulation included IL. IL carries no metro receipt, but its positions or relayer candidates could still feed a metro link; rerun `analyze.py --roots MO,MeshSTL` before the first week of ingestion to confirm the figures hold.
 - Docker documents that on-failure does not restart a container when the daemon restarts. A container running when Docker Desktop quits records a non-zero exit (255 for the warehouse and object store on 2026-10-28). Verify on Casey's host that the ingester is not restarted then (PR #12, Status). If it is not, ingestion stops until resumed and `ing_05` freshness is the alarm (platform-eng and ingest-eng).
 
 Other agents:
