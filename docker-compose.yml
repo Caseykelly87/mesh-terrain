@@ -20,9 +20,9 @@ x-dagster-environment: &dagster-environment
   LOG_FORMAT: json
 
 # Every service sets restart: "no", so nothing in this project starts unless
-# `make up` starts it. Docker Desktop restarts unless-stopped and always
-# services whenever its engine starts, even when it was opened for something
-# unrelated, and unless-stopped also restarts a container after a clean exit 0.
+# `make up` starts it. The Docker engine restarts always containers, and
+# unless-stopped containers not stopped by hand, whenever it starts;
+# unless-stopped also restarts a container after a clean exit.
 services:
   warehouse:
     build:
