@@ -328,9 +328,9 @@ class Tally:
             self.counts[("port", str(parsed.portnum))] += 1
         if parsed.kind == "e" and parsed.status != "malformed" and parsed.sender:
             self.add_header(parsed)
+            if parsed.region:
+                self.add_regional(parsed)
         self.add_payload(parsed)
-        if parsed.region and parsed.kind == "e":
-            self.add_regional(parsed)
 
     def add_header(self, parsed: Parsed) -> None:
         mode = "mqtt" if parsed.via_mqtt else "rf"

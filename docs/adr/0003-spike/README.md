@@ -4,7 +4,7 @@ Evidence for `docs/adr/0003-direct-link-and-position-source.md`: a capture of th
 
 ## Brokers and topics
 
-Public broker, from the Meshtastic docs (`https://meshtastic.org/docs/software/integrations/mqtt/` and `https://meshtastic.org/docs/configuration/module/mqtt/`): host `mqtt.meshtastic.org`, port 1883, username `meshdev`, password `large4cats`. Gateways publish protobuf `ServiceEnvelope` messages to `msh/REGION/2/e/CHANNELNAME/!gatewayid`. The default root for the United States is `msh/US`, and many communities insert a state or group segment (`msh/US/MO/2/e/...`, `msh/US/MeshSTL/2/e/...`). JSON copies go to `.../2/json/...`, map reports to `.../2/map/`, and status strings to `.../2/stat/`. The capture subscribes to `msh/US/#`. Measured over 63.594 observed hours: 1.28 million messages and 232 MB of JSON lines an hour, 5.57 GB a day, 88.6 percent of it header-only via_mqtt copies. The hourly files were gzipped in place after the capture (64 files, 2.6 GB) and are read directly; a verified zstd Parquet copy of each hour sits in `C:/Users/Casey/mesh-terrain-data/spike-parquet/` (columns `received_at`, `topic`, `payload` as bytes).
+Public broker, from the Meshtastic docs (`https://meshtastic.org/docs/software/integrations/mqtt/` and `https://meshtastic.org/docs/configuration/module/mqtt/`): host `mqtt.meshtastic.org`, port 1883, username `meshdev`, password `large4cats`. Gateways publish protobuf `ServiceEnvelope` messages to `msh/REGION/2/e/CHANNELNAME/!gatewayid`. The default root for the United States is `msh/US`, and many communities insert a state or group segment (`msh/US/MO/2/e/...`, `msh/US/MeshSTL/2/e/...`). JSON copies go to `.../2/json/...`, map reports to `.../2/map/`, and status strings to `.../2/stat/`. The capture subscribes to `msh/US/#`. Measured over 63.594 observed hours: 1.28 million messages and 232 MB of JSON lines an hour, 5.57 GB a day, 88.6 percent of it header-only via_mqtt copies. The hourly files were gzipped in place after the capture (64 files, 2.740 GB) and are read directly; a verified zstd Parquet copy of each hour sits in `C:/Users/Casey/mesh-terrain-data/spike-parquet/` (columns `received_at`, `topic`, `payload` as bytes).
 
 MeshSTL broker, from `https://meshstl.org` (section `#mqtt-settings` for the server and credentials, `#channels` for the channel keys): host `mqtt.meshstl.org`, port 1883, no TLS, root topic `msh/US/MeshSTL`. The username and password are posted on that page and are not copied here or anywhere in the repo; the container reads them from `C:/Users/Casey/mesh-terrain-data/meshstl.env` (outside the repo). The MeshSTL channel key on the same page is never used: the analysis decrypts the default key only, so MeshSTL-channel packets show as `decrypt_failed: wrong_key`.
 
@@ -17,31 +17,36 @@ MeshSTL broker, from `https://meshstl.org` (section `#mqtt-settings` for the ser
 
 ## Commands
 
-Both captures are finished. These are the commands for a rerun. Every capture gets an `END_AT` and `--restart on-failure`. The script halts itself at `END_AT` or at `MAX_RAW_BYTES` (default 10 GB of capture files in the folder, checked after each flush): it flushes, writes `HALTED.json` (reason, time, bytes), logs `halt` at error and exits 0, so `on-failure` leaves it stopped. A start that finds `HALTED.json` exits 0 at once; deleting the marker is the only way to resume. Never use `--restart unless-stopped` or `always`: Docker restarts those whenever Docker Desktop starts, and `unless-stopped` restarts a clean exit too. That is how both captures restarted on 2026-10-28 (ADR 0003, Consequences).
+Both captures are finished. These are the commands for a rerun. Every capture gets an `END_AT` and `--restart on-failure`. The script halts itself at `END_AT` or at `MAX_RAW_BYTES` (default 10 000 000 000 bytes of `capture-*` files in the folder, checked after the once-a-minute flush): it flushes, writes `HALTED.json` (reason, time, bytes), logs `halt` at error and exits 0, so `on-failure` leaves it stopped. A start that finds `HALTED.json` exits 0 at once; deleting the marker is the only way to resume.
+
+Stops before `END_AT`. A SIGTERM (`docker stop`, or Docker Desktop quitting) flushes and exits 0 with no marker, so `on-failure` does not restart it: the capture ends early, and the `stop` log line and the last file's time are the only record. If Docker kills it instead (exit 137), `on-failure` restarts it when the engine next starts, and the startup check writes the marker if `END_AT` has passed. Never use `--restart unless-stopped` or `always`. `unless-stopped` restarts after any exit, a clean one included, and on every engine start unless the container was stopped with `docker stop`; Docker Desktop quitting is not such a stop. That is how both captures restarted on 2026-10-28 (ADR 0003, Consequences).
+
+Every rerun writes to a new, empty folder: the byte cap counts every `capture-*` file already there, and new hours would mix with the spike's in the analysis. Set `END_AT` to the planned end and `MAX_RAW_BYTES` above the expected volume (the public broker writes about 232 MB an hour, so 48 hours is about 11.1 GB). The values in angle brackets below are placeholders.
 
 Build the image and start the public capture (from the repository root, Git Bash):
 
 ```
 docker build -t mesh-spike docs/adr/0003-spike
-mkdir -p C:/Users/Casey/mesh-terrain-data/spike-capture
+mkdir -p C:/Users/Casey/mesh-terrain-data/<new-public-folder>
 docker run -d --name mesh-spike-capture --restart on-failure \
-  -v C:/Users/Casey/mesh-terrain-data/spike-capture:/data \
+  -v C:/Users/Casey/mesh-terrain-data/<new-public-folder>:/data \
   -e MQTT_HOST=mqtt.meshtastic.org -e MQTT_PORT=1883 \
   -e MQTT_USER=meshdev -e MQTT_PASSWORD=large4cats \
-  -e "MQTT_TOPICS=msh/US/#" -e END_AT=2026-10-24T16:11:33+00:00 mesh-spike
+  -e "MQTT_TOPICS=msh/US/#" -e END_AT=<YYYY-MM-DDTHH:MM:SS+00:00> \
+  -e MAX_RAW_BYTES=<bytes> mesh-spike
 ```
 
 Start the MeshSTL capture (only when the lead says Casey has posted his courtesy note). The env file holds `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER`, `MQTT_PASSWORD`, `MQTT_TOPICS=msh/US/MeshSTL/#` and `DATA_DIR=/data`:
 
 ```
-mkdir -p C:/Users/Casey/mesh-terrain-data/meshstl-capture
+mkdir -p C:/Users/Casey/mesh-terrain-data/<new-meshstl-folder>
 docker run -d --name mesh-meshstl-capture --restart on-failure \
   --env-file C:/Users/Casey/mesh-terrain-data/meshstl.env \
-  -e END_AT=2026-10-24T22:08:59+00:00 \
-  -v C:/Users/Casey/mesh-terrain-data/meshstl-capture:/data mesh-spike
+  -e END_AT=<YYYY-MM-DDTHH:MM:SS+00:00> \
+  -v C:/Users/Casey/mesh-terrain-data/<new-meshstl-folder>:/data mesh-spike
 ```
 
-Check a halt: `cat C:/Users/Casey/mesh-terrain-data/spike-capture/HALTED.json` and `docker inspect -f '{{.State.ExitCode}} {{.RestartCount}}' mesh-spike-capture` (expect `0 0`).
+Check a halt: `cat C:/Users/Casey/mesh-terrain-data/<new-public-folder>/HALTED.json` and `docker inspect -f '{{.State.ExitCode}} {{.RestartCount}}' mesh-spike-capture` (expect `0 0`).
 
 Ten-minute rate check, after the container has run ten minutes. The `total` field of the last flush line divided by the minutes elapsed is the message rate; the file size divided by the minutes elapsed times 1 440 is the daily volume:
 
@@ -57,11 +62,11 @@ df -h /c
 du -sh C:/Users/Casey/mesh-terrain-data/spike-capture C:/Users/Casey/mesh-terrain-data/meshstl-capture
 docker stop mesh-spike-capture && docker rm mesh-spike-capture
 docker run -d --name mesh-spike-capture --restart on-failure \
-  -v C:/Users/Casey/mesh-terrain-data/spike-capture:/data \
+  -v C:/Users/Casey/mesh-terrain-data/<new-public-folder>:/data \
   -e MQTT_HOST=mqtt.meshtastic.org -e MQTT_PORT=1883 \
   -e MQTT_USER=meshdev -e MQTT_PASSWORD=large4cats \
-  -e "MQTT_TOPICS=msh/US/#" -e END_AT=2026-10-24T16:11:33+00:00 \
-  -e CAPTURE_THIN=1 mesh-spike
+  -e "MQTT_TOPICS=msh/US/#" -e END_AT=<same END_AT> \
+  -e MAX_RAW_BYTES=<bytes> -e CAPTURE_THIN=1 mesh-spike
 ```
 
 Check either capture is alive: one `flush` line a minute with `count`, `bytes`, `path`, `duration_s` and `last_message_age_s`, and one new file an hour.
@@ -79,7 +84,7 @@ docker stop mesh-spike-capture
 docker stop mesh-meshstl-capture
 ```
 
-Run the analysis. The committed scripts are mounted over the image's copies, so the image a capture runs from never needs a rebuild. `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting `/data` into a Windows path. It reads the gzipped hours directly.
+Run the analysis. The committed scripts are mounted at `/spike` and run from there instead of the image's copies in `/opt/spike`, so the image a capture runs from never needs a rebuild. `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting `/data` into a Windows path. It reads the gzipped hours directly.
 
 ```
 MSYS_NO_PATHCONV=1 docker run --rm \
@@ -109,14 +114,14 @@ The seven runs behind `results.md`, all with the command above plus:
 
 ## Definitions
 
-- Radio delivery: an envelope on an `e` topic that parses, has a sender, and has `via_mqtt` false. The reviewer's 82 812 is the radio deliveries in the file `capture-2026-10-22T18.jsonl` alone, the gateway's own packets included; `analyze.py` reproduces it on that file (53 406 without the gateway's own). The 271 208 at 3.68 hours is the same definition over 3.68 hours.
-- Radio receipt: a distinct (gateway, sender, packet id) among radio deliveries, the gateway's own packets excluded. Every link figure uses the radio receipts that carry `relay_node`. Candidates for the relayer are the senders the receiving gateway heard by radio anywhere in the capture; the ADR proposes the trailing 24 hours for production.
+- Radio delivery: an envelope on an `e` topic that parses, has a sender, and has `via_mqtt` false. The reviewer's 82 812 is the radio deliveries in the hour 2026-10-22T18Z (`capture-2026-10-22T18.jsonl.gz`), the gateway's own packets included; the hourly table in `results.md` prints it. The 271 208 at 3.68 hours is the same definition over 3.68 hours.
+- Radio receipt: a distinct (gateway, sender, packet id) among radio deliveries, the gateway's own packets excluded. Every link figure uses the radio receipts that carry `relay_node`. Candidates for the relayer are the senders the receiving gateway heard by radio anywhere in the capture, including after the receipt, so the measurement looks ahead; the ADR proposes the trailing 24 hours for production.
 - `lnk_06`: `rx_rssi` set and in [-140, 0] dBm, `rx_snr` in [-25, 15] dB.
 - (i) `relay_node`: if the byte equals the sender's own low byte, the relayer is the sender. Otherwise it is the one candidate with that low byte, or unresolved when there are none or several. `relay_node_strict` drops the own-byte shortcut.
 - (ii) NeighborInfo: the candidates are the neighbours listed in the gateway's own NeighborInfo reports, matched the same way.
 - (iii) combined: (i) or (ii), dropped when both resolve and disagree.
 - `lnk_02`, 30-minute rule: the usable position (15 bits or more) closest in time for each end, within 30 minutes. A failure is attributed to the relayer first, then the gateway, under: no position in the capture, a position only outside the area, below 15 bits, or usable but outside the window.
-- Stationarity rule (addendum 2b): a node whose every position in the capture is one box (same quantised latitude, longitude and bits) gets that box for every receipt; other nodes fall back to the 30-minute rule. The capture window stands in for the 7-day window production would use.
+- Stationarity rule (addendum 2b): a node whose every position in the capture is one box (same quantised latitude, longitude and bits) gets that box for every receipt; other nodes fall back to the 30-minute rule. The capture window stands in for the trailing 7-day window production would use; unlike it, the capture includes positions sent after the receipt.
 - Gateway-only fallback: the relayer is resolved and the gateway is positioned; no relayer position and no distance. The 500 m and 3 km columns do not apply.
 - Overlapping boxes (addendum 2c): two position boxes that share ground have no single distance, only a range from 0 m to the larger box's diagonal (926 m at 16 bits, 1 852 m at 15 bits). They get their own funnel row and never a link-hour.
 - `lnk_04` and the 3 km test: at least 3 receipts in the (relayer, gateway, clock hour) group, tested on the median distance of the group.

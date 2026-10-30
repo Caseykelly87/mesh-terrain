@@ -12,7 +12,7 @@ Every rate divides by observed hours: the sum of a capture's segments, where a s
 | public broker, shared window | 2026-10-23T22:08:59Z to 2026-10-24T22:08:58Z | 24.000 | 6.850 | 17.150 |
 | MeshSTL broker | 2026-10-23T22:09:00Z to 2026-10-24T22:08:51Z | 23.998 | 6.850 | 17.148 |
 
-Fragment 1 is the four minutes the public capture wrote after Docker Desktop restarted it on 2026-10-28 (ADR 0003, Consequences). It is inside every public total and labelled in the hourly curve; it adds 0.067 observed hours and 5 metro radio receipts. The wall clock from the first public record to the last is 148.56 hours, and no rate uses it. The MeshSTL capture also ran past its window: its 9 881 records after 2026-10-24T22:08:59Z, its own four-minute fragment on 2026-10-28 included, are outside `--end` and in no table.
+Fragment 1 is the four minutes the public capture wrote after Docker Desktop restarted it on 2026-10-28 (ADR 0003, Consequences). It is inside every public total and labelled in the hourly curve; it adds 0.067 observed hours and 5 metro relayed radio receipts. The wall clock from the first public record to the last is 148.56 hours, and no rate uses it. The MeshSTL capture also ran past its window: its 9 881 records after 2026-10-24T22:08:59Z, its own four-minute fragment on 2026-10-28 included, are outside `--end` and in no table.
 
 ## Headline: link-hours in the MSA
 
@@ -38,9 +38,9 @@ Observed link-hours behind the first three columns, with distinct (relayers, gat
 | gateway-only fallback | 320 (23, 16, 28) | 128 (18, 10, 19) | 200 (26, 14, 28) |
 | positions ignored | 447 (36, 25, 46) | 170 (26, 15, 27) | 332 (39, 22, 43) |
 
-Widening check (f), combined rule at 3 km against 300 link-hours a week: public 107, triggered; MeshSTL 281, triggered (its stationarity row, 309, would not be). Missouri plus Illinois on the public broker, full capture: keep 30 minutes 116 a week at 500 m and 113 at 3 km, stationarity 364 and 357, gateway-only 1 387; widening the area adds 6 link-hours a week under the contract rule as written.
+Widening check (f), combined rule at 3 km against 300 link-hours a week: public 107, triggered; MeshSTL 281, triggered (its stationarity row, 309, would not be). The MeshSTL weekday rate rests on 6.85 hours, all Friday evening (17:09 to 24:00 CDT): stationarity at 3 km is 13 link-hours in those hours, 1.90 an hour. Unweighted, the same row is 294 a week, under 300, so whether MeshSTL clears the threshold depends on that one evening. Missouri plus Illinois on the public broker, full capture: keep 30 minutes 116 a week at 500 m and 113 at 3 km, stationarity 364 and 357, gateway-only 1 387. Under the contract rule as written, widening the area adds 6 link-hours a week; under the stationarity rule it adds 196 at 500 m and 195 at 3 km, and Missouri plus Illinois clears 300 where the MSA (162) does not.
 
-Flat against weighted: over the full public capture they agree within 1 percent (gateway-only 845 flat, 852 weighted). The shared window is mostly weekend (17.15 of 24 hours), so weighting raises its figures, for example 147 flat to 177 weighted for keep 30 minutes at 500 m.
+Flat against weighted, full public capture: within 2.4 percent in every row (stationarity at 500 m 164 flat against 168 weighted, at 3 km 159 against 162, positions ignored 1 181 against 1 194, gateway-only 845 against 852). The shared window is mostly weekend (17.15 of 24 hours), so weighting raises its figures, for example 147 flat to 177 weighted for keep 30 minutes at 500 m.
 
 Contract-rule link-hours grow with capture length: the public MSA had 0 after 4 observed hours, 13 after 24, 34 after 48 and 42 after 63.59, from at most 2 relayers and 4 gateways. The interim 4.38-hour figure of zero was a short-window artefact, not a property of the broker.
 
@@ -58,7 +58,7 @@ Per local day, counts divided by that day's observed hours:
 
 Nationally, records per hour fall from 1.45 million on Thursday to 1.17 million on Saturday, and all of the fall is in internet copies (1.37 million to 1.05 million an hour). Radio deliveries hold at 66 000 to 68 000 an hour every day. In the MSA, gateway-only link-hours run 5.08, 5.21 and 4.96 an hour on Thursday, Friday and Saturday; Sunday's 4.04 covers 2.72 overnight hours only. The weekday rate is 5.15 and the weekend rate 4.87, so the weighting moves a week by under 1 percent. No hour of the main segment is empty.
 
-Hour by hour (observed minutes below 60 are the partial first and last hours and the fragment):
+Hour by hour (observed minutes below 60 are the partial first and last hours and the fragment). "Area radio receipts" in both tables counts relayed radio receipts at MSA gateways, those carrying `relay_node`; they sum to 5 760.
 
 | hour UTC | local CDT | segment | observed min | records | radio deliveries | internet copies | area radio receipts | contract 500 m | gateway-only | positions ignored |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -139,7 +139,7 @@ This table decides ADR 0005 item 7. Full public capture, distinct radio receipts
 | msh/US/MeshSTL | 6 234 | 93.3% | 5 479 | 95.1% |
 | other msh/US | 151 | 2.3% | 151 | 2.6% |
 
-All 151 "other" receipts arrived under `msh/US/2`, the default root with no region segment. Link-hours kept when only receipts under the given roots are counted (positions and relayer candidates still from the whole capture), per week weighted:
+All 151 "other" receipts arrived under `msh/US/2`, the default root with no region segment. In the table below, MO, IL and MeshSTL together keep all 320 gateway-only and all 447 positions-ignored link-hours, so receipts under `msh/US/2` add none in either row. Link-hours kept when only receipts under the given roots are counted (positions and relayer candidates still from the whole capture), per week weighted:
 
 | receipts counted from | gateway-only | share | per week | positions ignored | share | per week |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -149,7 +149,7 @@ All 151 "other" receipts arrived under `msh/US/2`, the default root with no regi
 | IL only | 0 | 0.0% | 0 | 0 | 0.0% | 0 |
 | MeshSTL only | 316 | 98.8% | 839 | 443 | 99.1% | 1 181 |
 
-A simulated subscription (`--roots MO,IL,MeshSTL`, so positions and relayer candidates also come only from those roots), MSA, per week weighted against the full subscription: keep 30 minutes 104 against 110 at 500 m and 101 against 107 at 3 km; stationarity 185 against 168 and 178 against 162; gateway-only 852 and positions ignored 1 194, both unchanged. Fewer candidates leave fewer ambiguous low bytes, which is why the stationarity rows rise; the 30-minute rule loses 2 of 42 link-hours whose positions arrived under `msh/US/2`. The raw volume falls from 5.568 GB a day to 0.017 GB a day. Dropping IL as well (`--roots MO,MeshSTL`) gives the same MSA figures in every row, so IL's positions and relayer candidates feed no metro link, and the volume falls to 116 260 records, 34.7 MB, 0.013 GB a day.
+A simulated subscription (`--roots MO,IL,MeshSTL`, so positions and relayer candidates also come only from those roots), MSA, per week weighted against the full subscription: keep 30 minutes 104 against 110 at 500 m and 101 against 107 at 3 km; stationarity 185 against 168 and 178 against 162; gateway-only 852 and positions ignored 1 194, both unchanged. Relayer resolution barely moves (4 604 resolved receipts become 4 601), so the changes come from positions: with fewer positions, usable MSA nodes fall from 58 to 55 and stationary ones from 35 to 34, a different set of nodes counts as stationary, and relayers usable but outside the 30-minute window rise from 344 to 358. The 30-minute rule loses 2 of 42 link-hours; the stationarity rule gains. The raw volume falls from 5.568 GB a day to 0.017 GB a day. Dropping IL as well (`--roots MO,MeshSTL`) gives the same MSA link-hours in every row (two funnel rows differ by one receipt), so IL's positions and relayer candidates feed no metro link, and the volume falls to 116 260 records, 34.7 MB, 0.013 GB a day.
 
 ## Volume
 
@@ -157,7 +157,7 @@ Public broker, full capture, uncompressed JSON lines as the spike stores them (b
 
 | copy class | records | GB | share of bytes | GB per day |
 | --- | --- | --- | --- | --- |
-| e, internet copy (via_mqtt, always header-only) | 74 314 521 | 13.080 | 88.6% | 4.936 |
+| e, internet copy (via_mqtt, header-only except 1 204) | 74 314 521 | 13.080 | 88.6% | 4.936 |
 | e, radio | 4 262 147 | 0.996 | 6.7% | 0.376 |
 | e, unparsed or no sender | 2 012 250 | 0.390 | 2.6% | 0.147 |
 | json | 448 218 | 0.214 | 1.4% | 0.081 |
@@ -165,7 +165,7 @@ Public broker, full capture, uncompressed JSON lines as the spike stores them (b
 | other and stat | 60 645 | 0.010 | 0.1% | 0.004 |
 | all | 81 338 604 | 14.755 | 100.0% | 5.568 |
 
-By topic root, the three regional roots together carry 158 099 records and 45.3 MB, 0.017 GB a day; everything else is under other `msh/US` roots. Internet copies kept as counts per (hour, topic, gateway) instead: 358 871 rows over 65 clock hours, median 3 978 rows an hour, about 135 000 rows a day. The MeshSTL broker, its 24 hours: 23 946 records, 6.5 MB, 0.006 GB a day.
+By topic root, the three regional roots together carry 158 099 records and 45.3 MB, 0.017 GB a day; everything else is under other `msh/US` roots. Only 9 internet copies arrive under the regional roots in 63.594 observed hours, all under `msh/US/IL`; none arrive under MO or MeshSTL. Of all 74 314 521 internet copies, 1 204 keep a payload (116 default key, 1 077 plaintext, 11 PKI). Internet copies kept as counts per (hour, topic, gateway) instead: 358 871 rows over 65 clock hours, median 3 978 rows an hour, about 135 000 rows a day. The MeshSTL broker, its 24 hours: 23 946 records, 6.5 MB, 0.006 GB a day.
 
 Compression, the 64 gzipped public hours (2026-10-22T16 to 2026-10-25T07, the main segment of 63.527 observed hours; the 2026-10-28T20 fragment stays plain JSON lines and is not converted). Each hour was converted on its own to Parquet with zstd (pyarrow 21.0.0, columns `received_at` as a UTC timestamp, `topic`, `payload` as decoded bytes), read back, and compared with its `.gz` on row count and on a sha256 over every (received_at, topic, payload) in file order before the next hour started. All 64 hours matched. The `.gz` files are kept.
 
@@ -192,17 +192,19 @@ Rows: 81 251 409, from 81 251 411 lines; the 2 others are truncated JSON lines i
 
 Decode status, all envelopes: stripped 93.3%, ok 3.3%, malformed 2.5%, decrypt_failed 0.9%. On radio deliveries: ok 57.2% (default key 47.3%, plaintext 9.9%), stripped 25.8%, wrong key 10.2%, PKI 6.9%. Distinct radio receipts, gateway's own excluded: 546 360, of which 461 099 carry `relay_node`; those resolve to one sender heard by the same gateway in 63.6%, several in 19.8%, none in 16.6%. The OK to MQTT bit is set on 74.8% of packets that keep a payload.
 
-Decoded portnums: Position 38.9%, NodeInfo 20.2%, Telemetry 14.7%, MapReport 8.6%, Routing 8.1%, Text 5.3%, Traceroute 4.1%. Seven more appear once each: three negative numbers, which are wrong-key noise that happened to parse (`analyze.py` rejects portnum 0 but not a negative one; the Phase 1 decoder rejects portnum 0 or below), SERIAL_APP, NODE_STATUS_APP and the unassigned 92 and 102. NeighborInfo 0. Position packets at 20 bits or more: 142, from 20 nodes nationally.
+Decoded portnums: Position 38.9%, NodeInfo 20.2%, Telemetry 14.7%, MapReport 8.6%, Routing 8.1%, Text 5.3% (142 003 TEXT_MESSAGE_APP packets), Traceroute 4.1%. Seven more appear once each: three negative numbers, which are wrong-key noise that happened to parse (`analyze.py` rejects portnum 0 but not a negative one; the Phase 1 decoder rejects portnum 0 or below), SERIAL_APP, NODE_STATUS_APP and the unassigned 92 and 102. NeighborInfo 0. Position packets at 20 bits or more: 142, from 20 nodes nationally.
 
 precision_bits on Position packets: national 15 or 16 bits 35.0%, 13 bits 40.7%; inside the MSA 15 or 16 bits 35.7%, 13 bits 39.1%, nothing above 16.
 
-Regional segments on the public broker (e topics, all radio):
+Regional segments on the public broker, radio deliveries on `e` topics (parsed, with a sender, via_mqtt false):
 
 | topic root | packets | per hour | gateways | senders | relayed | with payload | positions |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| msh/US/MeshSTL | 46 720 | 735 | 69 | 282 | 15.3% | 26.5% | 4 311 |
-| msh/US/MO | 20 633 | 324 | 20 | 511 | 30.4% | 81.0% | 1 955 |
-| msh/US/IL | 30 842 | 485 | 102 | 715 | 54.5% | 95.3% | 15 157 |
+| msh/US/MeshSTL | 18 378 | 289 | 68 | 282 | 38.9% | 67.3% | 4 311 |
+| msh/US/MO | 20 590 | 324 | 20 | 511 | 30.5% | 81.1% | 1 955 |
+| msh/US/IL | 30 828 | 485 | 101 | 715 | 54.5% | 95.4% | 15 157 |
+
+Another 28 342 records on `msh/US/MeshSTL` `e` topics do not parse as a `ServiceEnvelope` or have no sender: some MeshSTL gateways publish other payloads there. They are in the volume table as "e, unparsed or no sender" and in no link figure.
 
 Funnel, distinct radio receipts, combined rule, keep 30 minutes:
 
@@ -246,16 +248,16 @@ Sensitivity, combined rule, MSA, per week weighted at 500 m (not the contract ru
 
 No envelope arrives header-only and none is a via_mqtt copy: the broker forwards what its gateways upload. `relay_node` is set on 83.5% of radio deliveries (gateway's own excluded) and resolves to one sender heard by the same gateway for 77.6% of the 4 630 relayed receipts, several for 12.5%, none for 9.9%. Decode status on radio deliveries: ok 76.3% (default key 73.5%, plaintext 2.8%), wrong key 22.5% (MeshSTL's own channel, whose key is not used), PKI 0.9%.
 
-Decoded portnums: Position 27.5%, Routing 19.0%, NodeInfo 17.6%, Traceroute 13.6%, Telemetry 8.1%, Store and Forward 6.9%, MapReport 6.2%, NeighborInfo 0.6%, Text 0.2%, ATAK plugin 0.2%, Node status 0.2%; 11 in all, 54 packets unknown_port.
+Decoded portnums: Position 27.5%, Routing 19.0%, NodeInfo 17.6%, Traceroute 13.6%, Telemetry 8.1%, Store and Forward 6.9%, MapReport 6.2%, NeighborInfo 0.6%, Text 0.2% (38 packets), ATAK plugin 0.2%, Node status 0.2%; 11 in all, 54 packets unknown_port.
 
 NeighborInfo arrives: 104 packets (4.3 an hour), 11 reporters, 28 distinct (neighbour, reporter) pairs, median SNR 6.0 dB; 6 reporters are positioned in the MSA. As a link source on its own it gives 24 link-hours at 500 m (1 pair) and 0 at 3 km; in the combined rule it adds nothing over `relay_node`.
 
 precision_bits on Position packets: 15 bits or more on 40.8% nationally and 39.4% inside the MSA, against 35.7% in the MSA on the public broker; 17 to 19 bits on 4.5%; 32 bits on 4.2%. Position packets at 20 bits or more: 200, from 8 nodes.
 
-Funnel, MSA, combined rule, keep 30 minutes: 3 863 receipts with `relay_node`; 3 `lnk_06` failures; 676 unresolved; 3 184 resolved; relayer with no position 693, below 15 bits 993, outside the window 182; gateway below 15 bits 294, outside the window 103; 919 pass `lnk_02`; 200 overlapping boxes; 719 at 500 m to 60 km; 74 link-hours. Relayers resolved in the MSA: 58, of which 22 (37.9%) sent no decodable position, 18 only below 15 bits and 18 a usable one, p90 0.9 hours after their first receipt. Stationary usable nodes: 29 of 48.
+Funnel, MSA, combined rule, keep 30 minutes: 3 863 receipts with `relay_node`; 3 `lnk_06` failures; 676 unresolved; 3 184 resolved; relayer with no position 693, below 15 bits 993, outside the window 182; gateway below 15 bits 294, outside the window 103; 919 pass `lnk_02`; 200 overlapping boxes; 719 at 500 m to 60 km; 74 link-hours. Relayers resolved in the MSA: 58, of which 22 (37.9%) sent no decodable position (the funnel's relayer count is 23 because it uses the combined rule, and one relayer is resolved only through NeighborInfo), 18 only below 15 bits and 18 a usable one, p90 0.9 hours after their first receipt. Stationary usable nodes: 29 of 48.
 
 ## Positions across brokers, shared 24 hours
 
-- Public receipts with MeshSTL positions added: 121 nodes are positioned on MeshSTL, 8 of them never positioned on the public broker, all 8 usable. MSA relayers failing `lnk_02` with no position fall from 26 to 22, and keep 30 minutes at 500 m rises from 21 to 44 link-hours (177 to 344 a week). The 3 km figures do not move.
-- MeshSTL receipts with public positions added: 5 601 nodes are positioned on the public broker, 154 of them usable inside Missouri plus Illinois and absent from MeshSTL, but none is a metro relayer: the 23 MSA relayers with no position stay 23, and only gateway-only moves (200 to 201).
+- Public receipts with MeshSTL positions added: 121 nodes are positioned on MeshSTL, 8 of them not positioned on the public broker in the shared 24 hours, all 8 usable. MSA relayers failing `lnk_02` with no position fall from 26 to 22, and keep 30 minutes at 500 m rises from 21 to 44 link-hours (177 to 344 a week). The 3 km figures do not move.
+- MeshSTL receipts with public positions added: 5 601 nodes are positioned on the public broker, 154 of them usable inside the analysis's keep box (Missouri plus Illinois with a margin, longitude -96.0 to -86.9, latitude 35.8 to 42.7) and absent from MeshSTL, but none is a metro relayer: the 23 MSA relayers with no position stay 23, and only gateway-only moves (200 to 201).
 - So the MeshSTL broker places relayers the public broker cannot, and the public broker adds nothing the MeshSTL broker lacks in the metro.
