@@ -1,16 +1,21 @@
 """Decode and measure a spike capture for ADR 0003.
 
-Reads every capture-*.jsonl file in a directory, one worker process per file,
-parses each payload as a ServiceEnvelope, decrypts default-key packets, decodes
-Position, NodeInfo, Telemetry, NeighborInfo and MapReport by portnum, and
-prints the measurements the Phase 1 spike asks for: (a) relay_node split by
-via_mqtt, (b) NeighborInfo, (c) precision_bits, regional topics, area counts,
-(e) the link-hour yield per link rule with a funnel that names why receipts
-fail, a position-free diagnostic, and the (f) widening check. Output is
-aggregate only: no node id, node name or coordinate is printed. It is not the
+Reads every capture-*.jsonl and capture-*.jsonl.gz file in a directory, one
+worker process per file, parses each payload as a ServiceEnvelope, decrypts
+default-key packets, decodes Position, NodeInfo, Telemetry, NeighborInfo and
+MapReport by portnum, and prints the measurements the Phase 1 spike asks for:
+(a) relay_node split by via_mqtt, (b) NeighborInfo, (c) precision_bits,
+regional topics, area counts, (e) the link-hour yield per link rule with a
+funnel that names why receipts fail, a position-free diagnostic, and the (f)
+widening check. Every rate divides by the hours actually covered, which are
+the capture's segments (runs of records with no gap over 15 minutes), not the
+wall clock from the first record to the last. Weekly figures weight the
+weekday and weekend hourly rates by 120 and 48 hours. Output is aggregate
+only: no node id, node name or coordinate is printed. It is not the
 production decode asset and writes nothing to disk.
 
 Usage: python analyze.py DATA_DIR [MSA_CSV [STATES_CSV]] [--start ISO] [--end ISO]
+    [--roots MO,IL,MeshSTL] [--positions-from OTHER_DATA_DIR]
 """
 
 from __future__ import annotations
@@ -19,15 +24,17 @@ import argparse
 import base64
 import bisect
 import csv
+import gzip
 import json
 import math
 import os
 import statistics
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Iterable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -58,8 +65,17 @@ REGIONAL_SEGMENTS = ("MeshSTL", "MO", "IL")
 KEEP_BBOX_DEG = (-96.0, 35.8, -86.9, 42.7)
 RULES = ("relay_node", "neighbor_info", "combined", "relay_node_strict")
 PRECISE_BITS = 20
-GROWTH_HOURS = (4, 8, 12, 24, 36, 48)
-FIRST_POSITION_BINS_H = (1, 2, 4, 8, 12, 24, 48)
+GROWTH_HOURS = (4, 8, 12, 24, 36, 48, 60)
+FIRST_POSITION_BINS_H = (1, 2, 4, 8, 12, 24, 48, 72, 168)
+# A gap longer than this between records starts a new segment, and the gap
+# is not counted as observed time.
+SEGMENT_GAP_S = 15 * 60
+# St. Louis is on CDT for the whole capture (DST ends 2026-11-01); weekday and
+# weekend are local days.
+LOCAL_TZ = timezone(timedelta(hours=-5), "CDT")
+WEEKDAY_HOURS_PER_WEEK = 120.0
+WEEKEND_HOURS_PER_WEEK = 48.0
+ROOT_CLASSES = ("msh/US/MO", "msh/US/IL", "msh/US/MeshSTL", "other msh/US")
 THIN_FIELDS = (
     "gateway",
     "sender",
@@ -112,6 +128,27 @@ class Parsed:
     position: tuple[int, int, int] | None = None
     map_report: tuple[int, int, int] | None = None
     neighbors: tuple[tuple[int, float], ...] = ()
+    root: str = ""
+
+
+def topic_root(topic: str) -> str:
+    """The segment after msh/US: a state or community name, or the protocol version."""
+    parts = topic.split("/")
+    return parts[2] if len(parts) > 2 else ""
+
+
+def root_class(root: str) -> str:
+    """One of ROOT_CLASSES for a topic root segment."""
+    return f"msh/US/{root}" if root in REGIONAL_SEGMENTS else "other msh/US"
+
+
+def copy_class(kind: str, parsed: Parsed | None) -> str:
+    """Storage class of one record: radio delivery, internet copy, or another topic kind."""
+    if kind != "e":
+        return kind
+    if parsed is None or parsed.status == "malformed" or not parsed.sender:
+        return "e, unparsed or no sender"
+    return "e, internet copy (via_mqtt)" if parsed.via_mqtt else "e, radio"
 
 
 def topic_kind(topic: str) -> str:
@@ -255,14 +292,17 @@ class Tally:
 
     `heard` and `receipts` hold radio receipts only (via_mqtt false): a packet
     the gateway received over MQTT was not a radio hop at that gateway.
+    Receipts carry the topic root they arrived under, for the subscription
+    scope question.
     """
 
     first_s: float = math.inf
     last_s: float = 0.0
-    counts: Counter[tuple[str, ...]] = field(default_factory=Counter)
+    counts: Counter[tuple[Any, ...]] = field(default_factory=Counter)
     sender_kind: dict[int, int] = field(default_factory=dict)
     heard: dict[int, set[int]] = field(default_factory=lambda: defaultdict(set))
-    receipts: dict[tuple[int, int, int], tuple[float, int, bool]] = field(default_factory=dict)
+    receipts: dict[tuple[int, int, int], tuple[float, int, bool, str]] = field(default_factory=dict)
+    minute_bounds: dict[int, tuple[float, float]] = field(default_factory=dict)
     neighbor_reports: list[tuple[float, int, tuple[tuple[int, float], ...]]] = field(
         default_factory=list
     )
@@ -270,7 +310,7 @@ class Tally:
     positioned_senders: set[int] = field(default_factory=set)
     payload_senders: set[int] = field(default_factory=set)
     precise_senders: set[int] = field(default_factory=set)
-    radio_keys: set[tuple[int, int, int]] = field(default_factory=set)
+    radio_keys: dict[tuple[int, int, int], str] = field(default_factory=dict)
     first_heard: dict[int, float] = field(default_factory=dict)
     first_position: dict[int, float] = field(default_factory=dict)
     first_usable: dict[int, float] = field(default_factory=dict)
@@ -324,11 +364,27 @@ class Tally:
         if parsed.gateway == parsed.sender:
             return
         key = (parsed.gateway, parsed.sender, parsed.packet_id)
-        self.radio_keys.add(key)
+        self.radio_keys.setdefault(key, parsed.root)
         if not parsed.relay:
             return
         if key not in self.receipts or parsed.at_s < self.receipts[key][0]:
-            self.receipts[key] = (parsed.at_s, parsed.relay, signal_in_range(parsed))
+            self.receipts[key] = (parsed.at_s, parsed.relay, signal_in_range(parsed), parsed.root)
+
+    def add_volume(
+        self, at_s: float, topic: str, kind: str, parsed: Parsed | None, size: int
+    ) -> None:
+        """Minute coverage, hourly counts and JSON lines bytes by topic root and copy class."""
+        minute = int(at_s // 60)
+        low, high = self.minute_bounds.get(minute, (at_s, at_s))
+        self.minute_bounds[minute] = (min(low, at_s), max(high, at_s))
+        hour = minute // 60
+        copy = copy_class(kind, parsed)
+        self.counts[("hour", hour, "records")] += 1
+        self.counts[("hour", hour, "bytes")] += size
+        self.counts[("hour", hour, copy)] += 1
+        root = root_class(topic_root(topic))
+        self.counts[("volume_bytes", root, copy)] += size
+        self.counts[("volume_records", root, copy)] += 1
 
     def add_payload(self, parsed: Parsed) -> None:
         if parsed.status == "ok" and parsed.sender:
@@ -378,7 +434,11 @@ class Tally:
         self.positioned_senders |= other.positioned_senders
         self.payload_senders |= other.payload_senders
         self.precise_senders |= other.precise_senders
-        self.radio_keys |= other.radio_keys
+        for key, root in other.radio_keys.items():
+            self.radio_keys.setdefault(key, root)
+        for minute, (low, high) in other.minute_bounds.items():
+            mine = self.minute_bounds.get(minute, (low, high))
+            self.minute_bounds[minute] = (min(mine[0], low), max(mine[1], high))
         for mine, theirs in (
             (self.first_heard, other.first_heard),
             (self.first_position, other.first_position),
@@ -391,8 +451,96 @@ class Tally:
         for key, values in other.regional_sets.items():
             self.regional_sets[key] |= values
 
+    def coverage(self) -> Coverage:
+        return Coverage.from_minutes(self.minute_bounds)
+
     def hours(self) -> float:
-        return max((self.last_s - self.first_s) / 3600.0, 1e-9)
+        """Observed hours: the sum of segment spans, never the first-to-last wall clock."""
+        return max(self.coverage().hours(), 1e-9)
+
+
+@dataclass
+class Rates:
+    """One measure as observed count, hourly rate and weekly extrapolation."""
+
+    observed: int
+    hours: float
+    per_hour: float
+    weekday_per_hour: float
+    weekend_per_hour: float
+    week_flat: float
+    week_weighted: float
+
+
+@dataclass
+class Coverage:
+    """The time a capture actually observed, as (start_s, end_s) segments."""
+
+    segments: list[tuple[float, float]]
+
+    @classmethod
+    def from_minutes(cls, bounds: dict[int, tuple[float, float]]) -> Coverage:
+        segments: list[tuple[float, float]] = []
+        for minute in sorted(bounds):
+            low, high = bounds[minute]
+            if segments and low - segments[-1][1] <= SEGMENT_GAP_S:
+                segments[-1] = (segments[-1][0], high)
+            else:
+                segments.append((low, high))
+        return cls(segments)
+
+    def hours(self) -> float:
+        return sum(end - start for start, end in self.segments) / 3600.0
+
+    def overlap_h(self, low_s: float, high_s: float) -> float:
+        """Observed hours between two instants."""
+        total = sum(max(0.0, min(end, high_s) - max(start, low_s)) for start, end in self.segments)
+        return total / 3600.0
+
+    def hour_h(self, hour: int) -> float:
+        return self.overlap_h(hour * 3600.0, (hour + 1) * 3600.0)
+
+    def clock_hours(self) -> list[int]:
+        hours: set[int] = set()
+        for start, end in self.segments:
+            hours.update(range(int(start // 3600), int(end // 3600) + 1))
+        return sorted(hours)
+
+    def segment_of(self, hour: int) -> int:
+        """1-based segment number of a clock hour; 0 when the hour is not observed."""
+        for index, (start, end) in enumerate(self.segments, 1):
+            if start < (hour + 1) * 3600 and end >= hour * 3600:
+                return index
+        return 0
+
+    def class_hours(self) -> dict[str, float]:
+        totals = {"weekday": 0.0, "weekend": 0.0}
+        for hour in self.clock_hours():
+            totals[day_class(hour)] += self.hour_h(hour)
+        return totals
+
+    def rates(self, hours_of_events: Iterable[int]) -> Rates:
+        """Rates for events given by the clock hour each falls in."""
+        by_class: Counter[str] = Counter(day_class(hour) for hour in hours_of_events)
+        observed = sum(by_class.values())
+        exposure = self.class_hours()
+        per_hour = observed / max(self.hours(), 1e-9)
+        # A class with no observed hours takes the overall rate.
+        weekday = by_class["weekday"] / exposure["weekday"] if exposure["weekday"] else per_hour
+        weekend = by_class["weekend"] / exposure["weekend"] if exposure["weekend"] else per_hour
+        weighted = weekday * WEEKDAY_HOURS_PER_WEEK + weekend * WEEKEND_HOURS_PER_WEEK
+        return Rates(
+            observed, self.hours(), per_hour, weekday, weekend, per_hour * HOURS_PER_WEEK, weighted
+        )
+
+
+def local_time(hour: int) -> datetime:
+    return datetime.fromtimestamp(hour * 3600, LOCAL_TZ)
+
+
+def day_class(hour: int) -> str:
+    """weekday or weekend for the local day the clock hour starts in."""
+    return "weekend" if local_time(hour).weekday() >= 5 else "weekday"
 
 
 def first_at(table: dict[int, float], node: int, at_s: float) -> None:
@@ -407,10 +555,25 @@ def thin_parsed(at_s: float, record: dict[str, Any]) -> Parsed:
     return Parsed(at_s, record["kind"], region, record["status"], record["reason"], **fields)
 
 
-def tally_file(path: str, start_s: float = -math.inf, end_s: float = math.inf) -> Tally:
-    """Tally one hourly capture file; a partly written last line is counted and skipped."""
+def open_capture(path: str) -> Any:
+    if path.endswith(".gz"):
+        return gzip.open(path, "rt", encoding="ascii")
+    return open(path, encoding="ascii")  # noqa: SIM115 (closed by the caller's with)
+
+
+def tally_file(
+    path: str,
+    start_s: float = -math.inf,
+    end_s: float = math.inf,
+    roots: frozenset[str] | None = None,
+) -> Tally:
+    """Tally one hourly capture file; a partly written last line is counted and skipped.
+
+    With roots set, records whose topic root is not in it are skipped, which
+    is what a subscription to only those topic prefixes would have received.
+    """
     tally = Tally()
-    with open(path, encoding="ascii") as handle:
+    with open_capture(path) as handle:
         for line in handle:
             try:
                 record = json.loads(line)
@@ -418,29 +581,57 @@ def tally_file(path: str, start_s: float = -math.inf, end_s: float = math.inf) -
                 tally.counts[("kind", "unreadable_line")] += 1
                 continue
             at_s = datetime.fromisoformat(record["received_at"]).timestamp()
-            if not start_s <= at_s < end_s:
+            topic = record["topic"]
+            if not start_s <= at_s < end_s or (
+                roots is not None and topic_root(topic) not in roots
+            ):
                 continue
-            kind = record["kind"] if record.get("thin") else topic_kind(record["topic"])
+            kind = record["kind"] if record.get("thin") else topic_kind(topic)
             tally.counts[("kind", kind)] += 1
-            if kind not in {"e", "map"}:
-                continue
-            if record.get("thin"):
-                tally.counts[("kind", "thin")] += 1
-                tally.add(thin_parsed(at_s, record))
-                continue
-            raw = base64.b64decode(record["payload_b64"])
-            tally.add(parse_envelope(at_s, kind, topic_region(record["topic"]), raw))
+            parsed = None
+            if kind in {"e", "map"}:
+                parsed = tally_record(tally, at_s, kind, record)
+            tally.add_volume(at_s, topic, kind, parsed, len(line))
     tally.heard = dict(tally.heard)
     tally.boxes = dict(tally.boxes)
     tally.regional_sets = dict(tally.regional_sets)
     return tally
 
 
-def load_capture(data_dir: Path, start_s: float, end_s: float) -> Tally:
-    paths = sorted(str(p) for p in data_dir.glob("capture-*.jsonl"))
+def tally_record(tally: Tally, at_s: float, kind: str, record: dict[str, Any]) -> Parsed:
+    topic = record["topic"]
+    if record.get("thin"):
+        tally.counts[("kind", "thin")] += 1
+        parsed = thin_parsed(at_s, record)
+    else:
+        raw = base64.b64decode(record["payload_b64"])
+        parsed = parse_envelope(at_s, kind, topic_region(topic), raw)
+    parsed.root = topic_root(topic)
+    tally.add(parsed)
+    if kind == "e" and parsed.via_mqtt:
+        # The count-only store for internet copies keys on (hour, topic, gateway);
+        # the topic already ends in the gateway id.
+        tally.counts[("internet_key", int(at_s // 3600), topic)] = 1
+    return parsed
+
+
+def capture_paths(data_dir: Path) -> list[str]:
+    """Hourly files, plain or gzipped; the same hour in both forms is an error."""
+    paths = sorted(data_dir.glob("capture-*.jsonl")) + sorted(data_dir.glob("capture-*.jsonl.gz"))
+    hours = Counter(p.name.removesuffix(".gz") for p in paths)
+    doubled = sorted(name for name, n in hours.items() if n > 1)
+    if doubled:
+        raise ValueError(f"hour present both plain and gzipped: {doubled}")
+    return sorted(str(p) for p in paths)
+
+
+def load_capture(
+    data_dir: Path, start_s: float, end_s: float, roots: frozenset[str] | None = None
+) -> Tally:
+    paths = capture_paths(data_dir)
     total = Tally()
-    workers = max(1, min(len(paths), (os.cpu_count() or 2) - 1, 8))
-    work = partial(tally_file, start_s=start_s, end_s=end_s)
+    workers = max(1, min(len(paths), (os.cpu_count() or 2) - 1))
+    work = partial(tally_file, start_s=start_s, end_s=end_s, roots=roots)
     with ProcessPoolExecutor(max_workers=workers) as pool:
         for part in pool.map(work, paths):
             total.merge(part)
@@ -630,6 +821,17 @@ class RuleResult:
     resolved_relayers: set[int] = field(default_factory=set)
     overlap_diagonals_m: list[float] = field(default_factory=list)
     gateway_only: dict[tuple[int, int, int], int] = field(default_factory=dict)
+    gateway_only_roots: dict[tuple[int, int, int], Counter[str]] = field(default_factory=dict)
+
+    def gateway_only_hours(self, roots: frozenset[str] | None = None) -> list[tuple[int, int, int]]:
+        """Gateway-only link-hours; with roots set, counting only receipts under those roots."""
+        if roots is None:
+            return [key for key, n in self.gateway_only.items() if n >= MIN_PACKETS_PER_HOUR]
+        return [
+            key
+            for key, by_root in self.gateway_only_roots.items()
+            if sum(n for root, n in by_root.items() if root in roots) >= MIN_PACKETS_PER_HOUR
+        ]
 
     def add(self, relayer: int, gateway: int, at_s: float, distance_m: float) -> None:
         key = (relayer, gateway, int(at_s // 3600))
@@ -655,16 +857,16 @@ def neighbors_by_reporter(tally: Tally) -> dict[int, dict[int, set[int]]]:
 
 def area_resolutions(
     tally: Tally, positions: AreaPositions
-) -> list[tuple[float, int, bool, dict[str, int]]]:
+) -> list[tuple[float, int, bool, dict[str, int], str]]:
     """Radio receipts at gateways positioned in the area, with the relayer under each rule."""
     gateways = positions.any_nodes & set(tally.heard)
     candidates = {gateway: by_low_byte(tally.heard[gateway]) for gateway in gateways}
     neighbors = neighbors_by_reporter(tally)
     rows = []
-    for (gateway, sender, _), (at_s, relay, signal_ok) in tally.receipts.items():
+    for (gateway, sender, _), (at_s, relay, signal_ok, root) in tally.receipts.items():
         if gateway in gateways:
             resolved = resolve_all(sender, relay, candidates[gateway], neighbors.get(gateway, {}))
-            rows.append((at_s, gateway, signal_ok, resolved))
+            rows.append((at_s, gateway, signal_ok, resolved, root))
     return rows
 
 
@@ -676,9 +878,9 @@ def apply_rules(
 ) -> dict[str, RuleResult]:
     """Run lnk_06, lnk_01, lnk_03, lnk_02 and lnk_05 for each rule; lnk_04 is applied on output."""
     results = {rule: RuleResult() for rule in RULES}
-    for at_s, gateway, signal_ok, resolved in area_resolutions(tally, positions):
+    for at_s, gateway, signal_ok, resolved, root in area_resolutions(tally, positions):
         for rule, relayer in resolved.items():
-            receipt = (relayer, gateway, at_s, signal_ok)
+            receipt = (relayer, gateway, at_s, signal_ok, root)
             check_receipt(results[rule], positions, receipt, (window_s, stationary))
     return results
 
@@ -686,10 +888,10 @@ def apply_rules(
 def check_receipt(
     result: RuleResult,
     positions: AreaPositions,
-    receipt: tuple[int, int, float, bool],
+    receipt: tuple[int, int, float, bool, str],
     window: tuple[float, bool],
 ) -> None:
-    relayer, gateway, at_s, signal_ok = receipt
+    relayer, gateway, at_s, signal_ok, root = receipt
     window_s, stationary = window
     funnel = result.funnel
     funnel["1 radio receipts with relay_node at area gateways"] += 1
@@ -709,6 +911,7 @@ def check_receipt(
     if positions.near(gateway, at_s, window_s, stationary) is not None:
         group = (relayer, gateway, int(at_s // 3600))
         result.gateway_only[group] = result.gateway_only.get(group, 0) + 1
+        result.gateway_only_roots.setdefault(group, Counter())[root] += 1
     found: list[tuple[float, float, int]] = []
     for role, node in (("relayer", relayer), ("gateway", gateway)):
         location = positions.near(node, at_s, window_s, stationary)
@@ -771,12 +974,90 @@ def counts_of(tally: Tally, *prefix: str) -> Counter[str]:
     )
 
 
+def utc_label(at_s: float) -> str:
+    return f"{datetime.fromtimestamp(at_s, UTC):%Y-%m-%dT%H:%M:%S}Z"
+
+
+def report_coverage(tally: Tally) -> None:
+    """Segments, observed hours by local day class, and the denominators every rate uses."""
+    coverage = tally.coverage()
+    rows = []
+    for index, (start, end) in enumerate(coverage.segments, 1):
+        label = "main" if index == 1 else f"fragment {index - 1}"
+        rows.append(
+            (str(index), label, utc_label(start), utc_label(end), f"{(end - start) / 3600:.3f}")
+        )
+    print_table(
+        f"Capture segments (a gap over {SEGMENT_GAP_S // 60} minutes starts a new one)",
+        rows,
+        ("segment", "label", "first record", "last record", "observed h"),
+    )
+    exposure = coverage.class_hours()
+    print(
+        f"\nObserved hours: {coverage.hours():.3f}; local weekday (Mon to Fri, CDT)"
+        f" {exposure['weekday']:.3f} h, local weekend {exposure['weekend']:.3f} h."
+        f" First record to last record: {(tally.last_s - tally.first_s) / 3600:.2f} h of wall"
+        " clock, which no rate uses."
+    )
+
+
+def report_volume(tally: Tally) -> None:
+    """JSON lines bytes by topic root and copy class, per observed hour and per day."""
+    hours = tally.hours()
+    sizes = {key[1:]: n for key, n in tally.counts.items() if key[0] == "volume_bytes"}
+    records = {key[1:]: n for key, n in tally.counts.items() if key[0] == "volume_records"}
+    total = sum(sizes.values())
+    rows = []
+    for key in sorted(sizes, key=lambda k: -sizes[k]):
+        rows.append(
+            (
+                key[0],
+                key[1],
+                str(records[key]),
+                f"{sizes[key] / 1e6:.1f}",
+                pct(sizes[key], total),
+                f"{sizes[key] / hours / 1e6:.1f}",
+                f"{sizes[key] / hours * 24 / 1e9:.3f}",
+            )
+        )
+    rows.append(
+        (
+            "all",
+            "all",
+            str(sum(records.values())),
+            f"{total / 1e6:.1f}",
+            "100.0%",
+            f"{total / hours / 1e6:.1f}",
+            f"{total / hours * 24 / 1e9:.3f}",
+        )
+    )
+    print_table(
+        f"Volume, uncompressed JSON lines, over {hours:.2f} observed h",
+        rows,
+        (
+            "topic root",
+            "copy class",
+            "records",
+            "MB",
+            "share of bytes",
+            "MB per hour",
+            "GB per day",
+        ),
+    )
+    keys = [key for key in tally.counts if key[0] == "internet_key"]
+    per_hour = Counter(key[1] for key in keys)
+    median = statistics.median(per_hour.values()) if per_hour else 0
+    print(
+        f"\nInternet copies as counts per (hour, topic, gateway): {len(keys)} rows over"
+        f" {len(per_hour)} clock hours, median {median:.0f} rows per hour,"
+        f" {len(keys) / hours * 24:.0f} rows per day"
+    )
+
+
 def report_overview(tally: Tally) -> None:
     hours = tally.hours()
-    start = datetime.fromtimestamp(tally.first_s, UTC)
-    end = datetime.fromtimestamp(tally.last_s, UTC)
-    print(f"Capture window: {start:%Y-%m-%dT%H:%M}Z to {end:%Y-%m-%dT%H:%M}Z ({hours:.2f} h)")
-    print(f"Weekly scaling factor: 168 / {hours:.2f} = {HOURS_PER_WEEK / hours:.2f}")
+    report_coverage(tally)
+    report_volume(tally)
     kinds = counts_of(tally, "kind")
     rows = [(k, str(n), f"{n / hours:.0f}") for k, n in kinds.most_common()]
     print_table("Records by topic kind", rows, ("kind", "records", "per hour"))
@@ -887,7 +1168,7 @@ def report_relay_resolution(tally: Tally) -> None:
         gateway: Counter(s & 0xFF for s in senders) for gateway, senders in tally.heard.items()
     }
     outcome: dict[str, Counter[str]] = {"capture": Counter(), "gateway": Counter()}
-    for (gateway, _, _), (_, relay, _) in tally.receipts.items():
+    for (gateway, _, _), (_, relay, _, _) in tally.receipts.items():
         for scope, table in (("capture", everyone), ("gateway", per_gateway[gateway])):
             matches = table.get(relay, 0)
             outcome[scope]["one" if matches == 1 else "many" if matches > 1 else "none"] += 1
@@ -1018,12 +1299,14 @@ def report_area_counts(tally: Tally, area: Area, positions: AreaPositions) -> No
     )
 
 
-def group_cells(keys: list[tuple[int, int, int]], scale: float) -> list[str]:
-    """Observed count, weekly extrapolation, distinct relayers, gateways and pairs."""
+def group_cells(keys: list[tuple[int, int, int]], coverage: Coverage) -> list[str]:
+    """Observed count, hourly rate, weekday-weighted week, distinct relayers, gateways, pairs."""
     pairs = {(k[0], k[1]) for k in keys}
+    rates = coverage.rates(k[2] for k in keys)
     return [
         str(len(keys)),
-        f"{len(keys) * scale:.0f}",
+        f"{rates.per_hour:.2f}",
+        f"{rates.week_weighted:.0f}",
         str(len({p[0] for p in pairs})),
         str(len({p[1] for p in pairs})),
         str(len(pairs)),
@@ -1032,40 +1315,49 @@ def group_cells(keys: list[tuple[int, int, int]], scale: float) -> list[str]:
 
 YIELD_HEADER = (
     "500 m observed",
-    "500 m per week",
+    "per hour",
+    "per week",
     "relayers",
     "gateways",
     "pairs",
     "3 km observed",
-    "3 km per week",
+    "per hour",
+    "per week",
     "relayers",
     "gateways",
     "pairs",
 )
 
 
+def denominator_note(coverage: Coverage) -> str:
+    exposure = coverage.class_hours()
+    return (
+        f"per hour = observed / {coverage.hours():.2f} observed h; per week = weekday rate"
+        f" ({exposure['weekday']:.2f} h) x 120 + weekend rate ({exposure['weekend']:.2f} h) x 48"
+    )
+
+
 def yield_cells(
-    result: RuleResult, scale: float, min_packets: int = MIN_PACKETS_PER_HOUR
+    result: RuleResult, coverage: Coverage, min_packets: int = MIN_PACKETS_PER_HOUR
 ) -> list[str]:
     cells: list[str] = []
     for minimum in (MIN_DISTANCE_M, VALIDATION_DISTANCE_M):
-        cells += group_cells(result.link_hours(minimum, min_packets), scale)
+        cells += group_cells(result.link_hours(minimum, min_packets), coverage)
     return cells
 
 
-def gateway_only_cells(result: RuleResult, scale: float) -> list[str]:
+def gateway_only_cells(result: RuleResult, coverage: Coverage) -> list[str]:
     """Link-hours when only the gateway is positioned: no distance, so one set of cells."""
-    keys = [key for key, n in result.gateway_only.items() if n >= MIN_PACKETS_PER_HOUR]
-    return group_cells(keys, scale) + ["n/a"] * 5
+    return group_cells(result.gateway_only_hours(), coverage) + ["n/a"] * 6
 
 
 def report_yield(tally: Tally, area: Area, results: dict[str, RuleResult]) -> float:
-    """Measurement (e): link-hours per week per rule; returns the combined 3 km weekly figure."""
-    scale = HOURS_PER_WEEK / tally.hours()
-    rows = [(rule, *yield_cells(results[rule], scale)) for rule in RULES]
+    """Measurement (e): link-hours per rule; returns the combined 3 km weekly figure."""
+    coverage = tally.coverage()
+    rows = [(rule, *yield_cells(results[rule], coverage)) for rule in RULES]
     title = (
-        f"(e) Link-hours inside {area.name}, {tally.hours():.2f} h observed,"
-        f" extrapolated x{scale:.2f} to a week, 30-minute position rule, 3 km on the median"
+        f"(e) Link-hours inside {area.name}, 30-minute position rule, 3 km on the median;"
+        f" {denominator_note(coverage)}"
     )
     print_table(title, rows, ("rule", *YIELD_HEADER))
     steps = sorted(set().union(*(results[r].funnel for r in RULES)))
@@ -1074,7 +1366,8 @@ def report_yield(tally: Tally, area: Area, results: dict[str, RuleResult]) -> fl
         f"(e) Funnel inside {area.name}, distinct radio receipts", funnel_rows, ("step", *RULES)
     )
     report_unpositioned(tally, results["combined"])
-    return len(results["combined"].link_hours(VALIDATION_DISTANCE_M)) * scale
+    keys = results["combined"].link_hours(VALIDATION_DISTANCE_M)
+    return coverage.rates(k[2] for k in keys).week_weighted
 
 
 def report_unpositioned(tally: Tally, combined: RuleResult) -> None:
@@ -1096,22 +1389,23 @@ def report_unpositioned(tally: Tally, combined: RuleResult) -> None:
 
 def report_position_rules(tally: Tally, area: Area, positions: AreaPositions) -> None:
     """The three position rule options of ADR 0003, combined link rule, one row each."""
-    scale = HOURS_PER_WEEK / tally.hours()
+    coverage = tally.coverage()
     thirty = apply_rules(tally, positions)["combined"]
     stationary = apply_rules(tally, positions, stationary=True)["combined"]
     rows = [
-        ("keep 30 minutes (lnk_02 as written)", *yield_cells(thirty, scale)),
+        ("keep 30 minutes (lnk_02 as written)", *yield_cells(thirty, coverage)),
         (
             "stationarity window (one box all capture, else 30 minutes)",
-            *yield_cells(stationary, scale),
+            *yield_cells(stationary, coverage),
         ),
         (
             "gateway-only fallback (relayer unpositioned, no distance)",
-            *gateway_only_cells(thirty, scale),
+            *gateway_only_cells(thirty, coverage),
         ),
     ]
     print_table(
-        f"Position rule options inside {area.name}, combined link rule, extrapolated x{scale:.2f}",
+        f"Position rule options inside {area.name}, combined link rule;"
+        f" {denominator_note(coverage)}",
         rows,
         ("position rule", *YIELD_HEADER),
     )
@@ -1119,17 +1413,65 @@ def report_position_rules(tally: Tally, area: Area, positions: AreaPositions) ->
         f"Stationary usable nodes inside {area.name}: {len(positions.stationary)} of"
         f" {len(positions.usable_nodes)} usable (one box for every position in the capture)"
     )
+    report_headline(tally, area, positions, (thirty, stationary))
     report_growth(tally, area, thirty, positions)
 
 
-def cumulative_groups(keys: list[tuple[int, int, int]], first_s: float) -> list[tuple[str, ...]]:
+def report_headline(
+    tally: Tally,
+    area: Area,
+    positions: AreaPositions,
+    results: tuple[RuleResult, RuleResult],
+) -> None:
+    """Hourly rate by local day class and the weekday-weighted week, per position rule."""
+    coverage = tally.coverage()
+    thirty, stationary = results
+    measures = [
+        ("keep 30 minutes, 500 m", thirty.link_hours(MIN_DISTANCE_M)),
+        ("keep 30 minutes, 3 km", thirty.link_hours(VALIDATION_DISTANCE_M)),
+        ("stationarity window, 500 m", stationary.link_hours(MIN_DISTANCE_M)),
+        ("stationarity window, 3 km", stationary.link_hours(VALIDATION_DISTANCE_M)),
+        ("gateway-only fallback", thirty.gateway_only_hours()),
+        ("lnk_02 and lnk_05 ignored (diagnostic)", position_free_groups(tally, positions)),
+    ]
+    exposure = coverage.class_hours()
     rows = []
-    for hours in GROWTH_HOURS:
-        cutoff = [k for k in keys if (k[2] + 1) * 3600 - first_s <= hours * 3600]
+    for label, keys in measures:
+        r = coverage.rates(k[2] for k in keys)
+        rows.append(
+            (
+                label,
+                str(r.observed),
+                f"{r.per_hour:.2f}",
+                f"{r.weekday_per_hour:.2f}",
+                f"{r.weekend_per_hour:.2f}",
+                f"{r.week_flat:.0f}",
+                f"{r.week_weighted:.0f}",
+            )
+        )
+    header = (
+        "link-hours, combined rule",
+        "observed",
+        f"per hour ({coverage.hours():.2f} h)",
+        f"weekday per hour ({exposure['weekday']:.2f} h)",
+        f"weekend per hour ({exposure['weekend']:.2f} h)",
+        "per week, flat (x168)",
+        "per week, weekday-weighted (x120, x48)",
+    )
+    print_table(f"Headline: link-hour rates inside {area.name}", rows, header)
+
+
+def cumulative_groups(
+    keys: list[tuple[int, int, int]], coverage: Coverage
+) -> list[tuple[str, ...]]:
+    """Distinct groups by observed hours elapsed, so a gap between segments is not counted."""
+    rows = []
+    for hours in (*(h for h in GROWTH_HOURS if h < coverage.hours()), coverage.hours()):
+        cutoff = [k for k in keys if coverage.overlap_h(-math.inf, (k[2] + 1) * 3600) <= hours]
         pairs = {(k[0], k[1]) for k in cutoff}
         rows.append(
             (
-                str(hours),
+                f"{hours:g}" if isinstance(hours, int) else f"{hours:.2f} (all)",
                 str(len(cutoff)),
                 str(len({p[0] for p in pairs})),
                 str(len({p[1] for p in pairs})),
@@ -1140,18 +1482,24 @@ def cumulative_groups(keys: list[tuple[int, int, int]], first_s: float) -> list[
 
 
 def report_growth(tally: Tally, area: Area, combined: RuleResult, positions: AreaPositions) -> None:
-    """Addendum 2d: cumulative distinct groups at hours 4, 8, 12, 24, 36, 48."""
-    header = ("hours", "link-hours", "relayers", "gateways", "pairs")
+    """Addendum 2d: cumulative distinct groups by observed hours."""
+    header = ("observed hours", "link-hours", "relayers", "gateways", "pairs")
+    coverage = tally.coverage()
     contract = combined.link_hours(MIN_DISTANCE_M)
     print_table(
         f"Group growth inside {area.name}, contract rules at 500 m, cumulative",
-        cumulative_groups(contract, tally.first_s),
+        cumulative_groups(contract, coverage),
         header,
     )
     free = position_free_groups(tally, positions)
     print_table(
         f"Group growth inside {area.name}, lnk_02 and lnk_05 ignored, cumulative",
-        cumulative_groups(free, tally.first_s),
+        cumulative_groups(free, coverage),
+        header,
+    )
+    print_table(
+        f"Group growth inside {area.name}, gateway-only fallback, cumulative",
+        cumulative_groups(combined.gateway_only_hours(), coverage),
         header,
     )
 
@@ -1206,10 +1554,18 @@ def report_first_position(tally: Tally, area: Area, relayers: set[int]) -> None:
     )
 
 
-def position_free_groups(tally: Tally, positions: AreaPositions) -> list[tuple[int, int, int]]:
+def position_free_groups(
+    tally: Tally, positions: AreaPositions, roots: frozenset[str] | None = None
+) -> list[tuple[int, int, int]]:
+    """Combined-rule (relayer, gateway, hour) groups with 3 receipts, positions ignored.
+
+    With roots set, only receipts that arrived under those topic roots count.
+    """
     groups: Counter[tuple[int, int, int]] = Counter()
-    for at_s, gateway, signal_ok, resolved in area_resolutions(tally, positions):
+    for at_s, gateway, signal_ok, resolved, root in area_resolutions(tally, positions):
         relayer = resolved["combined"]
+        if roots is not None and root not in roots:
+            continue
         if signal_ok and relayer and relayer != gateway:
             groups[(relayer, gateway, int(at_s // 3600))] += 1
     return [key for key, n in groups.items() if n >= MIN_PACKETS_PER_HOUR]
@@ -1220,9 +1576,11 @@ def report_position_free(tally: Tally, area: Area, positions: AreaPositions) -> 
     keys = position_free_groups(tally, positions)
     pairs = {(relayer, gateway) for relayer, gateway, _ in keys}
     usable = positions.usable_nodes
+    rates = tally.coverage().rates(k[2] for k in keys)
     rows = [
         ("(relayer, gateway, hour) groups with 3 or more receipts", str(len(keys))),
-        ("per week, extrapolated", f"{len(keys) * HOURS_PER_WEEK / tally.hours():.0f}"),
+        (f"per hour, over {rates.hours:.2f} observed h", f"{rates.per_hour:.2f}"),
+        ("per week, weekday-weighted", f"{rates.week_weighted:.0f}"),
         ("distinct pairs", str(len(pairs))),
         ("distinct relayers", str(len({p[0] for p in pairs}))),
         ("distinct gateways", str(len({p[1] for p in pairs}))),
@@ -1244,26 +1602,193 @@ def report_position_free(tally: Tally, area: Area, positions: AreaPositions) -> 
 
 def report_sensitivity(tally: Tally, area: Area, positions: AreaPositions) -> None:
     """Combined-rule yield if lnk_02 and lnk_04 were relaxed; diagnostic only, not the contract."""
-    scale = HOURS_PER_WEEK / tally.hours()
+    coverage = tally.coverage()
     rows = []
     for window_s, window_label in ((POSITION_WINDOW_S, "30 min (contract)"), (86_400, "24 h")):
         combined = apply_rules(tally, positions, window_s)["combined"]
         for min_packets in (MIN_PACKETS_PER_HOUR, 1):
             rows.append(
-                (window_label, str(min_packets), *yield_cells(combined, scale, min_packets))
+                (window_label, str(min_packets), *yield_cells(combined, coverage, min_packets))
             )
     header = ("position window", "min packets", *YIELD_HEADER)
-    title = f"Sensitivity, combined rule inside {area.name}, extrapolated (not contract rules)"
+    title = (
+        f"Sensitivity, combined rule inside {area.name} (not contract rules);"
+        f" {denominator_note(coverage)}"
+    )
     print_table(title, rows, header)
 
 
-def report_area(tally: Tally, area: Area) -> float:
+def hourly_series(
+    tally: Tally, positions: AreaPositions, thirty: RuleResult
+) -> dict[str, Counter[int]]:
+    """Event counts per clock hour, national and inside the area."""
+    gateways = positions.any_nodes & set(tally.heard)
+    series: dict[str, Counter[int]] = {
+        "records": Counter(),
+        "radio deliveries": Counter(),
+        "internet copies": Counter(),
+        "area radio receipts": Counter(),
+        "contract 500 m": Counter(k[2] for k in thirty.link_hours(MIN_DISTANCE_M)),
+        "gateway-only": Counter(k[2] for k in thirty.gateway_only_hours()),
+        "positions ignored": Counter(k[2] for k in position_free_groups(tally, positions)),
+    }
+    for key, n in tally.counts.items():
+        if key[0] == "hour" and key[2] == "records":
+            series["records"][key[1]] += n
+        elif key[0] == "hour" and key[2] == "e, radio":
+            series["radio deliveries"][key[1]] += n
+        elif key[0] == "hour" and key[2] == "e, internet copy (via_mqtt)":
+            series["internet copies"][key[1]] += n
+    for (gateway, _, _), (at_s, _, _, _) in tally.receipts.items():
+        if gateway in gateways:
+            series["area radio receipts"][int(at_s // 3600)] += 1
+    return series
+
+
+def report_hourly(tally: Tally, area: Area, positions: AreaPositions, thirty: RuleResult) -> None:
+    """Hour-by-hour curve and per-local-day rates, so the weekend effect is visible."""
+    coverage = tally.coverage()
+    series = hourly_series(tally, positions, thirty)
+    rows = []
+    for hour in coverage.clock_hours():
+        observed_h = coverage.hour_h(hour)
+        segment = coverage.segment_of(hour)
+        rows.append(
+            (
+                f"{datetime.fromtimestamp(hour * 3600, UTC):%m-%dT%H}Z",
+                f"{local_time(hour):%a %H}",
+                "main" if segment == 1 else f"fragment {segment - 1}",
+                f"{observed_h * 60:.0f}",
+                *(str(series[name][hour]) for name in series),
+            )
+        )
+    header = ("hour UTC", "local CDT", "segment", "observed min", *series)
+    print_table(f"Hour by hour, national and inside {area.name} (combined rule)", rows, header)
+    days: dict[str, list[int]] = defaultdict(list)
+    for hour in coverage.clock_hours():
+        days[f"{local_time(hour):%a %Y-%m-%d}"].append(hour)
+    rows = []
+    for day, hours in days.items():
+        observed_h = sum(coverage.hour_h(h) for h in hours)
+        rates = [sum(series[name][h] for h in hours) / observed_h for name in series]
+        rows.append((day, day_class(hours[0]), f"{observed_h:.2f}", *(f"{r:.2f}" for r in rates)))
+    print_table(
+        f"Per hour by local day, inside {area.name} (counts / observed h of that day)",
+        rows,
+        ("local day", "class", "observed h", *series),
+    )
+
+
+def report_topic_shares(
+    tally: Tally, area: Area, positions: AreaPositions, thirty: RuleResult
+) -> None:
+    """Share of the area's radio receipts and link-hours by the topic root they arrived under."""
+    gateways = positions.any_nodes & set(tally.heard)
+    all_receipts = Counter(
+        root_class(root) for (g, _, _), root in tally.radio_keys.items() if g in gateways
+    )
+    relayed = Counter(root_class(v[3]) for (g, _, _), v in tally.receipts.items() if g in gateways)
+    total_all, total_relayed = sum(all_receipts.values()), sum(relayed.values())
+    rows = [
+        (
+            cls,
+            str(all_receipts[cls]),
+            pct(all_receipts[cls], total_all),
+            str(relayed[cls]),
+            pct(relayed[cls], total_relayed),
+        )
+        for cls in ROOT_CLASSES
+    ]
+    print_table(
+        f"Radio receipts at gateways inside {area.name}, by topic root",
+        rows,
+        ("topic root", "radio receipts", "share", "with relay_node", "share"),
+    )
+    other = Counter(
+        root
+        for (g, _, _), root in tally.radio_keys.items()
+        if g in gateways and root_class(root) == "other msh/US"
+    )
+    print(
+        "Largest roots inside 'other msh/US': "
+        + ", ".join(f"msh/US/{root} {n} ({pct(n, total_all)})" for root, n in other.most_common(5))
+    )
+    report_scope_yield(tally, area, positions, thirty)
+
+
+def report_scope_yield(
+    tally: Tally, area: Area, positions: AreaPositions, thirty: RuleResult
+) -> None:
+    """Link-hours kept if only receipts under the given roots had been received."""
+    coverage = tally.coverage()
+    scopes: list[tuple[str, frozenset[str] | None]] = [
+        ("msh/US/# (everything)", None),
+        ("MO, IL and MeshSTL", frozenset(REGIONAL_SEGMENTS)),
+        ("MO only", frozenset({"MO"})),
+        ("IL only", frozenset({"IL"})),
+        ("MeshSTL only", frozenset({"MeshSTL"})),
+    ]
+    full_gateway = len(thirty.gateway_only_hours())
+    full_free = len(position_free_groups(tally, positions))
+    rows = []
+    for label, roots in scopes:
+        gateway_only = thirty.gateway_only_hours(roots)
+        free = position_free_groups(tally, positions, roots)
+        rows.append(
+            (
+                label,
+                str(len(gateway_only)),
+                pct(len(gateway_only), full_gateway),
+                f"{coverage.rates(k[2] for k in gateway_only).week_weighted:.0f}",
+                str(len(free)),
+                pct(len(free), full_free),
+                f"{coverage.rates(k[2] for k in free).week_weighted:.0f}",
+            )
+        )
+    header = (
+        "receipts counted from",
+        "gateway-only link-hours",
+        "share",
+        "per week",
+        "positions-ignored link-hours",
+        "share",
+        "per week",
+    )
+    print_table(
+        f"Subscription scope inside {area.name}, receipts filtered after resolution"
+        f" (positions and relayer candidates from the whole capture); {denominator_note(coverage)}",
+        rows,
+        header,
+    )
+
+
+def borrow_positions(tally: Tally, other: Tally) -> None:
+    """Add another broker's positions so a relayer silent here can be placed from there."""
+    own = set(tally.positioned_senders)
+    usable_other = {row[0] for row in other.positions if row[4] >= USABLE_BITS}
+    print(
+        f"\nPositions borrowed: {len(other.positions)} rows from"
+        f" {len(other.positioned_senders)} nodes positioned on the other broker;"
+        f" {len(other.positioned_senders - own)} of them have no position on this one,"
+        f" {len(usable_other - own)} of those with a usable one inside Missouri plus Illinois"
+        " and margin"
+    )
+    tally.positions.extend(other.positions)
+    tally.positioned_senders |= other.positioned_senders
+    for node, boxes in other.boxes.items():
+        tally.boxes.setdefault(node, set()).update(boxes)
+
+
+def report_area(tally: Tally, area: Area, metro: bool = False) -> float:
     positions = area_positions(tally, area)
     report_area_counts(tally, area, positions)
     results = apply_rules(tally, positions)
     combined_3km = report_yield(tally, area, results)
     report_first_position(tally, area, results["combined"].resolved_relayers)
     report_position_rules(tally, area, positions)
+    if metro:
+        report_hourly(tally, area, positions, results["combined"])
+        report_topic_shares(tally, area, positions, results["combined"])
     report_position_free(tally, area, positions)
     report_sensitivity(tally, area, positions)
     return combined_3km
@@ -1276,6 +1801,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("states_csv", type=Path, nargs="?")
     parser.add_argument("--start", help="ISO 8601 UTC; records before it are skipped")
     parser.add_argument("--end", help="ISO 8601 UTC; records at or after it are skipped")
+    parser.add_argument(
+        "--roots",
+        help="comma-separated topic roots after msh/US (MO,IL,MeshSTL); other records are skipped",
+    )
+    parser.add_argument(
+        "--positions-from",
+        type=Path,
+        help="another capture whose positions (same window) are added to this one's",
+    )
     return parser.parse_args()
 
 
@@ -1285,10 +1819,16 @@ def bound_s(value: str | None, default: float) -> float:
 
 def main() -> None:
     args = parse_args()
-    tally = load_capture(args.data_dir, bound_s(args.start, -math.inf), bound_s(args.end, math.inf))
+    start_s, end_s = bound_s(args.start, -math.inf), bound_s(args.end, math.inf)
+    roots = frozenset(args.roots.split(",")) if args.roots else None
+    tally = load_capture(args.data_dir, start_s, end_s, roots)
     if not tally.counts:
         print("no capture records found")
         return
+    if roots is not None:
+        print(f"Topic roots kept: {', '.join(sorted(roots))} (everything else skipped at load)")
+    if args.positions_from is not None:
+        borrow_positions(tally, load_capture(args.positions_from, start_s, end_s))
     report_overview(tally)
     report_modes(tally)
     report_relay_resolution(tally)
@@ -1297,7 +1837,7 @@ def main() -> None:
     report_regional_topics(tally)
     if args.msa_csv is not None:
         msa = Area("the MSA (CBSA 41180)", load_area(args.msa_csv, {"41180"}))
-        combined_3km = report_area(tally, msa)
+        combined_3km = report_area(tally, msa, metro=True)
         triggered = combined_3km < WIDEN_THRESHOLD_PER_WEEK
         print(
             f"\n(f) Widening check: combined rule at 3 km gives {combined_3km:.0f}"
