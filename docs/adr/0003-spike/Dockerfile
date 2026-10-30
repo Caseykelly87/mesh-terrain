@@ -3,14 +3,9 @@
 # analysis (override the command). The pins are spike-only and do not enter
 # pyproject.toml or uv.lock.
 #
-# Build, capture, analyse:
-#   docker build -t mesh-spike docs/adr/0003-spike
-#   docker run -d --name mesh-spike-capture --restart unless-stopped \
-#     -v C:/Users/Casey/mesh-terrain-data/spike-capture:/data \
-#     -e MQTT_HOST=mqtt.meshtastic.org -e MQTT_USER=meshdev \
-#     -e MQTT_PASSWORD=large4cats -e MQTT_TOPICS=msh/US/# mesh-spike
-#   The analysis mounts the committed scripts over the image's copies; the
-#   full command and the boundary files are in README.md.
+# Build: docker build -t mesh-spike docs/adr/0003-spike
+# The capture and analysis commands are in README.md. A capture always runs
+# with --restart on-failure and END_AT, never --restart unless-stopped.
 
 FROM python:3.12-slim-bookworm
 

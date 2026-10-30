@@ -13,10 +13,12 @@ captures together would pass the disk line; it is never the default.
 
 It stops itself. At END_AT (ISO 8601 with an offset, optional) or once the
 capture files in DATA_DIR reach MAX_RAW_BYTES (default 10 GB, measured after
-each flush) it flushes, writes HALTED.json with the reason and byte count,
-logs at error and exits 0. With `--restart on-failure` Docker leaves it
-stopped. A start that finds HALTED.json exits 0 at once, so restarting the
-container never resumes a capture; deleting the marker does.
+the once-a-minute flush) it flushes, writes HALTED.json with the reason and
+byte count, logs at error and exits 0. With `--restart on-failure` Docker
+leaves it stopped. A start that finds HALTED.json exits 0 at once, so
+restarting the container never resumes a capture; deleting the marker does.
+SIGTERM flushes and exits 0 without a marker, so a stop before END_AT ends
+the capture early; the `stop` log line is the only record of it.
 """
 
 from __future__ import annotations
@@ -89,6 +91,8 @@ class Buffer:
         self.end_at = end_at
         self.records: list[dict[str, Any]] = []
         self.lock = threading.Lock()
+        # The MQTT thread and the main loop can both flush; one writer at a time.
+        self.write_lock = threading.Lock()
         self.total = 0
         self.last_message_at: float | None = None
 
@@ -113,6 +117,10 @@ class Buffer:
             return len(self.records)
 
     def flush(self) -> None:
+        with self.write_lock:
+            self.write()
+
+    def write(self) -> None:
         with self.lock:
             pending, self.records = self.records, []
         if not pending:
