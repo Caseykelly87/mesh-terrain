@@ -28,8 +28,8 @@ Identifiers are stable. Tests are named `assert_<identifier>` (dbt singular) or 
 
 | Id | Rule | Enforced by |
 | --- | --- | --- |
-| `lnk_01` | A receipt enters `fct_rx_observation` only when its last relayer is resolved to exactly one known node, by the method ADR 0003 selects (`relay_node` match or NeighborInfo pair), and `link_source` records which. `hop_limit` is never used to decide this. | singular test on `core.fct_rx_observation`; reviewer checks no model references `hop_limit` for link logic |
-| `lnk_02` | Both relayer and gateway have a `usable` position within 30 minutes of the receipt. | singular test |
+| `lnk_01` | A receipt enters `fct_rx_observation` only when it is a radio receipt (`via_mqtt` false, the gateway's own packets excluded) and its last relayer is resolved to exactly one known node (ADR 0003): `relay_node` equal to the sender's own low byte is a direct hop; otherwise exactly one sender the same gateway heard by radio in the trailing 24 hours has that low byte, or a NeighborInfo pair resolves it, and `link_source` records which. `hop_limit` is never used to decide this. | singular test on `core.fct_rx_observation`; reviewer checks no model references `hop_limit` for link logic |
+| `lnk_02` | Both relayer and gateway have a `usable` position for the receipt (ADR 0003): a node whose every position in the trailing 7 days is one box (same quantised latitude, longitude and `precision_bits`) keeps that box; any other node needs a `usable` position within 30 minutes of the receipt. | singular test |
 | `lnk_03` | Relayer and gateway are different nodes. | singular test |
 | `lnk_04` | A link-hour has at least 3 packets. | singular test on `core.int_link_window` |
 | `lnk_05` | Link distance is between 500 m and 60 000 m, and `position_uncertainty_m` (sum of both box half-widths) is stored. Validation marts additionally require `distance_m >= 3000` unless both endpoints are `precise_source`. | range test on `distance_m`; singular test on the mart filter |

@@ -1,7 +1,7 @@
 # ADR 0003: Resolve links from relay_node on radio receipts, take positions from the MeshSTL broker under a stationarity window, and keep the MSA
 
-Date: 2026-10-22, final numbers 2026-10-30
-Status: proposed
+Date: 2026-10-22, final numbers 2026-10-30, accepted 2026-10-31
+Status: accepted
 Proposed by: ingest-eng
 Decided by: Casey
 
@@ -63,17 +63,17 @@ Area of interest:
 
 ## Decision
 
-Proposed, one bullet per question; Casey decides all four.
+Casey accepted all four on 2026-10-31.
 
 - Link source: option 3, `relay_node` on radio receipts, with `link_source` kept so NeighborInfo from MeshSTL can be compared.
 - Position source: option 2, the MeshSTL broker for the metro, once its operators agree to a standing subscription, with the public broker's regional roots alongside (ADR 0005 item 7, PR #13, which merges after this ADR). Until they agree, option 1.
 - Position rule: the stationarity window over the trailing 7 days, falling back to 30 minutes for a node that moved; the gateway-only fallback is not adopted.
-- Area: the MSA.
+- Area: the MSA. Widening to Missouri plus Illinois is a documented trigger, not adopted: the condition is the widening check, under 300 contract link-hours a week at 3 km in the MSA under the adopted position rule, and Casey decides the widening when it fires. The spike's baseline under the stationarity rule is 162 a week in the MSA and 357 in Missouri plus Illinois on the public broker, and 309 in the MSA on MeshSTL.
 
 ## Consequences
 
-- `lnk_01` reads: relayer resolved from `relay_node` among senders the gateway heard by radio in the trailing 24 hours, with the sender's own byte taken as a direct hop. via_mqtt envelopes are never receipts, and `hop_limit` stays unused.
-- If the stationarity window is chosen, `lnk_02` gains it as a contract change for Casey: a node whose every position in the trailing 7 days is one box keeps that box; any other node keeps the 30-minute rule.
+- `lnk_01` and `lnk_02` are changed in `docs/data-quality-contract.md` in the same PR. `lnk_01` reads: relayer resolved from `relay_node` among senders the gateway heard by radio in the trailing 24 hours, with the sender's own byte taken as a direct hop. via_mqtt envelopes are never receipts, and `hop_limit` stays unused.
+- `lnk_02` gains the stationarity window: a node whose every position in the trailing 7 days is one box keeps that box; any other node keeps the 30-minute rule.
 - `ing_03` keeps the status `stripped`; ADR 0005 changes what is stored for header-only copies.
 - `analyze.py` accepts a negative portnum from wrong-key noise as decoded (3 packets in 63.59 hours); the Phase 1 decoder rejects portnum 0 or below.
 - The capture containers had no built-in end time and ran under `--restart unless-stopped`. The public capture ran 15.5 hours past its window (to 2026-10-25T07:43Z) and MeshSTL 9.6 hours past its own, until Docker Desktop stopped. When Docker Desktop was started for a disk check on 2026-10-28, Docker restarted both: they wrote 4 minutes of data (the public fragment above, and 72 MeshSTL records) and the MeshSTL capture reconnected to a community broker outside the agreed window, until Casey stopped both and set their restart policy to `no`. `unless-stopped` restarts a container after any exit, a clean one included, and on every engine start unless it was stopped with `docker stop`; Docker Desktop quitting does not count. Fixed in this PR: `capture.py` takes `END_AT` and `MAX_RAW_BYTES`, halts with a `HALTED.json` marker and exit 0, and refuses to start while the marker exists; captures run with `--restart on-failure`. Under `on-failure` a SIGTERM before `END_AT` ends the capture early with exit 0 and no marker, so the `stop` log line is its only record; a kill (exit 137) restarts it at the next engine start. Pending: every Compose service `restart: "no"` (PR #12), and the Phase 1 ingester's halt design (ADR 0005 item 1, PR #13).
