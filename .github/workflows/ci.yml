@@ -93,3 +93,13 @@ jobs:
         run: docker compose logs --no-color dagster-migrate dagster-webserver dagster-daemon minio-bootstrap
       - if: always()
         run: make down
+      # Casey decided on 2026-10-31 that make down keeps the data and only make
+      # nuke deletes it. Without a terminal, make nuke must refuse unless
+      # CONFIRM carries the word, which is how scripts are kept from it.
+      - name: check that make down kept the volumes and make nuke deletes them
+        run: |
+          docker volume inspect mesh-terrain_warehouse-data mesh-terrain_minio-data > /dev/null
+          if make nuke < /dev/null; then echo "make nuke ran without CONFIRM"; exit 1; fi
+          docker volume inspect mesh-terrain_warehouse-data mesh-terrain_minio-data > /dev/null
+          make nuke CONFIRM=nuke
+          test -z "$(docker volume ls --quiet --filter label=com.docker.compose.project=mesh-terrain)"
