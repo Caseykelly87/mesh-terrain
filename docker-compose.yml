@@ -67,6 +67,11 @@ services:
       - "${MINIO_CONSOLE_PORT}:9001"
     volumes:
       - minio-data:/bitnami/minio/data
+    # The image declares /certs as a volume, so each new container would leave
+    # an empty anonymous volume behind now that make down keeps volumes. No TLS
+    # is used locally; MinIO only creates an empty CAs folder there.
+    tmpfs:
+      - /certs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
