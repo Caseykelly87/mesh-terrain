@@ -18,7 +18,7 @@ byte count, logs at error and exits 0. With `--restart on-failure` Docker
 leaves it stopped. A start that finds HALTED.json exits 0 at once, so
 restarting the container never resumes a capture; deleting the marker does.
 SIGTERM flushes and exits 0 without a marker, so a stop before END_AT ends
-the capture early; the `stop` log line is the only record of it.
+the capture early; the `signal` and `stop` log lines are the only record.
 """
 
 from __future__ import annotations

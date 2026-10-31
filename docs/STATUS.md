@@ -4,7 +4,7 @@ This file says where the project actually stands. It is updated by the agent tha
 
 ## Current phase and last unit
 
-Phase 0, in progress. Last unit: ingest-eng, final Phase 1 spike numbers from both captures, ADR 0003 ready for decision, capture script that halts itself, PR #9. Before it: warehouse-eng, MSA boundary seed and `staging.stg_msa_boundary` view with 13 dbt tests, PR #7; platform-eng, ITM library build stage in the Dagster image per ADR 0002, PR #6; platform-eng, Phase 0 foundation (uv project, tooling, Makefile, Compose, dbt scaffold, Dagster Definitions, CI), PR #2; terrain-rf-eng ITM spike and ADR 0002 (accepted: option 1, the NTIA ITM library via ctypes), PR #1.
+Phase 0, in progress. Last unit: ingest-eng, final Phase 1 spike numbers from both captures, ADR 0003 accepted by Casey on 2026-10-31 with `lnk_01` and `lnk_02` changed in the contract, capture script that halts itself, PR #9. Before it: warehouse-eng, MSA boundary seed and `staging.stg_msa_boundary` view with 13 dbt tests, PR #7; platform-eng, ITM library build stage in the Dagster image per ADR 0002, PR #6; platform-eng, Phase 0 foundation (uv project, tooling, Makefile, Compose, dbt scaffold, Dagster Definitions, CI), PR #2; terrain-rf-eng ITM spike and ADR 0002 (accepted: option 1, the NTIA ITM library via ctypes), PR #1.
 
 ## Deviations from the plan still in effect
 
@@ -13,7 +13,7 @@ Phase 0, in progress. Last unit: ingest-eng, final Phase 1 spike numbers from bo
 - h3-pg is built from `github.com/postgis/h3-pg` (the `zachasme/h3-pg` repository named in the plan was archived and moved there) at tag v4.2.3, commit a26630b8.
 - ADR 0001 said PostgreSQL 16; the warehouse is PostgreSQL 17 with PostGIS 3.5 per ADR 0004, and the plan's stack table already says so.
 - `staging.stg_msa_boundary` rejoins two WKT chunks with `string_agg(geometry_wkt, '' order by part)`, beyond the staging rule of casting and renaming only, because dbt cannot load a seed field over 131,072 characters and the boundary WKT is 179,994. The lead decided to keep the two exact chunks rather than simplify the polygon to one row. No ADR: the grain is unchanged and it is not a stop item. PR #7.
-- Note for every agent: the plan was revised on 2026-10-21 after verifying two public-broker behaviours (hop_limit rewritten to 0; positions limited to 10 to 16 bits). The link is relayer to gateway, the 1 m DEM is out of scope, and ADR 0003 is pending the Phase 1 spike. Read the section "Two constraints of the public broker" in docs/PLAN.md before any Phase 1 or Phase 2 work.
+- Note for every agent: the plan was revised on 2026-10-21 after verifying two public-broker behaviours (hop_limit rewritten to 0; positions limited to 10 to 16 bits). The link is relayer to gateway, the 1 m DEM is out of scope, and ADR 0003 (accepted 2026-10-31) sets the link source, position source, position rule and area. Read the section "Two constraints of the public broker" in docs/PLAN.md before any Phase 1 or Phase 2 work.
 
 ## Known issues and skipped steps
 
@@ -21,6 +21,7 @@ Phase 0, in progress. Last unit: ingest-eng, final Phase 1 spike numbers from bo
 - The spike containers `mesh-spike-capture` and `mesh-meshstl-capture` still exist, exited, restart policy `no` (set by Casey on 2026-10-28 after Docker Desktop restarted both; ADR 0003, Consequences). Their image predates the `END_AT` fix in `capture.py`, so neither may be started again. Owner: ingest-eng. Casey approved removing the containers and the `mesh-spike` image after PR #9 merges (2026-10-31); the data folders are bind mounts and stay. Closes when they are removed.
 - The MeshSTL capture holds 9 881 records after its agreed window (2026-10-24T22:08:59Z onward: 672 in `capture-2026-10-24T22.jsonl`, all of the nine files `capture-2026-10-24T23.jsonl` to `capture-2026-10-25T07.jsonl`, and `capture-2026-10-28T20.jsonl`). No analysis reads them. Casey decided on 2026-10-31 that they are deleted with the real-id public archive, after the pseudonymised Parquet reproduces every ADR 0003 link figure and he confirms the gate. Owner: ingest-eng. Closes when they are deleted.
 - The public broker forwards via_mqtt copies (95 percent of parsed envelopes, 88.6 percent of bytes) with the payload removed from all but 1 204 of 74.3 million, and removes it from 25.8 percent of radio deliveries too; why is not established. The MeshSTL broker removes nothing. Casey approved `stripped` as an `ing_03` status on 2026-10-22 and the contract carries it; the spike and the Phase 1 decoder report it as its own status. Owner: ingest-eng. Closes when the Phase 1 decoder lands with the status.
+- `docs/data-quality-contract.md` says `tests/test_contract.py` parses it and fails when a rule has no matching test; that test does not exist, so nothing yet checks the contract against the tests. Owner: warehouse-eng, with the first `assert_` tests in Phase 2. Closes when the test exists and passes.
 - ArcGIS deliverable deferred: no ArcGIS Pro licence yet, so the arcpy script, layout and hosted feature layer wait until the rest of the pipeline passes its exit criteria. Owner: maps-eng, who builds the script untested against the exported GeoPackage. Closes when a licence exists and the manual smoke run is recorded.
 - The Debian variant of `postgis/postgis:17-3.5` is still bullseye, which both Debian and the PostgreSQL apt project have moved to archive hosts; the warehouse Dockerfile rewrites the apt sources in its builder stage and pre-empts h3-pg's `pgindent` step (ADR 0004). Owner: platform-eng. Closes when the upstream image moves to a newer Debian and the rewrite can go.
 - `astral-sh/setup-uv` is pinned to the exact tag v10.3.1 because the action publishes no major tag after v7; bumps are manual. Owner: platform-eng. Closes if the action resumes major tags.
@@ -59,8 +60,8 @@ Phase 0, in progress. Last unit: ingest-eng, final Phase 1 spike numbers from bo
 
 ## Next three units of work
 
-1. Casey: ADR 0003 decisions (link source, position source, position rule, area), review of ADR 0005, and whether the spike containers are removed and the out-of-window MeshSTL records deleted.
-2. platform-eng: make the Dagster image build work behind Norton on Casey's machine, then apply Casey's `make down` decision (PR #12).
-3. ingest-eng: the Phase 1 ingester per ADR 0003 and ADR 0005.
+1. ingest-eng: the ADR 0005 decoder as a batch tool over the spike archive, after PRs #12 and #13 merge (ADR 0005, Timing).
+2. warehouse-eng: Phase 2 core models on the pseudonymised spike data, with the stationarity `lnk_02` and modem preset as a column.
+3. platform-eng: make the Dagster image build work behind Norton on Casey's machine.
 
 Merge order: PR #9 (ADR 0003 and the spike), then PR #12 (Compose restart), then PR #13 (ADR 0005), which cites both.

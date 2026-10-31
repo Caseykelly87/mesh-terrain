@@ -196,7 +196,7 @@ Decoded portnums: Position 38.9%, NodeInfo 20.2%, Telemetry 14.7%, MapReport 8.6
 
 precision_bits on Position packets: national 15 or 16 bits 35.0%, 13 bits 40.7%; inside the MSA 15 or 16 bits 35.7%, 13 bits 39.1%, nothing above 16.
 
-Regional segments on the public broker, radio deliveries on `e` topics (parsed, with a sender, via_mqtt false):
+Regional segments on the public broker, envelopes on `e` topics that parse and have a sender (radio deliveries, plus the 9 internet copies under `msh/US/IL`):
 
 | topic root | packets | per hour | gateways | senders | relayed | with payload | positions |
 | --- | --- | --- | --- | --- | --- | --- | --- |
