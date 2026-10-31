@@ -1,6 +1,6 @@
 # ADR 0005: Ingest continuously under a byte cap, land only allowlisted and pseudonymised fields as hourly Parquet, and subscribe to the MeshSTL and MO roots
 
-Date: 2026-10-30
+Date: 2026-10-30, open questions decided and timing note 2026-10-31
 Status: accepted
 Proposed by: ingest-eng
 Decided by: Casey
@@ -108,12 +108,12 @@ With fewer positions, the nodes that count as stationary and the nodes that fall
 
 1. Continuous ingestion from Phase 1. The ingester runs until MAX_RAW_BYTES (default 10 GB, 10 000 000 000 bytes, measured on the landing folder at each flush) or an optional END_AT, then flushes, writes a halt marker with the reason and byte count, logs at error and exits 0. Its restart policy is on-failure, so a crash restarts it and a halt does not. A Dagster asset check surfaces the halt marker, and a make target resumes. Worked example, JSON lines: at the `msh/US/#` rate, 5.568 GB a day, 10 GB trips in about 43 hours (as zstd Parquet with payloads, 0.220 GB a day, about 45 days). The public MO and MeshSTL roots alone, 0.013 GB a day, take about 769 days; with the pending MeshSTL broker subscription added, 0.019 GB a day, about 526 days. Parquet of allowlisted fields is smaller still.
 2. No raw bytes are stored for any packet type. Each row carries decoder_version and schema_version. Replayability comes from committed fixtures per packet type, not from an archive.
-3. Node and gateway ids pass through HMAC-SHA-256 with a key from the environment before landing. No real id, long name, short name or public key is ever written. Hardware model and role are kept. The dbt-side hash is removed, and contract rule `prv_01` is restated as "no real identifier exists on disk".
+3. Node and gateway ids pass through HMAC-SHA-256 with a key from the environment before landing. No real id, long name, short name or public key is ever written. Hardware model and role are kept. The dbt-side hash is removed, and contract rule `prv_01` is restated as "no real identifier exists on disk", scoped on 2026-10-31 to the landing zone and the warehouse (see Decided 2026-10-31).
 4. Only allowlisted fields land.
-   - Envelope: received_at, gateway pseudonym, origin pseudonym, relay_node byte, hop_start, hop_limit, via_mqtt, rx_time, rx_snr, rx_rssi, channel, topic, modem preset parsed from the topic, portnum, payload length.
+   - Envelope: received_at, gateway pseudonym, origin pseudonym, relay_node byte, hop_start, hop_limit, via_mqtt, rx_time, rx_snr, rx_rssi, channel, topic, modem preset parsed from the topic, portnum, payload length. Added 2026-10-31: `packet_id`, and beside each pseudonym its node's low id byte: `gateway_pseudonym` with `gateway_low_byte`, `origin_pseudonym` with `origin_low_byte`.
    - Position: lat, lon, altitude, precision_bits, position timestamp, location_source, altitude_source.
    - NodeInfo: hardware model, role.
-   - NeighborInfo: neighbour pseudonym, snr, last heard.
+   - NeighborInfo: neighbour pseudonym, snr, last heard. Added 2026-10-31: `neighbour_pseudonym` with `neighbour_low_byte`.
    - Telemetry: channel_utilization, air_util_tx, uptime, battery level, nothing else.
    - Every other packet type: portnum and payload length.
    A contract test asserts that no TEXT_MESSAGE_APP payload bytes are on disk.
@@ -122,36 +122,52 @@ With fewer positions, the nodes that count as stationary and the nodes that fall
 7. On the public broker the ingester subscribes to `msh/US/MeshSTL/#` and `msh/US/MO/#`. `msh/US/IL/#` and `msh/US/#` are not subscribed: IL carries no metro receipt, and widening to Missouri plus Illinois is not proposed in ADR 0003. Whether the MeshSTL broker itself (`mqtt.meshstl.org`, `msh/US/MeshSTL/#`) is also subscribed is ADR 0003's position-source question, pending Casey and the MeshSTL operators. The ingester supports more than one broker connection, and the scope list is configuration.
 8. Modem preset is a column on every observation and a stratification term in the validation model; it goes into the analytics-eng brief when Phase 4 starts.
 
+### Decided 2026-10-31
+
+Casey answered the four questions this ADR left open:
+
+1. The envelope allowlist gains `packet_id` and the sender's low byte. Every pseudonymised id (gateway, origin, neighbour) has its node's low id byte stored beside it, in the columns named in item 4. `lnk_01` needs them: a radio receipt is keyed by (gateway, sender, packet id), and `relay_node` is matched against the `origin_low_byte` of the senders the gateway heard, the sender's own byte meaning a direct hop. A low byte is one of 256 values, the same kind of value as `relay_node`, and identifies no node on its own.
+2. The topic lands with its gateway segment replaced by the gateway pseudonym: `msh/US/MeshSTL/2/e/LongFast/!a1b2c3d4` lands as `msh/US/MeshSTL/2/e/LongFast/` followed by the pseudonym, in observations and copy counts alike.
+3. The copy of `NODE_ID_HMAC_KEY` is kept in Casey's password manager.
+4. `prv_01` is scoped to the landing zone and the warehouse. The spike archive (gzipped JSON lines and Parquet on Casey's machine, evidence for ADR 0003) is outside it until it is deleted; deletion follows the pseudonymised reproduction gate in the next unit, under Casey's yes.
+
+### Timing (2026-10-31)
+
+Casey: "The ingester service is deferred; the goal is an end-to-end MVP on the spike data, then continuous ingestion later as a configuration change. Nothing in ADR 0005 changes except timing." Status stays accepted.
+
+- The ingester service, item 1's continuous run, is deferred.
+- The decoder is built first as a batch tool over the spike archive. It writes the same production Parquet schema, allowlisted and pseudonymised, under the raw landing folder by hour.
+- Continuous ingestion is turned on later as a configuration change. The conditions are in `docs/STATUS.md`, Known issues.
+
 ## Consequences
 
-Contract wording, proposed by ingest-eng; Casey approves, then the lead edits `docs/data-quality-contract.md`:
+Contract rows, final wording for Casey's read; the lead edits `docs/data-quality-contract.md` after he approves:
 
-- `ing_01`: "Every stored delivery appears once, keyed by `delivery_key = HMAC-SHA-256(NODE_ID_HMAC_KEY, "delivery" || topic || payload_bytes)`, computed in memory before the bytes are dropped." It is keyed because topic and envelope carry real ids: anyone holding a recording of the same feed, the spike archive included, could recompute an unkeyed SHA-256 and join back to them (option 3). It uses the node-id key with a fixed `delivery` prefix rather than a second key: one secret to hold, and the prefix keeps the two uses apart. Enforced by a unique test on `delivery_key`.
-- `ing_02`: "Landed rows are never updated or deleted. The only rewrite is the hourly compaction, which replaces a finished hour's flush files with one file and removes them only after the new file holds the same set of `delivery_key`." Enforced by an asset check on the key sets.
-- `ing_03`: "Every stored delivery carries a decode status in {`ok`, `unknown_port`, `decrypt_failed`, `stripped`, `malformed`}, set at ingest on the same row. Internet copies are counted once per (hour, topic, gateway), and deliveries that are not stored as rows are counted per (hour, topic class), so stored rows plus counted deliveries equal deliveries received." `stripped` stays for header-only radio deliveries (25.8 percent of public radio deliveries, 84.1 percent of which carry `relay_node`). The decoder sets `malformed` on a portnum of 0 or below: wrong-key noise parsed with a negative portnum 3 times in 63.594 hours.
-- `prv_01` enforcement, replacing the column-name scan: the landed Parquet schema of each table equals the allowlist for its schema_version; no stored string matches `![0-9a-f]{8}` (a node id as it appears in topics); no column holds a long name, short name or public key.
-- `ing_04`: its decode-rate denominator must say whether `stripped` and unparsed or `malformed` deliveries count. Under `msh/US/MeshSTL` the public broker carried 18 378 parsed radio deliveries, 67.3 percent with a payload, and a further 28 342 records on `e` topics that do not parse as a `ServiceEnvelope` or have no sender, because some MeshSTL gateways publish other payloads there (results.md, "Regional segments"). With 28 342 unparsed against 18 378 parsed, the choice moves the rate a long way.
-- The text-message test in item 4 becomes a new privacy rule, id from the lead, and covers `json` payloads as well as `e` payloads.
+| Id | Rule | Enforced by |
+| --- | --- | --- |
+| `ing_01` | Every stored delivery appears once, keyed by `delivery_key = HMAC-SHA-256(NODE_ID_HMAC_KEY, "delivery" \|\| topic \|\| payload_bytes)`, computed in memory before the bytes are dropped. No payload bytes are stored (ADR 0005). | unique test on `raw.mqtt_message.delivery_key`; the loader inserts with `ON CONFLICT (delivery_key) DO NOTHING` |
+| `ing_02` | Landed rows are never updated or deleted. The only rewrite is the hourly compaction, which replaces a finished hour's flush files with one file and removes them only after the new file holds the same set of `delivery_key` (ADR 0005). | Dagster asset check comparing the `delivery_key` sets before and after compaction; no `UPDATE` or `DELETE` statement in any loader; reviewer checks |
+| `ing_03` | Every stored delivery carries a decode status in {`ok`, `unknown_port`, `decrypt_failed`, `stripped`, `malformed`}, set at decode on the same row. `stripped` means the broker forwarded the envelope header with no payload. Internet copies are counted once per (hour, topic, gateway), and deliveries not stored as rows are counted per (hour, topic class), so stored rows plus counted deliveries equal deliveries received (ADR 0005). | accepted_values on `raw.mqtt_message.decode_status`; Dagster asset check reconciling received, stored and counted totals per hour |
+| `prv_01` | No real identifier exists in the landing zone or the warehouse. Node, gateway and neighbour ids appear only as HMAC pseudonyms, each with its node's low id byte (one of 256 values, not an identifier); topics carry the gateway pseudonym; no long name, short name or public key is stored (ADR 0005). | test that each landed Parquet table's schema equals the allowlist for its schema_version; test that no stored string matches `![0-9a-f]{8}`; singular test scanning information_schema in every schema for `node_id`, name and public-key columns |
+
+The key is HMAC rather than SHA-256 because topic and envelope carry real ids: anyone holding a recording of the same feed could recompute an unkeyed hash and join back to them (option 3). The `delivery` prefix keeps it apart from the node pseudonyms under the same key. In `ing_03`, `stripped` stays for header-only radio deliveries (25.8 percent of public radio deliveries, 84.1 percent of which carry `relay_node`), and the decoder sets `malformed` on a portnum of 0 or below (wrong-key noise parsed with a negative portnum 3 times in 63.594 hours). The pipes in `ing_01` are escaped as `\|` so the table renders; the row on `main` leaves them bare.
+
+Fit with `raw.mqtt_message`: no loader or `raw.mqtt_message` table exists in code yet, only in the plan and the agent file. `ing_01` and `ing_02` fit a `raw.mqtt_message` with one row per stored delivery, the allowlisted envelope columns and `delivery_key` as its unique key; they do not fit the payload-keyed table the rules on `main` describe (columns `payload` and `key`), so the next unit creates the table with the new columns rather than loading into that design. `raw.decoded_packet` is no longer needed, because the decode status sits on the delivery row.
+
+Other contract points (lead): `ing_04`'s decode-rate denominator must say whether `stripped` and unparsed or `malformed` deliveries count. Under `msh/US/MeshSTL` the public broker carried 18 378 parsed radio deliveries, 67.3 percent with a payload, and a further 28 342 records on `e` topics that do not parse as a `ServiceEnvelope` or have no sender, because some MeshSTL gateways publish other payloads there (results.md, "Regional segments"); the choice moves the rate a long way. The text-message test in item 4 becomes a new privacy rule, id from the lead, covering `json` payloads as well as `e` payloads.
 
 Superseded text in lead-only files (lead): `docs/PLAN.md`, "Store ciphertext and decoded payload both", the `raw` row of the data model, the Phase 1 exit and tasks (`raw.mqtt_message`, the loader keyed on the payload, decode as a later asset), and Phase 2 "`dim_node` snapshot with keyed-hash pseudonymisation"; `CLAUDE.md`, "Node ids are pseudonymised with a keyed hash before anything leaves the `core` schema"; `.claude/agents/ingest-eng.md`, the dumb-subscriber rule with decoding as a replayable batch step, raw columns with `payload` as binary, the payload-keyed loader, the decode asset, keeping ciphertext and decoded payload, and recording real envelopes as fixtures.
 
 Ingester (ingest-eng unless stated):
 
 - Halt and resume. While the halt marker exists the ingester refuses to start: it logs at error and exits 0, as `capture.py` does. The resume target removes the marker and starts the service; it never deletes landed data. It refuses while the halt condition still holds: after a `max_raw_bytes` halt, until the landing folder is below MAX_RAW_BYTES (Casey raised the cap or moved files); after an `end_at` halt, until END_AT is unset or in the future. It prints the size and the cap either way. On the object store the landing folder is the bucket prefix.
-- `NODE_ID_HMAC_KEY` is read once as a secret, never logged, and listed in `.env.example` with no value. One key covers gateway, sender and neighbour ids, so a node has one pseudonym in every role (`lnk_03` compares them). Input encoding and output length are fixed by a known-answer test before the first landing, since changing either later equals a rotation. Losing or rotating the key breaks joins across the change, and with no raw bytes old rows cannot be recomputed; rotation is out of scope for Phase 1.
+- `NODE_ID_HMAC_KEY` is read once as a secret, never logged, and listed in `.env.example` with no value. One key covers gateway, sender and neighbour ids, so a node has one pseudonym in every role (`lnk_03` compares them). Input encoding and output length are fixed by a known-answer test before the first landing, since changing either later equals a rotation. Losing or rotating the key breaks joins across the change, and with no raw bytes old rows cannot be recomputed; rotation is out of scope for Phase 1, and the backup copy is in Casey's password manager.
 - `json`, `map` and `stat` topics are dropped and counted per (hour, topic class) with no topic string: `json` carries decoded text and real ids in clear, map reports carry names, and `stat` topics end in a node id.
 - A record on an `e` topic that does not parse as a `ServiceEnvelope` or has no sender (28 342 under `msh/US/MeshSTL` in the public capture) is neither an internet copy nor an allowlisted packet. It gets status `malformed` and is counted per (hour, topic class) the same way, with no bytes and no topic string.
 - The 1 204 internet copies that kept a payload (116 default key, 1 077 plaintext, 11 PKI) are counted with the other copies per (hour, topic, gateway); the payload is dropped undecoded.
-- Fixtures per packet type under `tests/fixtures/mqtt/` are the replay mechanism, a text message included. They are built, not recorded: made-up ids, invented text, re-encrypted with the default key, whose nonce uses packet id and sender id. A decoder change bumps decoder_version, a change to landed columns bumps schema_version, and rows from a faulty decoder can only be found by decoder_version and excluded.
+- Fixtures per packet type under `tests/fixtures/mqtt/` are the replay mechanism, a text message included. They are built, not recorded: made-up ids, invented text, re-encrypted with the default key, whose nonce uses packet id and sender id. None exist yet; the batch decoder unit builds them first. A decoder change bumps decoder_version, a change to landed columns bumps schema_version, and rows from a faulty decoder can only be found by decoder_version and excluded.
 - The Parquet table split and names are proposed with warehouse-eng in the Phase 1 brief.
 - Modem preset: the channel segment of an `e` topic is the channel name, which equals the preset name only on default channels such as LongFast. The parser maps known preset names and leaves null for custom names; analytics-eng decides in Phase 4 whether null is its own level or excluded.
 - Docker documents that on-failure does not restart a container when the daemon restarts, yet a container running when Docker Desktop quits records a non-zero exit (255 for the warehouse and object store on 2026-10-28). Verify on Casey's host that the ingester is not restarted then (PR #12). If not, `ing_05` freshness is the alarm (platform-eng and ingest-eng).
 
 Other agents: platform-eng adds the ingester Compose service with `restart: on-failure` (the one exception to PR #12's `restart: "no"`, excluded from the compose-smoke guard), the resume target and the `.env.example` entries `MAX_RAW_BYTES`, `END_AT` and `NODE_ID_HMAC_KEY`; warehouse-eng keys `dim_node` on the pseudonym and hashes nothing in dbt; analytics-eng adds modem preset as a stratification term at Phase 4.
-
-Open for Casey:
-
-1. The allowlist omits the packet id and the sender's low byte. ADR 0003's link rule matches `relay_node` against the low byte of each sender's real id, which the pseudonym hides, and a radio receipt is keyed by (gateway, sender, packet id); without both the relayer cannot be resolved. Add `packet_id` and the origin's low byte (one of 256 values, like `relay_node`), or name another way.
-2. An `e` topic ends in the real gateway id. Read together, items 3 and 4 mean the topic lands with that segment replaced by the gateway pseudonym, in observations and copy counts alike. Confirm.
-3. Where a copy of `NODE_ID_HMAC_KEY` is kept outside the repo and the machine.
-4. The spike's raw archive (gzipped JSON lines and Parquet on Casey's machine, evidence for ADR 0003) holds real ids, so it conflicts with the unscoped `prv_01`. Either scope the rule to the landing zone and the warehouse, or set a retention date for the archive.
