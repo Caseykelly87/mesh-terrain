@@ -20,12 +20,14 @@ UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
-.PHONY: help env up down check check-itm fmt reproduce dbt-deps dbt-build dbt-debug lint test
+.PHONY: help env up down nuke check check-itm fmt reproduce dbt-deps dbt-build dbt-debug lint test
 
 help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
-	@echo "make down       stop the stack and remove its volumes"
+	@echo "make down       stop the stack and remove its containers; the data volumes are kept"
 	@echo "                (up and down are the only start and stop; no service restarts on its own)"
+	@echo "make nuke       stop the stack and delete its data volumes after a typed confirmation"
+	@echo "                (without a terminal it refuses unless run as make nuke CONFIRM=nuke)"
 	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
 	@echo "make check-itm  load the ITM library in the Dagster image and reproduce the ADR 0002 figure"
 	@echo "make fmt        ruff format and autofix"
@@ -39,8 +41,14 @@ up: env
 	$(COMPOSE) up --build --detach
 	bash docker/wait-for-stack.sh
 
+# Keeps the named volumes so stopping never loses data; make nuke deletes them.
 down:
-	$(COMPOSE) down --volumes --remove-orphans
+	$(COMPOSE) down --remove-orphans
+
+# CONFIRM reaches the script through the bare export above. The script lists
+# the volumes and asks before deleting anything.
+nuke: env
+	bash docker/nuke.sh
 
 lint:
 	$(UV) ruff check .
