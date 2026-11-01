@@ -26,8 +26,8 @@ help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
 	@echo "make down       stop the stack and remove its containers; the data volumes are kept"
 	@echo "                (up and down are the only start and stop; no service restarts on its own)"
-	@echo "make nuke       stop the stack and delete its data volumes after a typed confirmation"
-	@echo "                (without a terminal it refuses unless run as make nuke CONFIRM=nuke)"
+	@echo "make nuke       stop the stack and delete every project volume after a typed confirmation"
+	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
 	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
 	@echo "make check-itm  load the ITM library in the Dagster image and reproduce the ADR 0002 figure"
 	@echo "make fmt        ruff format and autofix"
@@ -45,10 +45,14 @@ up: env
 down:
 	$(COMPOSE) down --remove-orphans
 
-# CONFIRM reaches the script through the bare export above. The script lists
-# the volumes and asks before deleting anything.
+# CONFIRM counts only when typed on the make command line. The bare export
+# above would also pass one from the shell environment or .env, so the word
+# goes to the script as an argument and only when origin says command line.
+NUKE_CONFIRM := $(if $(filter command line,$(origin CONFIRM)),$(CONFIRM))
+
+# The script lists every project volume and asks before deleting anything.
 nuke: env
-	bash docker/nuke.sh
+	bash docker/nuke.sh '$(NUKE_CONFIRM)'
 
 lint:
 	$(UV) ruff check .
