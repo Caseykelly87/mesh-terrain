@@ -4,7 +4,7 @@ This file is read by every agent and every session working in this repository. I
 
 ## What this project is
 
-A streaming-to-batch data pipeline that ingests the public Meshtastic MQTT feed, models it in PostGIS with dbt and Dagster, derives terrain features from USGS 3DEP elevation data, and tests how well a standard radio propagation model explains observed LoRa link quality across the St. Louis metro. The full plan, data model, phases and exit criteria are in `docs/PLAN.md`. Read it before starting any phase.
+A batch analysis on dated, immutable snapshots: a single Meshtastic MQTT capture from 2026-10-22 to 2026-10-25, modelled in PostGIS with dbt and Dagster, with terrain features from USGS 3DEP elevation and lidar data, testing how well standard radio propagation models explain observed LoRa link quality across the St. Louis metro. Alongside it, a reusable terrain-aware path-loss engine (`docs/INTERFACE.md`). There is no continuous or scheduled ingestion, now or planned; nothing runs unless started. The full plan, data model, phases and exit criteria are in `docs/PLAN.md`. Read it before starting any phase.
 
 The project owner is Casey. Casey reviews every pull request, makes every decision listed under "Decisions that stop for a human", and is learning GIS through this build. Explain decisions in plain language when asking for one.
 
@@ -15,9 +15,9 @@ Work is split by specialty. Each specialty is a subagent defined in `.claude/age
 | Agent | Owns | Phases |
 | --- | --- | --- |
 | `platform-eng` | repo layout, uv, Docker Compose, CI, Terraform, secrets | 0, 6 |
-| `ingest-eng` | MQTT subscriber service, Parquet landing, raw loader, protobuf decoding | 1 |
+| `ingest-eng` | on-demand MQTT capture command, decoder and reduction, snapshot Parquet, raw loader | 1 |
 | `warehouse-eng` | PostGIS schema, dbt models, dbt tests, Dagster dbt integration | 2 |
-| `terrain-rf-eng` | DEM and land-cover assets, terrain profiles, LOS, Fresnel, diffraction, ITM | 3 |
+| `terrain-rf-eng` | DEM, DSM and canopy assets, terrain profiles, LOS, Fresnel, diffraction, ITM and P.1812, the engine | 3 |
 | `analytics-eng` | validation statistics, mixed model, kriging, H3 marts, write-up numbers | 4 |
 | `maps-eng` | exports, PMTiles, MapLibre site, ArcGIS Pro script, README figures | 5 |
 | `reviewer` | reads every PR cold; never writes production code | all |
@@ -153,7 +153,8 @@ Casey decides these. Prepare the options, state the trade-offs in two or three s
 - Choice of propagation model implementation (ITM bindings vs SPLAT fallback).
 - The link-resolution method and position source (ADR 0003), the minimum validation distance, and the number of endpoint draws.
 - Anything that spends money (cloud resources, paid APIs).
-- Anything that publishes data externally (GitHub Pages, ArcGIS Online, tiles on S3).
+- Anything that publishes data externally (GitHub Pages, ArcGIS Online, tiles on S3). Precise MeshSTL positions are never published.
+- Any capture from the MeshSTL broker, each run.
 - Adding a dependency outside the stack listed in `docs/PLAN.md`.
 - Deleting data or dropping a table.
 
@@ -180,7 +181,8 @@ Coverage target: 80 percent on `terrain/` and `ingester/`. No target elsewhere. 
 - Geometry: store SRID 4326, compute in EPSG:26915. Every function that takes coordinates says which CRS it expects in its signature or docstring.
 - SQL: lowercase keywords, one clause per line, CTEs over nested subqueries, `dbt` models under 150 lines or split.
 - Secrets: `.env` locally (gitignored), SSM in cloud. `.env.example` lists every variable with a comment.
-- Node ids are pseudonymised with a keyed hash before anything leaves the `core` schema.
+- Node ids are pseudonymised with a keyed hash (HMAC-SHA-256, `NODE_ID_HMAC_KEY`) at capture or reduction, before anything lands on disk (ADR 0005). No real node id exists in the landing zone or the warehouse.
+- Every input is a snapshot with an id, capture date, source URL, licence and sha256 manifest (contract rule `snp_01`). Nothing reads a file that is not in a registered snapshot's manifest; nothing overwrites a snapshot.
 - SQL from Python is always parameterised; no string formatting into a query, ever.
 - Resource handles (files, connections, cursors, rasters) are opened with context managers.
 - Prefer `pathlib.Path` over `os.path`; prefer `structlog` over `print`.
@@ -212,7 +214,8 @@ Full detail in `docs/STYLE.md`.
 
 - `make up` / `make down`: Compose stack.
 - `make check`: ruff, mypy, pytest, dbt build against the local stack.
-- `make reproduce`: rebuild every asset from the raw zone.
+- `make reproduce`: rebuild every asset from the registered snapshots; run twice, it gives identical artifact checksums.
+- `make capture` and `make engine`: start one capture run or one engine run from parameters; neither is ever scheduled.
 - `make fmt`: ruff format.
 
 If a target does not exist yet, `platform-eng` creates it in Phase 0.
