@@ -2,7 +2,7 @@
 
 Measurements behind the 1 m layers, the engine test tile and ADR 0006. Nothing here was ingested; the scripts and JSON outputs are in the lead's scratch folder and are not needed to read this file.
 
-All web and bucket requests on 2026-11-08. MSA from dbt/seeds/msa_boundary.csv: 20 944 km2 (EPSG:26915), bbox lon -91.4186 to -89.1383, lat 38.0035 to 39.5233. 
+All web and bucket requests on 2026-11-08. MSA from dbt/seeds/msa_boundary.csv: 20 944 km2 (EPSG:26915), bbox lon -91.4186 to -89.1383, lat 38.0035 to 39.5233.
 
 ## a. TTN Mapper: no data obtainable
 
