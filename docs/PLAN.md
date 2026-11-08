@@ -1,162 +1,166 @@
 # Development plan
 
+Restated 2026-11-08 after Casey rescoped the project: batch analysis on dated, immutable snapshots, plus a reusable terrain-aware path-loss engine. There is no continuous or scheduled ingestion, now or planned.
+
 ## Objective
 
 Answer one question with a number: how much of the variation in observed Meshtastic link quality across the St. Louis metro is explained by terrain-based propagation prediction, and what explains the rest. No hardware, no driving; every input is public.
 
-Hypothesis: a bare-earth terrain model (free-space plus knife-edge diffraction, then ITM) will underpredict loss in developed areas, with an RMSE around 15 dB on direct links at 915 MHz; adding land-cover shares and building density along the path as covariates will reduce the unexplained error materially, and the remaining residual will show little spatial structure (a nugget-dominated variogram). Published studies of ITM at these frequencies in cities report 10 to 23 dB RMSE, so an 8 dB result would be a surprise, not the target.
+The observed data is a single capture from 2026-10-22 to 2026-10-25 (snapshot `meshtastic-capture-2026-10-22`, ADR 0005). Nothing is collected on a schedule.
 
-Scope held fixed: St. Louis MSA bounding box; US 915 MHz LongFast preset; one-hop links (last relayer to gateway) only for validation.
+A second deliverable comes out of answering the question: a propagation engine that takes a terrain snapshot, transmitter sites and receiver points and writes predictions, a coverage raster and a manifest, from one command and a config file. It is built to be reusable; no downstream user is named anywhere in this repo. Its contract is `docs/INTERFACE.md`.
+
+Hypothesis: a bare-earth terrain model (free-space plus knife-edge diffraction, then ITM) will underpredict loss in developed areas, with an RMSE around 15 dB on direct links at 915 MHz; adding path clutter (building and canopy height from the 1 m layers) as covariates will reduce the unexplained error materially, and the remaining residual will show little spatial structure (a nugget-dominated variogram). Published studies of ITM at these frequencies in cities report 10 to 23 dB RMSE, so an 8 dB result would be a surprise, not the target.
+
+Scope held fixed: the St. Louis MSA; US 915 MHz LongFast preset; one-hop links (last relayer to gateway) only for validation. The area is the MSA; the Missouri plus Illinois widening trigger of ADR 0003 was retired on 2026-11-08.
 
 ## Two constraints of the public broker that shape everything
 
-Verified against Meshtastic's own documentation and discussions before Phase 0:
+Verified against Meshtastic's own documentation and the ADR 0003 spike:
 
-1. The public broker sets `hop_limit` to 0 on every default-key packet and leaves `hop_start` as sent. A rule of the form `hop_start = hop_limit` identifies nothing. What a gateway measures (`rx_rssi`, `rx_snr`) is always the last RF hop into that gateway. So the analysable link is (last relayer, gateway), not (original sender, gateway). Firmware 2.6 and later carries the relayer's low id byte in `MeshPacket.relay_node`; whether the broker preserves it is measured in the Phase 1 spike. Fallback source of direct links: NeighborInfo packets, which list a node's directly heard neighbours with SNR.
-2. The public broker forwards default-key positions only at 10 to 16 bits of precision; 16 bits is about plus or minus 364 m. Endpoint positions are therefore boxes, not points. Consequences: the 1 m DEM adds nothing and is dropped; terrain profiles are sampled over the position box and prediction is reported as a distribution; validation favours links long enough that the box is a small fraction of the path. The Phase 1 spike also checks for a St. Louis regional broker or a community channel with a published key, either of which would bypass the filter.
+1. The public broker sets `hop_limit` to 0 on every default-key packet and leaves `hop_start` as sent. A rule of the form `hop_start = hop_limit` identifies nothing. What a gateway measures (`rx_rssi`, `rx_snr`) is always the last RF hop into that gateway. So the analysable link is (last relayer, gateway), not (original sender, gateway). Firmware 2.6 and later carries the relayer's low id byte in `MeshPacket.relay_node`; the spike found it on 87 percent of radio deliveries and ADR 0003 resolves links from it. Fallback: NeighborInfo packets, which the MeshSTL broker forwards.
+2. The public broker forwards default-key positions only at 10 to 16 bits of precision; 16 bits is about plus or minus 364 m. Endpoint positions are therefore boxes, not points. Consequences: terrain profiles are sampled over the position box and prediction is reported as a distribution; validation favours links long enough that the box is a small fraction of the path. The 1 m layers do not sharpen the endpoints; they sharpen the clutter along the path, and they are built only where links are (Phase 3).
 
 Both constraints and the funnel they create are stated plainly in the write-up. Explaining why the public feed limits the analysis is part of the deliverable.
+
+## Operating model: snapshots
+
+Every input is a snapshot: a folder with an id, a capture date, a source URL, a licence and a sha256 manifest of its files, registered in `docs/data-quality-contract.md` (rule `snp_01`). A refresh is a new snapshot id, never an overwrite. Re-running the pipeline against the same snapshot ids reproduces the same artifacts. Snapshots live on the host under `C:/Users/Casey/mesh-terrain-data/snapshots/<id>/`, outside every Docker volume, so `make nuke` cannot touch them. They are not in git or LFS and are never published.
+
+Snapshot sources, each started by one documented make target or command and never on a schedule:
+
+| Source | Snapshot | Licence | Notes |
+| --- | --- | --- | --- |
+| Meshtastic MQTT capture (public broker and, with Casey's approval per run, the MeshSTL broker) | `meshtastic-capture-2026-10-22`, both brokers, 2026-10-22 to 2026-10-25 | none published; captured from public brokers under their terms, held privately | ADR 0005: allowlisted fields, HMAC pseudonyms, no raw bytes, no text, no names. Not irreplaceable: if lost, its figures are reproducible only by a new capture under a new id. Precise MeshSTL positions are never published. |
+| USGS 3DEP 1/3 arc-second DEM | dated editions of the six tiles n39w090 to n40w092 | public domain | metro-wide profiles for every link; pin the edition, since `/current/` changes |
+| USGS 3DEP 1 m DEM | dated TNM editions, test tile and link corridors only | public domain | pair each DEM with the EPT project of the same collection (MO_SaintLouis_2017 for the core) |
+| USGS 3DEP Entwine point tiles (EPT) | per project, test tile and corridors only | public domain | first-return DSM rasterised with PDAL at 1 m; 6.5 bytes a point, 3 to 34 points per square metre |
+| Meta and WRI canopy height v2 | tiles over the test tile and corridors | CC BY 4.0 on the AWS registry, DINOv3 licence in the paper; both recorded | 2018 to 2020 imagery, 40 to 68 percent leaf-on; lidar over the MSA is all leaf-off |
+| OpenStreetMap | Geofabrik extract, dated | ODbL | building footprints, roads for context |
+| Census TIGER | MSA boundary | public domain | committed as a seed |
+
+NLCD is dropped. Path clutter comes from DSM minus DEM and the canopy layer; the Okumura-Hata urban or suburban variant is chosen from the building share near each endpoint (`ter_06`).
+
+TTN Mapper is not a source. Its dumps are gone (the last, from 2020, is unarchived), its API is closed, and its maintainer said in December 2025 the dataset will not be released; it was also LoRaWAN at other spreading factors from rooftop gateways. It is recorded as a limitation in the write-up. If Casey obtains a St. Louis extract from the maintainer, it may serve as a calibration source for the clutter term only, under its own privacy rule, never as a validation set.
 
 ## Stack
 
 | Layer | Tool |
 | --- | --- |
 | Language, env | Python 3.12, uv |
-| Orchestration | Dagster 1.x with dagster-dbt, dagster-postgres, dagster-webserver |
+| Orchestration | Dagster 1.x with dagster-dbt, dagster-postgres, dagster-webserver; asset graph for lineage only, no schedules, no sensors |
 | Transforms | dbt-core 1.8+ with dbt-postgres, dbt-utils, dbt-expectations |
-| Warehouse | PostgreSQL 17 + PostGIS 3.5 (`postgis/postgis:17-3.5`), matching RDS for PostgreSQL 17; see ADR 0004 |
-| Raw landing | MinIO locally, S3 in cloud; Parquet via pyarrow |
-| MQTT ingest | paho-mqtt 2.x, meshtastic protobufs, cryptography |
-| Raster | rasterio, rio-cogeo, numpy, py3dep or direct National Map downloads |
+| Warehouse | PostgreSQL 17 + PostGIS 3.5 (`postgis/postgis:17-3.5`); see ADR 0004 |
+| Snapshots | host folders with sha256 manifests; Parquet via pyarrow |
+| Derived artifacts | MinIO locally, S3 in cloud |
+| MQTT capture | paho-mqtt 2.x, meshtastic protobufs, cryptography; on demand, ADR 0005 |
+| Raster | rasterio, rio-cogeo, numpy, PDAL (DSM from EPT), direct National Map and S3 downloads |
 | Vector | geopandas 1.x, shapely 2.x, pyproj, h3 4.x, pyrosm |
-| Propagation | numpy FSPL + ITU-R P.526 knife edge (own code); NTIA ITM library or SPLAT CLI |
+| Propagation | numpy FSPL + ITU-R P.526 knife edge (own code); NTIA ITM library (ADR 0002); ITU-R P.1812 via Py1812, pinned to a git commit (ADR 0006); Okumura-Hata |
 | Statistics | pandas, statsmodels, scipy, scikit-gstat, PyKrige, scikit-learn (comparison only) |
 | Web map | MapLibre GL JS, PMTiles via tippecanoe, GitHub Pages |
 | Esri | ArcGIS Pro 3.x, arcpy, ArcGIS Online hosted feature layer |
 | Quality | pytest, ruff, mypy, pre-commit, dbt tests, Dagster asset checks, GitHub Actions |
-| Infra | Docker Compose; Terraform 1.x on AWS (S3, RDS Postgres, one EC2) in Phase 6 |
+| Infra | Docker Compose, every service `restart: "no"`; Terraform 1.x on AWS in Phase 6 |
 | Config, logging | pydantic-settings, structlog, psycopg 3 |
 
-Deliberately not used: Airflow, PostGIS raster, Spark or Sedona, Great Expectations, Kubernetes.
+Deliberately not used: Airflow, PostGIS raster, Spark or Sedona, Great Expectations, Kubernetes, NLCD.
 
 ## Architecture
 
-Three lanes. The streaming lane (MQTT subscriber, raw Parquet) runs continuously and never mutates data. The batch lane (raster assets, PostGIS, dbt, terrain features, statistics) is Dagster assets rebuildable from the raw zone. The output lane (exports, MapLibre site, ArcGIS) reads export files only.
+Three lanes. The snapshot lane (captures and downloads) produces immutable folders on the host when a person starts it. The batch lane (loaders, dbt, terrain, the engine, statistics) is Dagster assets started by hand or by `make reproduce`, rebuildable from the snapshots. The output lane (exports, MapLibre site, ArcGIS) reads export files only. Nothing runs unless started.
 
-Boundaries: raw is append-only; terrain work in Python writes features, not rasters, to PostGIS; dbt owns every table a human queries; Python assets write only to `raw` and `features`.
-
-## Data sources
-
-| Source | Use | Notes |
-| --- | --- | --- |
-| Meshtastic public MQTT broker | packets with envelope (from, to, id, hop_limit, hop_start, relay_node, rx_time, rx_snr, rx_rssi, gateway, channel) and decoded Position, NodeInfo, Telemetry, NeighborInfo | rx values are measured at the uploading gateway for the last hop; hop_limit is rewritten to 0 by the broker; positions arrive at 10 to 16 bits (about plus or minus 364 m at 16); the same packet via several gateways is several receipts, keyed by (packet id, gateway) |
-| USGS 3DEP | 1/3 arc-second (about 10 m) metro-wide | reproject once to EPSG:26915, store as COG; 1 m LiDAR is a listed next step only if a precise position source appears |
-| NLCD | land-cover class at each end and along each path | nearest-neighbour resampling |
-| OpenStreetMap | building footprints, roads for context | pyrosm from a Geofabrik extract; ODbL attribution |
-| Census TIGER | MSA boundary as the AOI clip | committed as a seed |
-
-Decryption: default-channel packets use AES-CTR with a publicly documented key and a nonce from packet id and sender id. Store ciphertext and decoded payload both.
-
-Antenna gain and transmit power are unknown. Per-node offsets are random effects in the statistics.
+Boundaries: snapshots are read-only once their manifest exists; terrain work in Python writes features, not rasters, to PostGIS, and writes rasters only as engine artifacts; dbt owns every table a human queries; Python assets write only to `raw`, `features` and the artifact store.
 
 ## Data model
 
 | Schema | Owner | Tables (grain) |
 | --- | --- | --- |
-| `raw` | ingest-eng | `mqtt_message` (one per MQTT delivery), `decoded_packet` (one per delivery, with decode_status), `dem_tile`, `nlcd_tile`, `osm_extract` (one per file with checksum) |
-| `staging` | warehouse-eng (views) | `stg_packet` (per packet id and gateway), `stg_position`, `stg_nodeinfo`, `stg_telemetry`, `stg_neighbor` |
-| `core` | warehouse-eng (incremental) | `dim_node` (SCD2), `fct_node_position` (with precision_bits and the box half-width in metres), `fct_rx_observation` (one per receipt, with `relayer_node_hash` resolved from relay_node or NeighborInfo and `link_source` in {relay_node, neighbor_info}), `int_link_window` (per relayer, gateway, hour: median snr and rssi, n packets, both position boxes, LINESTRING between box centres, distance_m, bearing_deg, position_uncertainty_m) |
-| `features` | terrain-rf-eng | `link_terrain` (per link-hour, aggregated over sampled endpoint positions: LOS share, Fresnel clearance median and range, obstruction, knife-edge dB median and range, NLCD histogram, building count and area), `link_prediction` (fspl_db, diffraction_db median and interquartile range, itm_db median and interquartile range, hata_db) |
-| `analytics` | warehouse-eng and analytics-eng (H3 via the h3-pg extension in SQL) | `mart_link_validation`, `mart_hex` (H3 r8), `mart_node_effect`, `mart_data_quality` (daily funnel), `model_result`, `variogram_result` |
+| `raw` | ingest-eng | `mqtt_message` (one per stored delivery per snapshot, allowlisted fields, decode status, `seen_public`, `seen_meshstl`), `mqtt_copy_count` (per snapshot, hour, topic, gateway pseudonym), `mqtt_dropped_count` (per snapshot, hour, topic class, reason), `snapshot` (one per registered snapshot) |
+| `staging` | warehouse-eng (views) | `stg_packet` (per packet id and gateway, deduplicated across snapshots), `stg_position` (Position and MapReport, with `position_source`), `stg_nodeinfo`, `stg_telemetry`, `stg_neighbor` |
+| `core` | warehouse-eng (incremental) | `dim_node` (SCD2, keyed on the pseudonym), `fct_node_position` (with precision_bits and the box half-width in metres), `fct_rx_observation` (one per receipt, with the relayer pseudonym resolved per ADR 0003 and `link_source`), `int_link_window` (per relayer, gateway, hour: median snr and rssi, n packets, modem preset, both position boxes, LINESTRING between box centres, distance_m, bearing_deg, position_uncertainty_m) |
+| `features` | terrain-rf-eng | `link_terrain` (per link-hour, aggregated over sampled endpoint positions: LOS share, Fresnel clearance median and range, obstruction, knife-edge dB median and range, clutter height statistics along the path, building share and canopy share near each endpoint), `link_prediction` (fspl_db, diffraction_db, itm_db, p1812_db, each median and interquartile range, hata_db with its variant) |
+| `analytics` | warehouse-eng and analytics-eng (H3 via the h3-pg extension in SQL) | `mart_link_validation`, `mart_hex` (H3 r8), `mart_node_effect`, `mart_data_quality` (funnel), `model_result`, `variogram_result` |
 
 The unit of analysis is the link-hour, not the packet, and the link is last relayer to gateway. Rules are in `docs/data-quality-contract.md`.
 
 ## Phases
 
-### Phase 0: Foundation (week 1)
+The sequence is the original one with the smallest changes that fit the snapshot model: Phase 1 becomes a reduction of the existing capture rather than a service, Phase 3 gains the engine milestone, Phase 6 loses its schedules.
 
-Exit: `docker compose up` brings up PostGIS, MinIO, Dagster; CI green on an empty pipeline; ITM spike decided and recorded in `docs/adr/0002-propagation-model.md`.
+### Phase 0: Foundation
 
-Repo layout:
+Exit: `docker compose up` brings up PostGIS, MinIO, Dagster; CI green; ITM spike decided (ADR 0002); the spike and its ADRs 0003 and 0005 accepted. Done except PR #13.
 
-```
-mesh-terrain/
-  pyproject.toml, uv.lock, .pre-commit-config.yaml, Makefile
-  docker-compose.yml, .env.example
-  ingester/     pipeline/     dbt/     terrain/
-  notebooks/    web/          arcgis/  infra/
-  tests/        docs/
-```
+### Phase 1: Snapshot and reduction
 
-Tasks: uv project and tooling; Compose services and init SQL; dbt project and profile; Dagster Definitions with DbtCliResource; GitHub Actions (lint, types, tests, dbt build with service container); ITM spike time-boxed to three hours; MSA boundary seed.
+Exit: the decoder passes its fixture tests; snapshot `meshtastic-capture-2026-10-22` exists with README and manifest; the reproduction gate passes (every ADR 0003 link figure, including 560 against 177 per broker, reproduces from the pseudonymised Parquet) and Casey has confirmed it; the real-id archive is deleted after his yes; `raw.mqtt_message` and the count tables are loaded; the on-demand capture command is documented with the 2026-10-22 run as the worked example.
 
-### Phase 1: MQTT ingestion (week 2)
+Tasks (ingest-eng): `raw` tables and loader (`COPY`, `ON CONFLICT DO NOTHING` on the three keys); decoder test-first on synthetic fixtures under `tests/fixtures/mqtt/` (none exist; built, never recorded); batch reduction of the gzipped public archive and the in-window MeshSTL capture into the snapshot folder, Parquet by hour; the gate; `capture.py` brought to the ADR 0005 design in place as the capture command (broker, topic list, END_AT, MAX_RAW_BYTES, snapshot id; allowlist and pseudonymisation in memory; manifest at exit; no restart, no marker, no schedule); README.
 
-Exit: ingester ran unattended 72 hours; hourly Parquet lands; loader fills `raw.mqtt_message`; decode and freshness asset checks visible.
+### Phase 2: dbt transforms and data quality
 
-Tasks: paho-mqtt subscriber with buffer, flush and reconnect; Parquet partitioning by received date and hour; MinIO writes via pyarrow S3 filesystem; Dagster sensor on the bucket prefix; loader with COPY and ON CONFLICT DO NOTHING; decode asset with decrypt and portnum decoding; fixtures per portnum; asset checks; replay runbook.
+Exit: `dbt build` passes with at least 40 tests; the link-hours of the capture exist in `int_link_window`; `mart_data_quality` shows the funnel.
 
-Phase 1 spike, first three days, written up as `docs/adr/0003-direct-link-and-position-source.md` and decided by Casey: on 48 hours of St. Louis traffic, measure (a) the share of packets carrying a non-zero `relay_node` and whether it resolves to a known node, (b) the volume of NeighborInfo packets and how many distinct (neighbour, reporter) pairs they yield, (c) the distribution of `precision_bits` on positions, (d) whether any St. Louis regional broker or community channel with a published key exists and what precision it carries. The ADR picks the link source and the position source and records the expected link-hour yield.
+Tasks (warehouse-eng): staging views, cross-snapshot dedup in `stg_packet`; `dim_node` keyed on the pseudonym, no hashing in dbt; `fct_node_position` with `position_source`; `fct_rx_observation` resolving the relayer per ADR 0003; `int_link_window` with the stationarity rule (`lnk_02`), geometry, medians, modem preset and position_uncertainty_m; H3 in SQL via `h3-pg`; tests per the contract; Dagster dbt assets, run by hand.
 
-### Phase 2: dbt transforms and data quality (week 3)
+### Phase 3: Terrain and the engine
 
-Exit: `dbt build` passes with at least 40 tests; a few hundred link-hours exist; `mart_data_quality` shows the daily funnel.
+Exit, metro: `features.link_terrain` and `features.link_prediction` populated for every link-hour from the 1/3 arc-second DEM; terrain functions tested on synthetic DEMs; one notebook shows a real profile with LOS, Fresnel ellipse, obstruction and the spread across sampled endpoints.
 
-Tasks: staging views; `dim_node` snapshot with keyed-hash pseudonymisation; `fct_node_position` with precision_bits and box half-width; `fct_rx_observation` resolving the relayer per ADR 0003 and applying the position-window rule; `int_link_window` with geometry, medians and position_uncertainty_m; H3 cell assignment in SQL via the `h3-pg` extension (added to the Postgres image by platform-eng; RDS supports it); tests per the contract; Dagster dbt assets on a daily schedule.
+Exit, engine milestone: one documented command, from a clean checkout and the Docker image, produces: a terrain and DSM build for the test tile; a prediction from a two-site fixture to a 500-point receiver fixture as GeoParquet; a derived coverage COG; a calibration residual report; and a manifest that a script in a scratch directory can load without the database. Interface rules (`docs/INTERFACE.md`): frequency is a run parameter; transmitter and receiver profiles are named config records, with a mesh node and a site gateway shipped; receivers are a GeoParquet point layer; transmitter sites are a caller-supplied point layer; calibration is a separate labelled artifact that never mutates predictions; one end-to-end command from a config file.
 
-### Phase 3: Terrain and propagation (weeks 4 and 5)
+Tasks (terrain-rf-eng): ADR 0006 (P.1812 via Py1812 beside ITM behind one function with a `model` parameter; FSPL, knife-edge and Okumura-Hata as validation baselines; the ITU map files installed by a documented step, never committed); `dem_metro_10m` from pinned editions; 1 m DEM, PDAL DSM and canopy assets for the test tile (one 10 km USGS 1 m tile, proposed x71y428) and for 500 m corridors around the observed links, on demand; clutter height = max(DSM minus DEM, canopy where nonzero), with the leaf-off lidar against leaf-on capture stated in ADR 0006; `terrain/` functions (profile with earth curvature k = 4/3 using windowed reads, los_clear, fresnel_clearance_pct, fspl_db, knife_edge_db per P.526 with Bullington, hata_db with the variant from the building share, itm_db and p1812_db wrappers); endpoint sampling (N draws, default 16, uniform in each box; median and interquartile range per quantity); the engine command, profiles, fixtures and manifest; synthetic-DEM tests.
 
-Exit: `features.link_terrain` and `features.link_prediction` populated for every link-hour; terrain functions tested on synthetic DEMs; one notebook shows a real profile with LOS, Fresnel ellipse and obstruction and the spread across sampled endpoints.
+Memory rule: never read a raster whole. Every profile reads one window covering the path's bounding box plus a margin.
 
-Tasks: `dem_metro_10m`, `nlcd_metro`, `osm_buildings` assets; `terrain/` functions (profile with earth curvature k = 4/3 using windowed rasterio reads and `scipy.ndimage.map_coordinates` for sampling, los_clear, fresnel_clearance_pct, fspl_db, knife_edge_db per P.526 with Bullington, hata_db per Okumura-Hata for 150 to 1500 MHz with urban and suburban variants, itm_db wrapper); endpoint sampling: for each link-hour draw N positions (default 16) uniformly inside each endpoint's precision box, compute every quantity per draw, store median and interquartile range; feature asset partitioned by day; synthetic-DEM tests; knife-edge versus ITM sanity comparison.
-
-Memory rule: never read a DEM whole. Every profile reads one window covering the path's bounding box plus a margin.
-
-### Phase 4: Validation analytics (week 6)
+### Phase 4: Validation analytics
 
 Exit: marts built; model results written; headline numbers in `docs/results.md`.
 
-Tasks: baselines (distance-only, FSPL, FSPL + knife-edge, Okumura-Hata, ITM) with RMSE, MAE, bias, R squared on identical rows and a node-pair hold-out; mixed-effects model with random intercepts per relayer and gateway and the position_uncertainty_m term as a covariate or weight; variogram of the mixed-model residuals with the nugget-to-sill ratio logged and stored in `variogram_result`; kriging of those residuals (this is regression kriging, since the trend is already removed) to a 500 m grid only when the nugget-to-sill ratio is below 0.8, otherwise the step is skipped and the write-up states that residuals carry no usable spatial structure; H3 r8 mart with sparse-cell mask; sensitivity table (antenna heights 1 m and 5 m, endpoint draws 4 and 64, at least 10 packets, links over 3 km only).
+Tasks (analytics-eng): baselines (distance-only, FSPL, FSPL + knife-edge, Okumura-Hata, ITM, P.1812) with RMSE, MAE, bias, R squared on identical rows and a node-pair hold-out; mixed-effects model with random intercepts per relayer and gateway, modem preset as a stratification term, and position_uncertainty_m as a covariate or weight; variogram of the residuals with the nugget-to-sill ratio stored; regression kriging to a 500 m grid only when the ratio is below 0.8, otherwise skipped by rule; H3 r8 mart with sparse-cell mask; sensitivity table (antenna heights 1 m and 5 m, endpoint draws 4 and 64, at least 10 packets, links over 3 km only); the TTN Mapper limitation stated.
 
-### Phase 5: Outputs (week 7)
+### Phase 5: Outputs
 
 Exit: public MapLibre URL; public ArcGIS Online web map; README readable in five minutes.
 
-Tasks: export asset (GeoParquet, COG, GeoPackage); tippecanoe PMTiles; MapLibre page with three toggles and profile on click for 400 links; GitHub Pages deploy on tag; arcpy script, `.aprx`, `.lyrx`, PDF layout, hosted feature layer; `docs/writeup.md` under 1500 words; `docs/interview-notes.md`.
+Tasks (maps-eng): export asset (GeoParquet, COG, GeoPackage) with `prv_02` and `prv_03` applied and no precise MeshSTL position in any export; tippecanoe PMTiles; MapLibre page with three toggles and profile on click; GitHub Pages deploy on tag; arcpy script, `.aprx`, `.lyrx`, PDF layout, hosted feature layer; `docs/writeup.md` under 1500 words, describing the data as a single capture from 2026-10-22 to 2026-10-25; `docs/interview-notes.md`.
 
-The arcpy script is never imported from the project's uv environment and is not a Dagster asset. It runs on Windows through ArcGIS Pro's own interpreter (`propy.bat`) with a clean environment, reads the exported GeoPackage, and is documented as a manual step with its last-run date.
+The arcpy script runs on Windows through ArcGIS Pro's own interpreter (`propy.bat`), reads the exported GeoPackage, and is a documented manual step with its last-run date.
 
-### Phase 6: Cloud deploy (week 8)
+### Phase 6: Cloud deploy (optional)
 
-Exit: `terraform apply` from a clean account stands up the stack; nightly schedules run; monthly cost stated in README.
+Exit: `terraform apply` from a clean account stands up the stack and one documented command runs the pipeline against the registered snapshots; monthly cost stated in README. No schedules, no sensors, no retention sweeps.
 
-Tasks: Terraform modules s3 (with a CORS rule allowing GET and HEAD with the Range header from the site origin, since PMTiles depends on HTTP range requests), rds (db.t4g.micro, PostGIS and h3-pg), ec2 (t3.small with Compose), iam (instance role, OIDC for Actions), ssm; Dagster schedules (ingester health every 15 min, dbt nightly, features nightly, exports weekly); state in S3 with DynamoDB lock; fmt, validate, tflint, plan on PRs.
+Tasks (platform-eng): Terraform modules s3 (CORS for PMTiles range requests), rds (db.t4g.micro, PostGIS and h3-pg), ec2 (t3.small with Compose), iam (instance role, OIDC for Actions), ssm; state in S3 with DynamoDB lock; fmt, validate, tflint, plan on PRs.
 
 ## Cut order if time is short
 
 1. Phase 6 entirely (keep a Terraform stub and a README note).
-2. ITM; ship FSPL + knife-edge and Hata as the headline models.
+2. Corridor 1 m layers; keep the test tile build as the engine acceptance.
 3. Kriging; keep the H3 map and the variogram numbers.
 4. Endpoint sampling; use box centres with position_uncertainty_m as a covariate.
 
-Never cut: the data-quality contract and tests, the link-hour grain, the mixed-effects result, the ArcGIS deliverable.
+Never cut: the data-quality contract and tests, the link-hour grain, the mixed-effects result, the engine milestone, the ArcGIS deliverable.
 
 ## Risks
 
 | Risk | Mitigation |
 | --- | --- |
-| `relay_node` is stripped by the broker and NeighborInfo volume is low, so one-hop links cannot be identified | ADR 0003 decides after the spike; last resort is to treat every receipt as an unknown-relayer link and model only gateway-side terrain, which is a weaker but still honest project |
-| Position precision of plus or minus 364 m swamps terrain effects on short links | Endpoint sampling, uncertainty as a covariate, validation restricted to links over 3 km; a regional broker or published-key channel, if found, lifts the limit |
-| Too few positioned link-hours in the metro | Measure in week 2; if under about 300 link-hours after two weeks, widen to Missouri and Illinois |
-| ITM bindings do not build | SPLAT fallback; FSPL + knife-edge and Hata are legitimate headlines |
-| Residual variogram is pure nugget | Expected and reported as a finding; kriging is skipped by rule, not by hand |
-| Broker changes topics or fields | raw bytes kept; decoder pinned to the meshtastic package version |
-| Node operators object to mapping | pseudonymised ids, aggregated public outputs, stated in README |
+| The capture's link-hours are too few for the mixed model | Measured: 320 gateway-only and 62 to 89 both-ends-positioned link-hours in the spike. Report with confidence intervals; a further capture under a new snapshot id is a Casey decision, never automatic |
+| Position precision of plus or minus 364 m swamps terrain effects on short links | Endpoint sampling, uncertainty as a covariate, validation restricted to links over 3 km |
+| The snapshot is lost | It is not irreplaceable; its figures are reproducible only by a new capture under a new snapshot id, recorded in ADR 0003 |
+| ITM bindings or Py1812 do not build | SPLAT fallback for ITM; P.1812 needs two ITU map files installed by hand and fails loudly without them; FSPL + knife-edge and Hata are legitimate headlines |
+| Lidar DSM is leaf-off while the capture is leaf-on | Clutter height takes the larger of DSM minus DEM and the canopy layer; stated as a limitation |
+| Residual variogram is pure nugget | Expected and reported as a finding; kriging is skipped by rule |
+| Decoder bug after the real-id archive is deleted | Fixtures per packet type are the replay mechanism; `decoder_version` on every row lets faulty rows be excluded |
+| Node operators object to mapping | pseudonymised ids, aggregated public outputs, no precise MeshSTL position published, stated in README |
 | Scope creep | the cut list and `docs/next-steps.md` are the fence |
 
 ## Headline outputs
 
 1. RMSE of each model with n links and the hold-out method.
-2. Which covariates are significant, their sign, whether building count matters after terrain.
+2. Which covariates are significant, their sign, whether clutter height matters after terrain.
 3. Where the model is worst, as a map, with one explained example link and its profile.
-4. The data funnel: ingested, decoded, direct, positioned, usable link-hours.
+4. The data funnel: captured, decoded, direct, positioned, usable link-hours.
+5. The engine: one command, one config, one manifest; the acceptance run on the test tile.
