@@ -1,6 +1,6 @@
 # mesh-terrain
 
-How much of the variation in Meshtastic LoRa link quality across the St. Louis metro is explained by terrain, and what explains the rest. A streaming-to-batch pipeline ingests the public Meshtastic MQTT feed, models it in PostGIS with dbt and Dagster, derives terrain features from USGS 3DEP elevation data, and tests a standard radio propagation model against observed link quality. The plan, data model and phases are in `docs/PLAN.md`; where the project actually stands is in `docs/STATUS.md`.
+How much of the variation in Meshtastic LoRa link quality across the St. Louis metro is explained by terrain, and what explains the rest. A batch pipeline takes a single Meshtastic MQTT capture from 2026-10-22 to 2026-10-25, models it in PostGIS with dbt and Dagster, derives terrain features from USGS 3DEP elevation and lidar data, and tests standard radio propagation models against observed link quality. Every input is a dated, immutable snapshot; nothing is collected on a schedule. A reusable path-loss engine comes out of the same work (`docs/INTERFACE.md`). The plan, data model and phases are in `docs/PLAN.md`; where the project actually stands is in `docs/STATUS.md`.
 
 ## Quick start
 
@@ -25,7 +25,7 @@ To run the pre-commit hooks on every commit: `uv run pre-commit install`.
 
 | Path | Purpose |
 | --- | --- |
-| `ingester/` | MQTT subscriber and Parquet landing (Phase 1) |
+| `ingester/` | On-demand MQTT capture command, decoder and reduction to snapshot Parquet (Phase 1) |
 | `pipeline/` | Dagster code location: settings, logging, dbt assets, later loaders and features |
 | `dbt/` | dbt project: staging, core and analytics models and tests |
 | `terrain/` | Pure terrain and propagation functions (Phase 3) |
