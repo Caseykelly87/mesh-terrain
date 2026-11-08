@@ -95,7 +95,8 @@ import json, pathlib, pyarrow.parquet as pq, rasterio
 run = pathlib.Path("out/test-tile")
 manifest = json.loads((run / "manifest.json").read_text())
 predictions = pq.read_table(run / "predictions.parquet")
-with rasterio.open(run / "coverage_itm.tif") as cov:
+coverage = [a["path"] for a in manifest["artifacts"] if a["path"].startswith("coverage_")]
+with rasterio.open(run / coverage[0]) as cov:
     print(cov.crs, cov.res, cov.nodata)
 ```
 
