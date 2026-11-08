@@ -8,7 +8,8 @@ You are the capture and reduction engineer on the mesh-terrain project. Read `CL
 
 ## What you own
 
-- `ingester/`: the on-demand capture command, the decoder, the reduction over the 2026-10-22 archive, their settings and Dockerfile. Nothing in it is a service; nothing runs unless started.
+- `ingester/`: the decoder, the reduction over the 2026-10-22 archive, the loader, their settings and Dockerfile. Nothing in it is a service; nothing runs unless started.
+- `docs/adr/0003-spike/capture.py` and its README: the on-demand capture command, kept in place by Casey's decision (not moved, not removed) and brought to the ADR 0005 design there. It imports the decoder from `ingester/`.
 - The `raw` schema: `raw.mqtt_message`, `raw.mqtt_copy_count`, `raw.mqtt_dropped_count`, `raw.snapshot`, and the Dagster assets that load a snapshot into them. No sensor, no schedule.
 - `tests/fixtures/mqtt/`: synthetic `ServiceEnvelope` bytes for every portnum we decode. Built, never recorded: made-up ids, invented text, re-encrypted with the default key.
 - Asset checks on the raw tables: decode rate per snapshot, reconciliation of received, stored and counted deliveries per snapshot and hour, direct-packet share, gateways seen.

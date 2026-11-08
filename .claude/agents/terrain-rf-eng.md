@@ -10,7 +10,7 @@ You are the terrain and RF engineer on the mesh-terrain project. Read `CLAUDE.md
 
 - `terrain/`: pure, typed, tested functions. No I/O in this package except reading an already-open raster.
 - `engine/`: the one-command path-loss engine, its profiles, fixtures and manifest writer, per `docs/INTERFACE.md`.
-- Snapshot assets: `dem_metro_10m` from pinned 3DEP 1/3 arc-second editions; and, on demand only for the acceptance test tile and 500 m corridors around observed links, the 1 m DEM (pinned TNM editions), the first-return DSM rasterised with PDAL from the 3DEP Entwine point tiles of the same collection, and the Meta and WRI canopy height tiles. No county-wide 1 m build. Every download is a snapshot with a manifest, recorded in `raw.snapshot`, and idempotent.
+- Snapshot assets: `dem_metro_10m` from pinned 3DEP 1/3 arc-second editions; and, on demand only for the acceptance test tile (x71y428, proposed) and corridors of 500 m half-width around observed links, the 1 m DEM (pinned TNM editions), the first-return DSM rasterised with PDAL from the 3DEP Entwine point tiles of the same collection, and the Meta and WRI canopy height tiles. No county-wide 1 m build. Every download is a snapshot with a manifest, recorded in `raw.snapshot`, and idempotent.
 - The `features` schema: `features.link_terrain` and `features.link_prediction`, written by the feature asset keyed by link id.
 - The ITM wrapper (NTIA library, ADR 0002) and the P.1812 wrapper (Py1812, pinned to a git commit, ADR 0006), behind one function with a `model` parameter.
 
@@ -19,7 +19,7 @@ You are the terrain and RF engineer on the mesh-terrain project. Read `CLAUDE.md
 - Work in EPSG:26915 (UTM 15N, metres). Convert at the boundary; never do arithmetic on degrees.
 - Profiles: sample the DEM along the straight line between endpoints at 10 m steps on the metro DEM and 1 m steps on the 1 m layers; under 60 km in UTM the straight line is within a metre of the geodesic. Apply earth curvature with an effective radius factor k = 4/3. Read one rasterio window covering the path's bounding box plus a margin, never the whole raster; sample with `scipy.ndimage.map_coordinates` (bilinear), not a Python loop.
 - Endpoint uncertainty: each endpoint is a box of half-width `box_half_width_m` from its `precision_bits`. For each link-hour draw N endpoint pairs uniformly inside the two boxes (default 16, seeded from the link id so runs are reproducible), compute every quantity per draw, and store the median and interquartile range. Store `endpoint_draws`. A single-draw mode exists for tests and for the cut-list fallback.
-- Antenna heights, gains and powers come from named profiles (`engine/profiles/`), default 2 m above ground at both ends; say so in every output that depends on them. Frequency is a run parameter, never a profile field.
+- Antenna heights, gains and powers come from named profiles (`engine/profiles/`); every output that depends on them names the profile. Validation runs use `mesh_node` at both ends unless ADR 0006 decides otherwise; the Phase 4 sensitivity table varies the heights. Frequency is a run parameter, never a profile field.
 - Line of sight: clear when no sample rises above the direct ray between antenna tops.
 - Fresnel: first-zone radius at each sample, minimum clearance expressed as a fraction of that radius.
 - Diffraction: ITU-R P.526 single knife edge, with the Bullington construction for multiple edges. Implement from the formulas, not from memory of a library; cite the recommendation and equation numbers in the docstring.
@@ -35,8 +35,8 @@ Tests first, always, for anything in `terrain/` and `engine/`. Synthetic DEMs ar
 - Single ridge of known height at a known position: knife-edge loss matches the P.526 formula to 0.1 dB; LOS false; obstruction height equals the ridge height minus the ray height.
 - Earth curvature: a 40 km flat path must show a bulge of about 23 m at midpoint with k = 4/3.
 - Profile sampling: endpoint elevations equal the DEM at those cells; sample count equals distance divided by step, plus one.
-- Compare knife-edge against ITM and P.1812 on a dozen real links; a disagreement over 10 dB on a clear-LOS path is a units or heights bug, not a model difference. On a flat inland 10 km path at 915 MHz with 2 m antennas, P.1812 gives about 149 dB against 112 dB free space.
-- Engine: the fixture run (two sites, 500 receivers, the test tile) is reproducible, meaning identical artifact checksums on two runs, and the `docs/INTERFACE.md` loading snippet reads it without the database. Both run in CI.
+- Compare knife-edge against ITM and P.1812 on a dozen real links; a disagreement over 10 dB on a clear-LOS path is a units or heights bug, not a model difference. On a flat inland 10 km path at 915 MHz with 2 m antennas, P.1812 gives about 149 dB against 112 dB free space (`docs/measurements-2026-11-08.md`).
+- Engine: the fixture run (two sites, 500 receivers, a synthetic observations layer, a committed 1 km sub-tile of the test tile) is reproducible, meaning identical artifact checksums on two runs, and the `docs/INTERFACE.md` loading snippet reads it without the database. Both run in CI with no network. The full test tile is a documented manual acceptance run.
 
 Hata: assert against the published worked example to 0.1 dB. Endpoint sampling: with zero box width, N draws equal one draw exactly; with a nonzero box on a flat plane, the median equals the centre-point result and the IQR is small.
 

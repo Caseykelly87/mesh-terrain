@@ -38,7 +38,7 @@ Never skip the reviewer. Never merge with failing CI. Never force-push `main`.
 ## File ownership
 
 - An agent edits only the paths it owns (see the team table and its own agent file). Touching another agent's path means stopping and asking the lead to co-assign.
-- `CLAUDE.md`, `docs/STYLE.md`, `docs/PLAN.md` and `docs/data-quality-contract.md` are lead-only; edits to them go through Casey.
+- `CLAUDE.md`, `docs/STYLE.md`, `docs/PLAN.md`, `docs/INTERFACE.md` and `docs/data-quality-contract.md` are lead-only; edits to them go through Casey.
 - `pyproject.toml`, `uv.lock`, `docker-compose.yml` and `.github/workflows/` belong to `platform-eng`; other agents request changes in their PR description.
 - Schema changes (dbt model grain, PostGIS DDL, dbt snapshots) are sequential. Never run two schema-changing units of work in parallel.
 - Shared code under `pipeline/common/` is assigned per task by the lead.
@@ -150,7 +150,7 @@ Who may do what:
 Casey decides these. Prepare the options, state the trade-offs in two or three sentences each, recommend one, and wait.
 
 - Any change to the data model grain or to a rule in `docs/data-quality-contract.md`.
-- Choice of propagation model implementation (ITM bindings vs SPLAT fallback).
+- Choice of propagation model implementation (ITM bindings vs SPLAT fallback, decided in ADR 0002; adding P.1812 via Py1812, ADR 0006).
 - The link-resolution method and position source (ADR 0003), the minimum validation distance, and the number of endpoint draws.
 - Anything that spends money (cloud resources, paid APIs).
 - Anything that publishes data externally (GitHub Pages, ArcGIS Online, tiles on S3). Precise MeshSTL positions are never published.
@@ -162,18 +162,18 @@ Casey decides these. Prepare the options, state the trade-offs in two or three s
 
 We do test-driven development where a test adds real confidence, and we do not write tests that exist only to exist.
 
-Write the test first for: pure functions in `terrain/`, the protobuf decoder, every dbt model (schema tests and singular tests), Dagster asset checks, Terraform validation, anything with arithmetic or geometry in it.
+Write the test first for: pure functions in `terrain/` and `engine/`, the protobuf decoder, the engine manifest and its reproducibility on the committed fixture, every dbt model (schema tests and singular tests), Dagster asset checks, Terraform validation, anything with arithmetic or geometry in it.
 
 Do not write unit tests for: thin wrappers around a third-party call that would only test the mock, download assets that hit the network (use a recorded fixture and a smoke test instead), the MapLibre page (manual check with a screenshot in the PR), and the arcpy script (cannot run in CI; keep a documented manual smoke run).
 
 When you decide not to test something, say so in the PR description in one sentence. That sentence is the test of whether the decision was honest.
 
-Coverage target: 80 percent on `terrain/` and `ingester/`. No target elsewhere. Do not chase coverage with trivial tests.
+Coverage target: 80 percent on `terrain/`, `engine/` and `ingester/`. No target elsewhere. Do not chase coverage with trivial tests.
 
 ## Engineering conventions
 
 - Python 3.12. `uv` manages the environment; never `pip install` outside it. Pin in `uv.lock`.
-- `ruff` for lint and format, `mypy --strict` on `terrain/` and `pipeline/`. Both run in pre-commit and CI.
+- `ruff` for lint and format, `mypy --strict` on `terrain/`, `engine/` and `pipeline/`. Both run in pre-commit and CI.
 - Logging: `structlog`, JSON renderer in containers, console renderer locally. Log at the boundary of every external interaction (MQTT, filesystem, database, HTTP) with enough context to reproduce. Never log secrets, raw payload bytes, or unhashed node ids.
 - Errors: catch narrowly and only where you can do something useful. Re-raise with context using `raise ... from err`. A function that swallows an exception must log it at warning or above and say why it is safe to continue. Dagster assets fail loudly; retries are configured on the asset, not hand-rolled.
 - Configuration: environment variables read once at startup through a typed settings object (`pydantic-settings`). No `os.environ` calls scattered through the code.
@@ -187,7 +187,7 @@ Coverage target: 80 percent on `terrain/` and `ingester/`. No target elsewhere. 
 - Resource handles (files, connections, cursors, rasters) are opened with context managers.
 - Prefer `pathlib.Path` over `os.path`; prefer `structlog` over `print`.
 - Functions stay under 40 lines; extract when approaching it.
-- Every top-level package (`ingester/`, `pipeline/`, `terrain/`, `dbt/`, `web/`, `arcgis/`, `infra/`) has a README stating its purpose, how to run it, and what it deliberately does not do.
+- Every top-level package (`ingester/`, `pipeline/`, `terrain/`, `engine/`, `dbt/`, `web/`, `arcgis/`, `infra/`) has a README stating its purpose, how to run it, and what it deliberately does not do.
 - `docs/schema.md` documents every table in `core`, `features` and `analytics` with its grain and owner; `warehouse-eng` keeps it current and the reviewer checks it on any schema PR.
 
 ## PR description additions
@@ -218,7 +218,7 @@ Full detail in `docs/STYLE.md`.
 - `make capture` and `make engine`: start one capture run or one engine run from parameters; neither is ever scheduled.
 - `make fmt`: ruff format.
 
-If a target does not exist yet, `platform-eng` creates it in Phase 0.
+If a target does not exist yet, `platform-eng` creates it: the stack targets in Phase 0, `make capture` in Phase 1 (ADR 0005), `make engine` in Phase 3.
 
 ## Where to look
 
