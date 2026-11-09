@@ -12,21 +12,26 @@ import re
 from ingester.keys import pseudonym
 
 CLASS_SEGMENTS = {"e": "e", "c": "e", "json": "json", "map": "map", "stat": "stat"}
+# The channel names firmware gives a default channel, one per modem preset. Read
+# from getModemPresetDisplayName in
+# https://github.com/meshtastic/firmware/blob/v2.7.11.ee68575/src/DisplayFormatters.cpp
+# (Channels::getName in src/mesh/Channels.cpp uses it when the channel has no
+# name). That release has no name for LONG_TURBO or VERY_LONG_SLOW: both fall
+# to "Invalid", which is not a preset.
 MODEM_PRESETS = frozenset(
     {
-        "LongFast",
-        "LongModerate",
-        "LongSlow",
-        "LongTurbo",
-        "MediumFast",
-        "MediumSlow",
-        "ShortFast",
-        "ShortSlow",
         "ShortTurbo",
-        "VeryLongSlow",
+        "ShortSlow",
+        "ShortFast",
+        "MediumSlow",
+        "MediumFast",
+        "LongSlow",
+        "LongFast",
+        "LongMod",
     }
 )
-NODE_ID_PATTERN = re.compile(r"!([0-9a-fA-F]{8})")
+# A node id is "!" and exactly eight hex digits; a longer hex run is not one.
+NODE_ID_PATTERN = re.compile(r"!([0-9a-fA-F]{8})(?![0-9a-fA-F])")
 
 
 def _class_index(parts: list[str]) -> int | None:
