@@ -60,9 +60,11 @@ class CopyCounts:
     def __init__(self) -> None:
         self._counts: Counter[tuple[datetime, str, str, int]] = Counter()
 
-    def add(self, received_at: datetime, topic: str, gateway_pseudonym: str, low: int) -> None:
-        """Count one copy; topic is the landed topic, low the gateway's low id byte."""
-        self._counts[(hour_of(received_at), topic, gateway_pseudonym, low)] += 1
+    def add(
+        self, received_at: datetime, topic: str, gateway_pseudonym: str, gateway_low_byte: int
+    ) -> None:
+        """Count one copy under its landed topic and the gateway pseudonym and low id byte."""
+        self._counts[(hour_of(received_at), topic, gateway_pseudonym, gateway_low_byte)] += 1
 
     def merge(self, other: "CopyCounts") -> None:
         """Add another counter's counts to this one."""
