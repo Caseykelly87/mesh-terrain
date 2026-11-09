@@ -31,6 +31,10 @@ class IngesterSettings(BaseSettings):
 
     node_id_hmac_key: SecretStr | None = None
     snapshots_dir: Path = Path("C:/Users/Casey/mesh-terrain-data/snapshots")
+    # The public broker's credentials are published by Meshtastic; the MeshSTL
+    # broker's come from C:/Users/Casey/mesh-terrain-data/meshstl.env, never the repo.
+    mqtt_user: str = "meshdev"
+    mqtt_password: SecretStr = SecretStr("large4cats")
 
     def hmac_key(self) -> bytes:
         """The decoded key.

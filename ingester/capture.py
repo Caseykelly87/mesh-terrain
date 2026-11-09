@@ -57,6 +57,7 @@ class RunParameters:
     max_raw_bytes: int
     snapshot_id: str
     licence: str = LICENCE
+    meshstl_approval: str | None = None
 
 
 def _utc_now() -> datetime:
@@ -198,6 +199,7 @@ class CaptureRun:
             "stop_reason": reason,
             "description": "One capture run, started by hand, from one broker.",
             "windows": {source: [None, self.params.end_at.isoformat()]},
+            "meshstl_approval": self.params.meshstl_approval,
         }
         write_metadata(self.partial, self._info(), self.deliveries.rows(), hours, run)
         folder = finish(self.partial)
