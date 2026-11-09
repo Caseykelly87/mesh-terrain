@@ -96,7 +96,13 @@ def test_merged_keys_must_equal_the_flush_keys() -> None:
         check_merged_keys([["k1"]], ["k1", "k1"])
 
 
-def test_merged_counts_must_total_the_flush_counts() -> None:
-    check_merged_counts([3, 4], 7)
+def test_merged_counts_must_match_the_flush_counts_per_key() -> None:
+    first = {("2026-01-01T07", "json", "json"): 3}
+    second = {("2026-01-01T07", "json", "json"): 1, ("2026-01-01T07", "stat", "stat"): 2}
+    merged = {("2026-01-01T07", "json", "json"): 4, ("2026-01-01T07", "stat", "stat"): 2}
+    check_merged_counts([first, second], merged)
+    # Same grand total, different keys: a total-only check would pass this.
     with pytest.raises(MergeError):
-        check_merged_counts([3, 4], 6)
+        check_merged_counts([first, second], {("2026-01-01T07", "json", "json"): 6})
+    with pytest.raises(MergeError):
+        check_merged_counts([first], {("2026-01-01T07", "json", "json"): 3, ("x", "y", "z"): 0})

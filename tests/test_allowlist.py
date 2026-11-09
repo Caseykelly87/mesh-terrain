@@ -107,6 +107,16 @@ def test_no_column_can_hold_bytes_text_names_or_keys(table: str) -> None:
         assert not FORBIDDEN.search(name), name
 
 
+# Header fields with no protobuf presence: the decoder lands 0 as null ("not set").
+UNSET_IS_NULL = ("packet_id", "relay_node", "hop_start", "rx_time", "rx_snr", "rx_rssi", "channel")
+
+
+@pytest.mark.parametrize("name", UNSET_IS_NULL)
+def test_header_fields_that_may_be_unset_are_nullable(name: str) -> None:
+    [column] = [column for column in TABLES["mqtt_message"] if column.name == name]
+    assert column.nullable
+
+
 def test_versions_are_set() -> None:
     assert SCHEMA_VERSION == 1
     assert DECODER_VERSION
