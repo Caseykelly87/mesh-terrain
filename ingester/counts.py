@@ -1,14 +1,18 @@
-"""Counts of deliveries that are not stored as rows (ADR 0005 item 5, ing_03).
+"""Counts of deliveries that are not stored as rows, and of every delivery per hour and broker.
 
 Header-only internet copies are counted per (hour, topic, gateway pseudonym);
-json, stat, unparsed and other deliveries per (hour, topic class, reason). The
-snapshot id is added when a count table is written, since one run or reduction
-fills one snapshot. Counts are summed across flushes with merge.
+json, stat, unparsed and other deliveries per (hour, topic class, reason)
+(ADR 0005 item 5). Every delivery received is also counted per (hour, broker)
+by what happened to it: stored, counted, merged_cross_broker or merged_repeat,
+so the ing_03 balance can be checked from the manifest. The snapshot id is
+added when a table is written, since one run or reduction fills one snapshot.
 """
 
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
+
+from ingester.sightings import Broker
 
 # Each counted reason and the topic classes it may come from.
 REASON_CLASSES: dict[str, frozenset[str]] = {
@@ -17,6 +21,10 @@ REASON_CLASSES: dict[str, frozenset[str]] = {
     "unparsed": frozenset({"e", "map"}),
     "other": frozenset({"other"}),
 }
+OUTCOMES = ("stored", "counted", "merged_cross_broker", "merged_repeat")
+
+CopyKey = tuple[datetime, str, str]
+DroppedKey = tuple[datetime, str, str]
 
 
 def hour_of(received_at: datetime) -> datetime:
@@ -55,35 +63,55 @@ class DroppedCountRow:
 
 
 class CopyCounts:
-    """Internet copies counted per (hour, landed topic, gateway pseudonym)."""
+    """Internet copies counted per (hour, landed topic, gateway pseudonym), the contract key."""
 
     def __init__(self) -> None:
-        self._counts: Counter[tuple[datetime, str, str, int]] = Counter()
+        self._counts: Counter[CopyKey] = Counter()
+        self._low_bytes: dict[str, int] = {}
+
+    def _note_low_byte(self, gateway_pseudonym: str, gateway_low_byte: int) -> None:
+        known = self._low_bytes.setdefault(gateway_pseudonym, gateway_low_byte)
+        if known != gateway_low_byte:
+            raise ValueError("one gateway pseudonym arrived with two low bytes")
 
     def add(
         self, received_at: datetime, topic: str, gateway_pseudonym: str, gateway_low_byte: int
     ) -> None:
-        """Count one copy under its landed topic and the gateway pseudonym and low id byte."""
-        self._counts[(hour_of(received_at), topic, gateway_pseudonym, gateway_low_byte)] += 1
+        """Count one copy under its landed topic and gateway pseudonym.
+
+        Raises:
+            ValueError: if the pseudonym was seen before with another low byte.
+        """
+        self._note_low_byte(gateway_pseudonym, gateway_low_byte)
+        self._counts[(hour_of(received_at), topic, gateway_pseudonym)] += 1
 
     def merge(self, other: "CopyCounts") -> None:
         """Add another counter's counts to this one."""
+        for pseudonym, low in other._low_bytes.items():
+            self._note_low_byte(pseudonym, low)
         self._counts.update(other._counts)
 
     def total(self) -> int:
         """Copies counted."""
         return sum(self._counts.values())
 
+    def by_key(self) -> dict[CopyKey, int]:
+        """Counts by (hour, topic, gateway pseudonym)."""
+        return dict(self._counts)
+
     def rows(self) -> list[CopyCountRow]:
         """One row per key, sorted by hour, topic and gateway."""
-        return sorted(CopyCountRow(*key, count) for key, count in self._counts.items())
+        return sorted(
+            CopyCountRow(hour, topic, gateway, self._low_bytes[gateway], count)
+            for (hour, topic, gateway), count in self._counts.items()
+        )
 
 
 class DroppedCounts:
     """Deliveries not stored as rows, counted per (hour, topic class, reason)."""
 
     def __init__(self) -> None:
-        self._counts: Counter[tuple[datetime, str, str]] = Counter()
+        self._counts: Counter[DroppedKey] = Counter()
 
     def add(self, received_at: datetime, topic_class: str, reason: str) -> None:
         """Count one delivery.
@@ -104,6 +132,43 @@ class DroppedCounts:
         """Deliveries counted."""
         return sum(self._counts.values())
 
+    def by_key(self) -> dict[DroppedKey, int]:
+        """Counts by (hour, topic class, reason)."""
+        return dict(self._counts)
+
     def rows(self) -> list[DroppedCountRow]:
         """One row per key, sorted by hour, topic class and reason."""
         return sorted(DroppedCountRow(*key, count) for key, count in self._counts.items())
+
+
+class BrokerHourCounts:
+    """Every delivery received, per (hour, broker), by what became of it (ing_03)."""
+
+    def __init__(self) -> None:
+        self._counts: Counter[tuple[datetime, str, str]] = Counter()
+
+    def add(self, received_at: datetime, broker: Broker, outcome: str, count: int = 1) -> None:
+        """Count deliveries of one outcome.
+
+        Raises:
+            ValueError: if outcome is not stored, counted, merged_cross_broker or merged_repeat.
+        """
+        if outcome not in OUTCOMES:
+            raise ValueError(f"unknown outcome {outcome!r}")
+        self._counts[(hour_of(received_at), str(broker), outcome)] += count
+
+    def merge(self, other: "BrokerHourCounts") -> None:
+        """Add another counter's counts to this one."""
+        self._counts.update(other._counts)
+
+    def rows(self) -> list[dict[str, str | int]]:
+        """One manifest row per (hour, broker), received being the sum of the outcomes."""
+        keys = sorted({(hour, broker) for hour, broker, _ in self._counts})
+        rows: list[dict[str, str | int]] = []
+        for hour, broker in keys:
+            parts = {outcome: self._counts[(hour, broker, outcome)] for outcome in OUTCOMES}
+            row: dict[str, str | int] = {"hour": f"{hour:%Y-%m-%dT%H}", "broker": broker}
+            row["received"] = sum(parts.values())
+            row.update(parts)
+            rows.append(row)
+        return rows

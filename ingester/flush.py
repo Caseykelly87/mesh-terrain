@@ -9,7 +9,7 @@ file passes the check here. The clock is injected so tests run on a fake one.
 """
 
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -103,12 +103,22 @@ def check_merged_keys(flush_keys: Iterable[Iterable[str]], merged_keys: Iterable
         )
 
 
-def check_merged_counts(flush_totals: Iterable[int], merged_total: int) -> None:
-    """The merged count file totals what its flush files counted.
+def check_merged_counts(
+    flush_counts: Iterable[Mapping[Hashable, int]], merged_counts: Mapping[Hashable, int]
+) -> None:
+    """The merged count file holds, per key, the sum of its flush files' counts.
+
+    Args:
+        flush_counts: Counts by key from each flush file.
+        merged_counts: Counts by key from the merged file.
 
     Raises:
-        MergeError: if the totals differ.
+        MergeError: if any key's count differs, or a key is missing or added.
     """
-    expected = sum(flush_totals)
-    if merged_total != expected:
-        raise MergeError(f"merged count {merged_total} differs from flushed {expected}")
+    expected: Counter[Hashable] = Counter()
+    for counts in flush_counts:
+        expected.update(counts)
+    merged = Counter(merged_counts)
+    differing = [key for key in expected.keys() | merged.keys() if expected[key] != merged[key]]
+    if differing or set(merged) != set(expected):
+        raise MergeError(f"merged counts differ from the flush files on {len(differing)} keys")
