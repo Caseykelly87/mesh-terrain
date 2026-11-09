@@ -23,6 +23,7 @@ import base64
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -36,8 +37,15 @@ from meshtastic.protobuf import (  # type: ignore[import-untyped]
 )
 
 from ingester.allowlist import DECODER_VERSION, SCHEMA_VERSION, allowlist
-from ingester.keys import delivery_key, low_byte, pseudonym
-from ingester.topics import landed_topic, modem_preset, topic_class
+from ingester.keys import delivery_key, low_byte
+from ingester.keys import pseudonym as _pseudonym
+from ingester.topics import landed_topic as _landed_topic
+from ingester.topics import modem_preset, topic_class
+
+# A capture hour repeats the same few thousand gateways and topics millions of
+# times; caching their HMACs keeps the reduction to minutes.
+pseudonym = lru_cache(maxsize=1 << 17)(_pseudonym)
+landed_topic = lru_cache(maxsize=1 << 17)(_landed_topic)
 
 DEFAULT_KEY = base64.b64decode("1PG7OiApB1nwvP+rz05pAQ==")
 DECODED_COLUMNS = tuple(
