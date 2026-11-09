@@ -1,21 +1,22 @@
-"""Counting of internet copies and dropped deliveries, and broker sightings (ing_01, ing_03)."""
+"""Counting of internet copies, dropped deliveries and deliveries per hour and broker (ing_03)."""
 
 from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
-from ingester.counts import CopyCounts, DroppedCounts, hour_of
-from ingester.sightings import Broker, SightingIndex
+from ingester.counts import BrokerHourCounts, CopyCounts, DroppedCounts, hour_of
+from ingester.sightings import Broker
 
 GATEWAY = "a" * 64
 TOPIC = "msh/US/Example/2/e/LongFast/" + GATEWAY
 AT = datetime(2026, 10, 22, 16, 59, 59, 999999, tzinfo=UTC)
+HOUR = datetime(2026, 10, 22, 16, tzinfo=UTC)
 
 
 def test_hour_of_floors_to_the_utc_hour() -> None:
-    assert hour_of(AT) == datetime(2026, 10, 22, 16, tzinfo=UTC)
+    assert hour_of(AT) == HOUR
     central = AT.astimezone(timezone(timedelta(hours=-5)))
-    assert hour_of(central) == datetime(2026, 10, 22, 16, tzinfo=UTC)
+    assert hour_of(central) == HOUR
 
 
 def test_hour_of_rejects_a_naive_time() -> None:
@@ -34,6 +35,15 @@ def test_copy_counts_group_by_hour_topic_and_gateway() -> None:
     assert rows[0].gateway_pseudonym == GATEWAY
     assert rows[0].gateway_low_byte == 0xAA
     assert counts.total() == 3
+
+
+def test_copy_counts_key_on_the_contract_tuple_and_carry_the_low_byte() -> None:
+    # The key is (hour, topic, gateway_pseudonym); a pseudonym has one low byte.
+    counts = CopyCounts()
+    counts.add(AT, TOPIC, GATEWAY, 0xAA)
+    with pytest.raises(ValueError):
+        counts.add(AT, TOPIC, GATEWAY, 0xAB)
+    assert counts.by_key() == {(HOUR, TOPIC, GATEWAY): 1}
 
 
 def test_copy_counts_merge_sums_per_key() -> None:
@@ -84,31 +94,45 @@ def test_dropped_counts_merge_and_total() -> None:
     first.merge(second)
     assert first.total() == 3
     assert len(first.rows()) == 2
+    assert first.by_key() == {(HOUR, "json", "json"): 2, (HOUR, "stat", "stat"): 1}
 
 
-def test_a_delivery_seen_on_both_brokers_is_one_entry_with_both_flags() -> None:
-    index = SightingIndex()
-    assert index.add("k" * 64, Broker.PUBLIC, AT) is True
-    assert index.add("k" * 64, Broker.MESHSTL, AT + timedelta(seconds=2)) is False
-    assert len(index) == 1
-    sighting = index.get("k" * 64)
-    assert (sighting.seen_public, sighting.seen_meshstl) == (True, True)
-    # The earliest sighting fixes received_at and so the hour the row lands in.
-    assert sighting.received_at == AT
+def test_broker_hour_counts_balance_received_against_its_parts() -> None:
+    # ing_03: received = stored + counted + both merged counts, per hour and broker.
+    counts = BrokerHourCounts()
+    for outcome in ("stored", "stored", "counted", "merged_repeat"):
+        counts.add(AT, Broker.PUBLIC, outcome)
+    counts.add(AT, Broker.MESHSTL, "merged_cross_broker")
+    assert counts.rows() == [
+        {
+            "hour": "2026-10-22T16",
+            "broker": "meshstl",
+            "received": 1,
+            "stored": 0,
+            "counted": 0,
+            "merged_cross_broker": 1,
+            "merged_repeat": 0,
+        },
+        {
+            "hour": "2026-10-22T16",
+            "broker": "public",
+            "received": 4,
+            "stored": 2,
+            "counted": 1,
+            "merged_cross_broker": 0,
+            "merged_repeat": 1,
+        },
+    ]
 
 
-def test_the_earlier_sighting_wins_whichever_broker_is_read_first() -> None:
-    index = SightingIndex()
-    index.add("k" * 64, Broker.MESHSTL, AT)
-    index.add("k" * 64, Broker.PUBLIC, AT - timedelta(seconds=5))
-    assert index.get("k" * 64).received_at == AT - timedelta(seconds=5)
+def test_broker_hour_counts_reject_an_unknown_outcome() -> None:
+    with pytest.raises(ValueError):
+        BrokerHourCounts().add(AT, Broker.PUBLIC, "dropped")
 
 
-def test_two_keys_from_two_brokers_stay_two_entries() -> None:
-    # A delivery the public broker stripped and MeshSTL forwarded whole has two keys.
-    index = SightingIndex()
-    index.add("s" * 64, Broker.PUBLIC, AT)
-    index.add("w" * 64, Broker.MESHSTL, AT)
-    assert len(index) == 2
-    assert (index.get("s" * 64).seen_public, index.get("s" * 64).seen_meshstl) == (True, False)
-    assert (index.get("w" * 64).seen_public, index.get("w" * 64).seen_meshstl) == (False, True)
+def test_broker_hour_counts_merge() -> None:
+    first, second = BrokerHourCounts(), BrokerHourCounts()
+    first.add(AT, Broker.PUBLIC, "stored")
+    second.add(AT, Broker.PUBLIC, "stored")
+    first.merge(second)
+    assert first.rows()[0]["stored"] == 2

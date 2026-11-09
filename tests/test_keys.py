@@ -54,14 +54,6 @@ def test_length_prefix_separates_topic_from_payload() -> None:
     assert delivery_key(KEY, "msh/a", b"bc") != delivery_key(KEY, "msh/ab", b"c")
 
 
-def test_identical_bytes_from_both_brokers_give_one_key() -> None:
-    # ing_01: the broker is not part of the key, so the public and MeshSTL
-    # copies of the same delivery land as one row with both broker flags set.
-    from_public = delivery_key(KEY, TOPIC, PAYLOAD)
-    from_meshstl = delivery_key(KEY, TOPIC, PAYLOAD)
-    assert from_public == from_meshstl
-
-
 def test_stripped_and_whole_copies_give_two_keys() -> None:
     # The public broker removed the payload; the MeshSTL broker forwarded it whole.
     stripped_header = PAYLOAD[:2]

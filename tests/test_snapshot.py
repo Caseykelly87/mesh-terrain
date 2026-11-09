@@ -4,7 +4,10 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
+from structlog.testing import capture_logs
 
 from ingester.snapshot import (
     MANIFEST_NAME,
@@ -33,6 +36,11 @@ METADATA = {
     "content_hashes": {"mqtt_message": "0" * 64},
     "decoder_version": "1",
     "schema_version": 1,
+    "brokers": ["broker.example.invalid"],
+    "topics": ["msh/US/Example/#"],
+    "end_at": "2026-01-02T00:00:00+00:00",
+    "max_raw_bytes": 10_000_000_000,
+    "deliveries": [],
 }
 
 
@@ -100,7 +108,19 @@ def test_manifest_lists_every_file_with_sha256_and_size(tmp_path: Path) -> None:
 
 def test_manifest_requires_the_snp_01_fields(tmp_path: Path) -> None:
     partial = start_snapshot(tmp_path, SNAPSHOT_ID)
-    for field in ("licence", "seeds", "source_url", "content_hashes", "stop_reason"):
+    required = (
+        "licence",
+        "seeds",
+        "source_url",
+        "content_hashes",
+        "stop_reason",
+        "brokers",
+        "topics",
+        "end_at",
+        "max_raw_bytes",
+        "deliveries",
+    )
+    for field in required:
         incomplete = {key: value for key, value in METADATA.items() if key != field}
         with pytest.raises(SnapshotError):
             write_manifest(partial, incomplete)
@@ -170,3 +190,41 @@ def test_partial_and_finished_folders_are_listed_apart(tmp_path: Path) -> None:
     start_snapshot(tmp_path, "example-capture-2026-01-02")
     assert partial_folders(tmp_path) == [tmp_path / "example-capture-2026-01-02.partial"]
     assert finished_snapshots(tmp_path) == [tmp_path / SNAPSHOT_ID]
+
+
+def write_keys(folder: Path, hour: datetime, keys: list[str]) -> None:
+    path = hour_file(folder, "mqtt_message", hour)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(pa.table({"delivery_key": keys}), path)
+
+
+def test_manifest_refuses_a_delivery_key_in_two_hour_files(tmp_path: Path) -> None:
+    # ing_01: one row per delivery key in the whole snapshot, not only per file.
+    partial = start_snapshot(tmp_path, SNAPSHOT_ID)
+    write_keys(partial, HOUR, ["a" * 64, "b" * 64])
+    write_keys(partial, HOUR.replace(hour=8), ["b" * 64])
+    with pytest.raises(SnapshotError):
+        write_manifest(partial, METADATA)
+
+
+def test_manifest_accepts_distinct_delivery_keys(tmp_path: Path) -> None:
+    partial = start_snapshot(tmp_path, SNAPSHOT_ID)
+    write_keys(partial, HOUR, ["a" * 64])
+    write_keys(partial, HOUR.replace(hour=8), ["b" * 64])
+    write_manifest(partial, METADATA)
+
+
+def test_filesystem_operations_log_start_and_end_with_the_snapshot_id(tmp_path: Path) -> None:
+    with capture_logs() as logs:
+        partial = start_snapshot(tmp_path, SNAPSHOT_ID)
+        fill(partial)
+        write_manifest(partial, METADATA)
+        verify_manifest(finish_snapshot(partial))
+    events = [(entry["event"], entry.get("snapshot_id")) for entry in logs]
+    for name in ("snapshot_start", "manifest_write", "snapshot_finish", "manifest_verify"):
+        assert (f"{name}_begin", SNAPSHOT_ID) in events
+        assert (f"{name}_end", SNAPSHOT_ID) in events
+    manifest_end = next(entry for entry in logs if entry["event"] == "manifest_write_end")
+    assert manifest_end["files"] == 2
+    assert manifest_end["bytes"] > 0
+    assert manifest_end["duration_s"] >= 0
