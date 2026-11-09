@@ -103,8 +103,8 @@ def check_merged_keys(flush_keys: Iterable[Iterable[str]], merged_keys: Iterable
         )
 
 
-def check_merged_counts(
-    flush_counts: Iterable[Mapping[Hashable, int]], merged_counts: Mapping[Hashable, int]
+def check_merged_counts[K: Hashable](
+    flush_counts: Iterable[Mapping[K, int]], merged_counts: Mapping[K, int]
 ) -> None:
     """The merged count file holds, per key, the sum of its flush files' counts.
 
@@ -115,7 +115,7 @@ def check_merged_counts(
     Raises:
         MergeError: if any key's count differs, or a key is missing or added.
     """
-    expected: Counter[Hashable] = Counter()
+    expected: Counter[K] = Counter()
     for counts in flush_counts:
         expected.update(counts)
     merged = Counter(merged_counts)

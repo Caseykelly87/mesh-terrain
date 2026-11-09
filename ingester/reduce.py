@@ -35,23 +35,24 @@ from typing import Any
 
 import structlog
 
-from ingester.allowlist import DECODER_VERSION, SCHEMA_VERSION, allowlist
+from ingester.allowlist import DECODER_VERSION, SCHEMA_VERSION
 from ingester.counts import BrokerHourCounts, CopyCounts, DroppedCounts, hour_of
 from ingester.decoder import CopyDelivery, StoredDelivery, decode_delivery
-from ingester.flush import check_merged_keys
+from ingester.finalise import (
+    DELIVERY_TABLE,
+    SnapshotInfo,
+    finish,
+    merge_hour,
+    write_coverage,
+    write_metadata,
+)
 from ingester.keys import delivery_key
-from ingester.parquet import content_hash, read_rows, write_rows
-from ingester.readme import render_readme
+from ingester.parquet import write_rows
 from ingester.settings import get_ingester_settings
 from ingester.sightings import Broker, SightingIndex
-from ingester.snapshot import (
-    finish_snapshot,
-    flush_file,
-    hour_file,
-    sha256_file,
-    start_snapshot,
-    write_manifest,
-)
+from ingester.snapshot import flush_file, hour_file, sha256_file, start_snapshot
+
+__all__ = ["DEFAULT_INFO", "LICENCE", "SnapshotInfo", "Source", "reduce_capture"]
 
 log = structlog.get_logger(component="ingester.reduce")
 
@@ -68,7 +69,6 @@ MESHSTL_WINDOW = (
 )
 PUBLIC_DIR = Path("C:/Users/Casey/mesh-terrain-data/spike-capture")
 MESHSTL_DIR = Path("C:/Users/Casey/mesh-terrain-data/meshstl-capture")
-DELIVERY_TABLE = "mqtt_message"
 
 
 @dataclass(frozen=True)
@@ -92,18 +92,6 @@ class Source:
             path.name.removeprefix("capture-").split(".")[0]: path
             for path in sorted(self.directory.glob(pattern))
         }
-
-
-@dataclass(frozen=True)
-class SnapshotInfo:
-    """What the README and manifest say about the snapshot (snp_01)."""
-
-    snapshot_id: str
-    capture_date: str
-    source_url: list[str]
-    licence: str
-    brokers: list[str]
-    topics: dict[str, list[str]]
 
 
 DEFAULT_INFO = SnapshotInfo(
@@ -283,23 +271,6 @@ class Reduction:
             merge_hour(self.partial, hour, self.flushes[hour])
 
 
-def merge_hour(partial: Path, hour: datetime, flushes: int) -> None:
-    """Merge one hour's delivery flush files into its hour file, then remove them."""
-    paths = [flush_file(partial, DELIVERY_TABLE, hour, number) for number in range(1, flushes + 1)]
-    flushed = [read_rows(path) for path in paths]
-    rows = sorted(
-        (row for part in flushed for row in part),
-        key=lambda row: (row["received_at"], row["delivery_key"]),
-    )
-    target = hour_file(partial, DELIVERY_TABLE, hour)
-    write_rows(target, DELIVERY_TABLE, rows)
-    merged_keys = [row["delivery_key"] for row in read_rows(target)]
-    check_merged_keys([[row["delivery_key"] for row in part] for part in flushed], merged_keys)
-    for path in paths:
-        path.unlink()
-    log.info("merge", table=DELIVERY_TABLE, hour=f"{hour:%Y-%m-%dT%H}", count=len(rows))
-
-
 def write_count_tables(reduction: Reduction) -> None:
     """One copy count file and one dropped count file per hour."""
     versions = {"decoder_version": DECODER_VERSION, "schema_version": SCHEMA_VERSION}
@@ -315,39 +286,10 @@ def write_count_tables(reduction: Reduction) -> None:
             write_rows(hour_file(reduction.partial, table, hour), table, rows)
 
 
-def write_coverage(reduction: Reduction) -> dict[str, float]:
-    """coverage.json, and the observed hours per broker it implies (15-minute gap rule)."""
-    coverage = {
-        broker: [[minute, low, high] for minute, (low, high) in sorted(minutes.items())]
-        for broker, minutes in sorted(reduction.minutes.items())
-    }
-    path = reduction.partial / "coverage.json"
-    path.write_text(json.dumps(coverage, separators=(",", ":")) + "\n", encoding="utf-8")
-    return {broker: observed_hours(rows) for broker, rows in coverage.items()}
-
-
-def observed_hours(minutes: list[list[float]], gap_s: float = 900.0) -> float:
-    """Sum of segment spans in hours; a gap over gap_s starts a new segment (ADR 0003 spike)."""
-    total_s, start, end = 0.0, None, None
-    for _, low, high in minutes:
-        if end is not None and low - end <= gap_s:
-            end = high
-            continue
-        if start is not None and end is not None:
-            total_s += end - start
-        start, end = low, high
-    if start is not None and end is not None:
-        total_s += end - start
-    return total_s / 3600.0
-
-
-def write_metadata(reduction: Reduction, sources: list[Source], hours: dict[str, float]) -> Path:
-    """README, content hashes and the manifest."""
-    tables = ("mqtt_message", "mqtt_copy_count", "mqtt_dropped_count")
-    hashes = {
-        table: content_hash(sorted((reduction.partial / table).glob("*.parquet")), allowlist(table))
-        for table in tables
-    }
+def write_reduction_metadata(
+    reduction: Reduction, sources: list[Source], hours: dict[str, float]
+) -> Path:
+    """README, content hashes and the manifest of a reduction."""
     windows = {
         source.broker.value: [
             source.start.isoformat() if source.start else None,
@@ -355,24 +297,18 @@ def write_metadata(reduction: Reduction, sources: list[Source], hours: dict[str,
         ]
         for source in sources
     }
-    metadata: dict[str, Any] = {
-        **vars(reduction.info),
+    run: dict[str, Any] = {
         "end_at": None,
         "max_raw_bytes": None,
         "stop_reason": "reduction_complete",
-        "seeds": {},
-        "content_hashes": hashes,
-        "deliveries": reduction.deliveries.rows(),
-        "decoder_version": DECODER_VERSION,
-        "schema_version": SCHEMA_VERSION,
         "windows": windows,
-        "observed_hours": hours,
         "unreadable_lines": {b.value: reduction.unreadable[b.value] for b in Broker},
         "outside_window": {b.value: reduction.outside[b.value] for b in Broker},
         "source_files": reduction.sources,
     }
-    (reduction.partial / "README.md").write_text(render_readme(metadata), encoding="utf-8")
-    return write_manifest(reduction.partial, metadata)
+    return write_metadata(
+        reduction.partial, reduction.info, reduction.deliveries.rows(), hours, run
+    )
 
 
 def _tasks(sources: list[Source]) -> list[list[tuple[str, Source, Path]]]:
@@ -423,9 +359,9 @@ def reduce_capture(
         reduction.take(results)
     reduction.finish_rows()
     write_count_tables(reduction)
-    hours = write_coverage(reduction)
-    write_metadata(reduction, sources, hours)
-    return finish_snapshot(partial)
+    hours = write_coverage(partial, reduction.minutes)
+    write_reduction_metadata(reduction, sources, hours)
+    return finish(partial)
 
 
 def main() -> None:
