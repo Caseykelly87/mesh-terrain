@@ -6,13 +6,17 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 dependencies = [
+    "cryptography==50.0.2",
     "dagster==1.13.26",
     "dagster-dbt==0.29.26",
     "dagster-postgres==0.29.26",
     "dagster-webserver==1.13.26",
     "dbt-core==1.12.6",
     "dbt-postgres==1.11.0",
+    "meshtastic==2.7.11",
+    "paho-mqtt==2.2.0",
     "psycopg[binary]==3.3.6",
+    "pyarrow==26.0.1",
     "pydantic-settings==2.16.1",
     "structlog==26.1.0",
 ]
@@ -49,7 +53,7 @@ known-first-party = ["pipeline", "terrain", "ingester"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["pipeline", "terrain"]
+files = ["pipeline", "terrain", "ingester"]
 strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
