@@ -45,7 +45,7 @@ METADATA = {
 
 
 def fill(folder: Path) -> None:
-    path = hour_file(folder, "mqtt_message", HOUR)
+    path = hour_file(folder, "mqtt_copy_count", HOUR)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"rows")
     (folder / "README.md").write_text("what, when, where\n", encoding="utf-8")
@@ -97,7 +97,7 @@ def test_manifest_lists_every_file_with_sha256_and_size(tmp_path: Path) -> None:
     fill(partial)
     manifest = json.loads(write_manifest(partial, METADATA).read_text(encoding="utf-8"))
     paths = [entry["path"] for entry in manifest["files"]]
-    assert paths == ["README.md", "mqtt_message/2026-01-01T07.parquet"]
+    assert paths == ["README.md", "mqtt_copy_count/2026-01-01T07.parquet"]
     rows = next(entry for entry in manifest["files"] if entry["path"].endswith(".parquet"))
     assert rows["sha256"] == "bc51e9e65d79e1c90ba544ab2eae1044ccdf8c1af7a559ba375cba4276f7d99e"
     assert rows["bytes"] == 4
@@ -165,12 +165,12 @@ def test_verify_names_changed_missing_and_extra_files(tmp_path: Path) -> None:
     fill(partial)
     write_manifest(partial, METADATA)
     final = finish_snapshot(partial)
-    hour_file(final, "mqtt_message", HOUR).write_bytes(b"changed")
+    hour_file(final, "mqtt_copy_count", HOUR).write_bytes(b"changed")
     (final / "README.md").unlink()
     (final / "extra.parquet").write_bytes(b"x")
     problems = verify_manifest(final)
     assert problems == [
-        "changed: mqtt_message/2026-01-01T07.parquet",
+        "changed: mqtt_copy_count/2026-01-01T07.parquet",
         "extra: extra.parquet",
         "missing: README.md",
     ]

@@ -10,9 +10,28 @@ columns: MapReport `latitude_i`, `longitude_i`, `altitude` and
 `position_precision` land in `latitude_i`, `longitude_i`, `altitude_m` and
 `precision_bits`, with `position_source` saying which message they came from.
 NeighborInfo neighbours land as four arrays of equal length, in message order.
+
+Column names keep the protobuf field names on purpose (`hw_model`,
+`latitude_i`, `air_util_tx`, `channel_utilization`), so a reader can look a
+column up in the Meshtastic protobuf definitions. Units are the protobuf's:
+`latitude_i` and `longitude_i` in 1e-7 degrees (EPSG:4326), `altitude_m` in
+metres, `rx_snr` in dB, `rx_rssi` in dBm, `rx_time`, `position_time` and
+`neighbour_last_heard` in Unix seconds, `uptime_s` in seconds,
+`channel_utilization` and `air_util_tx` in percent, `battery_level` in percent
+(101 means powered).
+
+Not set lands as null. Where the protobuf field has presence (Position
+`latitude_i`, `longitude_i`, `altitude`, MapReport fields read as optional) the
+decoder asks the message; the MeshPacket header fields `packet_id`,
+`relay_node`, `hop_start`, `rx_time`, `rx_snr`, `rx_rssi` and `channel` have
+no presence, and 0 there means unset, so 0 lands as null. `hop_limit` stays
+not null: 0 is a real value, the public broker's rewrite of every default-key
+packet (docs/PLAN.md).
 """
 
 from dataclasses import dataclass
+
+import pyarrow as pa  # type: ignore[import-untyped]
 
 SCHEMA_VERSION = 1
 DECODER_VERSION = "1"
@@ -44,15 +63,15 @@ MQTT_MESSAGE = (
     Column("gateway_low_byte", "smallint", nullable=True),
     Column("origin_pseudonym", "text"),
     Column("origin_low_byte", "smallint"),
-    Column("packet_id", "bigint"),
-    Column("relay_node", "smallint"),
-    Column("hop_start", "smallint"),
+    Column("packet_id", "bigint", nullable=True),
+    Column("relay_node", "smallint", nullable=True),
+    Column("hop_start", "smallint", nullable=True),
     Column("hop_limit", "smallint"),
     Column("via_mqtt", "boolean"),
-    Column("rx_time", "bigint"),
-    Column("rx_snr", "real"),
-    Column("rx_rssi", "integer"),
-    Column("channel", "bigint"),
+    Column("rx_time", "bigint", nullable=True),
+    Column("rx_snr", "real", nullable=True),
+    Column("rx_rssi", "integer", nullable=True),
+    Column("channel", "bigint", nullable=True),
     Column("portnum", "integer", nullable=True),
     Column("payload_length", "integer"),
     Column("position_source", "text", nullable=True),
@@ -120,3 +139,32 @@ def allowlist(table: str) -> list[str]:
         KeyError: if the table is not one the reduction or a capture writes.
     """
     return [column.name for column in TABLES[table]]
+
+
+_ARROW_TYPES: dict[str, pa.DataType] = {
+    "text": pa.string(),
+    "timestamp with time zone": pa.timestamp("us", tz="UTC"),
+    "boolean": pa.bool_(),
+    "smallint": pa.int16(),
+    "integer": pa.int32(),
+    "bigint": pa.int64(),
+    "real": pa.float32(),
+    "text[]": pa.list_(pa.string()),
+    "smallint[]": pa.list_(pa.int16()),
+    "real[]": pa.list_(pa.float32()),
+    "bigint[]": pa.list_(pa.int64()),
+}
+
+
+def arrow_schema(table: str) -> pa.Schema:
+    """The Parquet schema of a landed table, derived from its allowlist.
+
+    Raises:
+        KeyError: if the table is not one the reduction or a capture writes.
+    """
+    return pa.schema(
+        [
+            pa.field(column.name, _ARROW_TYPES[column.sql_type], nullable=column.nullable)
+            for column in TABLES[table]
+        ]
+    )
