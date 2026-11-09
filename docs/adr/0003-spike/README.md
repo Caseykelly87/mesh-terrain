@@ -10,81 +10,79 @@ MeshSTL broker, from `https://meshstl.org` (section `#mqtt-settings` for the ser
 
 ## Files
 
-- `capture.py`: subscribes, buffers, and appends one JSON line per delivery (`received_at` in UTC from our clock, `topic`, `payload_b64`) to `capture-YYYY-MM-DDTHH.jsonl`. It flushes every 60 seconds or 20 000 records and reconnects with backoff from 1 to 120 seconds. JSON lines rather than Parquet: an append-only text file survives a crash mid-hour with every flushed record readable, needs no writer state, and the landing format belongs to the ingester. It never logs a payload or a topic. With `CAPTURE_THIN=1` it writes headers only (parsed header fields, decode status, payload length, no bytes); that is the thinning rule below and is never the default.
+- `capture.py`: the on-demand capture command of ADR 0005, brought to that design in place (below). During the spike it was a raw JSON lines capture; that version is in git history and is not to be run.
 - `analyze.py`: tallies each hourly file (`.jsonl` or `.jsonl.gz`) in its own worker process, decrypts default-key packets (AES-128-CTR, key `1PG7OiApB1nwvP+rz05pAQ==`, nonce = packet id as 8 bytes little-endian, sender id as 4 bytes little-endian, 4 zero bytes), decodes Position, NodeInfo, Telemetry, NeighborInfo and MapReport, and prints every table in `results.md`. It reads thin records too. `--start` and `--end` (ISO 8601 UTC) restrict it to a window, which is how the two brokers are compared on the same hours. `--roots MO,IL,MeshSTL` keeps only topics under those roots, which is what a subscription to those prefixes would have received. `--positions-from DIR` adds another capture's positions (same window) so a relayer silent on one broker can be placed from the other. Aggregates only; no node id, name or coordinate is printed.
 - Denominators: every rate divides by observed hours, the sum of the capture's segments. A segment is a run of records with no gap over 15 minutes; a gap is not observed time. Weekly figures are weighted: the weekday hourly rate times 120 plus the weekend hourly rate times 48, with weekday and weekend taken as local days (CDT, UTC minus 5, for the whole capture). The flat figure (overall hourly rate times 168) is printed beside it.
-- `Dockerfile`: one image for both scripts, with spike-only pins.
+- `Dockerfile`: the spike analysis image, with spike-only pins. The capture command runs from the repository with uv, not in this image.
+- `reproduce_from_snapshot.py`: the reproduction gate (below).
 
-## Commands
+## The capture command
 
-Both captures are finished. These are the commands for a rerun. Every capture gets an `END_AT` and `--restart on-failure`. The script halts itself at `END_AT` or at `MAX_RAW_BYTES` (default 10 000 000 000 bytes of `capture-*` files in the folder, checked after the once-a-minute flush): it flushes, writes `HALTED.json` (reason, time, bytes), logs `halt` at error and exits 0, so `on-failure` leaves it stopped. A start that finds `HALTED.json` exits 0 at once; deleting the marker is the only way to resume.
+`capture.py` is the project's on-demand capture command (ADR 0005 item 1). One run connects to one broker, keeps only the ADR 0005 allowlist with HMAC pseudonyms in place of node ids, and writes one snapshot: zstd Parquet by table and UTC hour, `coverage.json`, a README and a sha256 manifest. Nothing raw lands: no payload bytes, no text, no names, no real id. It runs only when started, under no restart policy and no schedule, and stops itself.
 
-Stops before `END_AT`. A SIGTERM (`docker stop`, or Docker Desktop quitting) flushes and exits 0 with no marker, so `on-failure` does not restart it: the capture ends early, and the `signal` and `stop` log lines and the last file's time are the only record. If Docker kills it instead (exit 137), `on-failure` restarts it when the engine next starts, and the startup check writes the marker if `END_AT` has passed. Never use `--restart unless-stopped` or `always`. `unless-stopped` restarts after any exit, a clean one included, and on every engine start unless the container was stopped with `docker stop`; Docker Desktop quitting is not such a stop. That is how both captures restarted on 2026-10-28 (ADR 0003, Consequences).
+Parameters:
 
-Every rerun writes to a new, empty folder: the byte cap counts every `capture-*` file already there, and new hours would mix with the spike's in the analysis. Set `END_AT` to the planned end and `MAX_RAW_BYTES` above the expected volume (the public broker writes about 232 MB an hour, so 48 hours is about 11.1 GB). The values in angle brackets below are placeholders.
+| parameter | meaning |
+| --- | --- |
+| `--host`, `--port` | the broker; one per run |
+| `--source` | `public` or `meshstl`: which broker flag (`seen_public`, `seen_meshstl`) the rows carry |
+| `--topic` | a topic filter; repeat for several. The documented default for the public broker is `msh/US/MeshSTL/#` and `msh/US/MO/#` (ADR 0005 item 7) |
+| `--end-at` | END_AT, ISO 8601 with an offset; nothing received at or after it is kept |
+| `--max-raw-bytes` | MAX_RAW_BYTES, default 10 000 000 000, measured on the snapshot folder at each check |
+| `--snapshot-id` | the new snapshot's id; a refresh is always a new id |
+| `--meshstl-approved-by-casey` | the date of Casey's approval; the command refuses the MeshSTL broker without it, and the manifest records it |
 
-Build the image and start the public capture (from the repository root, Git Bash):
+`NODE_ID_HMAC_KEY` (32 random bytes written as 64 hex characters, in `.env`) must be set; the command refuses to start without it. `SNAPSHOTS_DIR` defaults to `C:/Users/Casey/mesh-terrain-data/snapshots`. The public broker's credentials are Meshtastic's published ones and are the defaults; for the MeshSTL broker, export `MQTT_USER` and `MQTT_PASSWORD` from `C:/Users/Casey/mesh-terrain-data/meshstl.env`, which is outside the repo.
 
-```
-docker build -t mesh-spike docs/adr/0003-spike
-mkdir -p C:/Users/Casey/mesh-terrain-data/<new-public-folder>
-docker run -d --name mesh-spike-capture --restart on-failure \
-  -v C:/Users/Casey/mesh-terrain-data/<new-public-folder>:/data \
-  -e MQTT_HOST=mqtt.meshtastic.org -e MQTT_PORT=1883 \
-  -e MQTT_USER=meshdev -e MQTT_PASSWORD=large4cats \
-  -e "MQTT_TOPICS=msh/US/#" -e END_AT=<YYYY-MM-DDTHH:MM:SS+00:00> \
-  -e MAX_RAW_BYTES=<bytes> mesh-spike
-```
+How a run ends. The run writes into `<snapshots>/<id>.partial/`, flushing one file per table and hour every 5 minutes or 5 000 deliveries. At END_AT, at MAX_RAW_BYTES, or on Ctrl-C or SIGTERM, it merges each hour's flush files into one file, writes the README and the manifest with the stop reason (`end_at`, `max_raw_bytes` or `signal`) and the byte count, renames the folder to `<id>/` and exits 0. A write that fails twice exits non-zero and leaves `<id>.partial/` without a manifest; so does a crash or a power loss. Nothing deletes a `.partial` folder: the run report lists it, Casey deletes or keeps it by hand, and a new run with the same id refuses while it exists.
 
-Start the MeshSTL capture (only when the lead says Casey has posted his courtesy note). The env file holds `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER`, `MQTT_PASSWORD`, `MQTT_TOPICS=msh/US/MeshSTL/#` and `DATA_DIR=/data`:
-
-```
-mkdir -p C:/Users/Casey/mesh-terrain-data/<new-meshstl-folder>
-docker run -d --name mesh-meshstl-capture --restart on-failure \
-  --env-file C:/Users/Casey/mesh-terrain-data/meshstl.env \
-  -e END_AT=<YYYY-MM-DDTHH:MM:SS+00:00> \
-  -v C:/Users/Casey/mesh-terrain-data/<new-meshstl-folder>:/data mesh-spike
-```
-
-Check a halt: `cat C:/Users/Casey/mesh-terrain-data/<new-public-folder>/HALTED.json` and `docker inspect -f '{{.State.ExitCode}} {{.RestartCount}}' mesh-spike-capture` (expect `0 0`).
-
-Ten-minute rate check, after the container has run ten minutes. The `total` field of the last flush line divided by the minutes elapsed is the message rate; the file size divided by the minutes elapsed times 1 440 is the daily volume:
+Worked example: the 2026-10-22 public run as this command would start it. The spike ran from the 2026-10-22T16Z hour with no end time until it stopped at 2026-10-25T07:43Z, 63.6 observed hours; with the parameters it would have ended at its planned 48 hours, with MAX_RAW_BYTES above the README's 48-hour estimate of 11.1 GB of JSON lines as the guard:
 
 ```
-docker logs mesh-meshstl-capture 2>&1 | grep '"flush"' | tail -1
-ls -la C:/Users/Casey/mesh-terrain-data/meshstl-capture
+uv run --frozen python -I docs/adr/0003-spike/capture.py \
+  --host mqtt.meshtastic.org --source public --topic 'msh/US/#' \
+  --end-at 2026-10-24T16:00:00+00:00 --max-raw-bytes 12000000000 \
+  --snapshot-id meshtastic-capture-2026-10-22
 ```
 
-Disk check and the thinning rule. Free space on C: was 34 GB at 20:29Z on 2026-10-22, the public capture was at 1.2 GB after 4.3 hours and runs about 270 MB an hour, so about 12 GB more by its end. Both captures together must stay under the 20 GB line. If the MeshSTL ten-minute projection plus 12 GB passes 20 GB, do not skip MeshSTL: restart the public capture in headers-only mode for its remaining hours and record the time in `docs/STATUS.md`. The thin file keeps the header fields and decode status, so every link measurement still works; positions are lost for those hours.
+That run would have written `C:/Users/Casey/mesh-terrain-data/snapshots/meshtastic-capture-2026-10-22.partial/`, stopped with `end_at` (allowlisted Parquet of `msh/US/#` is far below 12 GB in 48 hours), and renamed it to `meshtastic-capture-2026-10-22/`. The actual snapshot of that id is the reduction of the spike's two captures (`python -I -m ingester.reduce`), since they ran before this command existed; a new run today takes a new id and the documented topics:
 
 ```
-df -h /c
-du -sh C:/Users/Casey/mesh-terrain-data/spike-capture C:/Users/Casey/mesh-terrain-data/meshstl-capture
-docker stop mesh-spike-capture && docker rm mesh-spike-capture
-docker run -d --name mesh-spike-capture --restart on-failure \
-  -v C:/Users/Casey/mesh-terrain-data/<new-public-folder>:/data \
-  -e MQTT_HOST=mqtt.meshtastic.org -e MQTT_PORT=1883 \
-  -e MQTT_USER=meshdev -e MQTT_PASSWORD=large4cats \
-  -e "MQTT_TOPICS=msh/US/#" -e END_AT=<same END_AT> \
-  -e MAX_RAW_BYTES=<bytes> -e CAPTURE_THIN=1 mesh-spike
+uv run --frozen python -I docs/adr/0003-spike/capture.py \
+  --host mqtt.meshtastic.org --source public \
+  --topic 'msh/US/MeshSTL/#' --topic 'msh/US/MO/#' \
+  --end-at <YYYY-MM-DDTHH:MM:SS+00:00> --snapshot-id meshtastic-capture-<YYYY-MM-DD>
 ```
 
-Check either capture is alive: one `flush` line a minute with `count`, `bytes`, `path`, `duration_s` and `last_message_age_s`, and one new file an hour.
+The MeshSTL broker, only after Casey has approved this run (the MeshSTL capture of 2026-10-23 ran its agreed 24 hours from 22:09Z):
 
 ```
-docker ps --filter name=mesh-
-docker logs --since 5m mesh-spike-capture
-docker logs --since 5m mesh-meshstl-capture
+set -a; source C:/Users/Casey/mesh-terrain-data/meshstl.env; set +a
+uv run --frozen python -I docs/adr/0003-spike/capture.py \
+  --host mqtt.meshstl.org --source meshstl --topic 'msh/US/MeshSTL/#' \
+  --end-at <YYYY-MM-DDTHH:MM:SS+00:00> --snapshot-id meshstl-capture-<YYYY-MM-DD> \
+  --meshstl-approved-by-casey <YYYY-MM-DD>
 ```
 
-Stop a capture. SIGTERM flushes the buffer first, and the data stays on disk.
+Do not run any capture without the lead's brief, and never the MeshSTL one without Casey's approval for that run. A make target that wraps this command is requested from platform-eng.
+
+## Reproduction gate
+
+`reproduce_from_snapshot.py` reruns every ADR 0003 link figure from the snapshot alone, checking every file against the manifest first and never opening the real-id archive. Pseudonyms become stand-in integers that keep the stored low byte, so `analyze.py` runs unchanged on the rows:
 
 ```
-docker stop mesh-spike-capture
-docker stop mesh-meshstl-capture
+uv run --frozen --with shapely==2.2.0 --with pyproj==3.8.0 python -I \
+  docs/adr/0003-spike/reproduce_from_snapshot.py \
+  C:/Users/Casey/mesh-terrain-data/snapshots/meshtastic-capture-2026-10-22 <out-dir>
 ```
 
-Run the analysis. The committed scripts are mounted at `/spike` and run from there instead of the image's copies in `/opt/spike`, so the image a capture runs from never needs a rebuild. `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting `/data` into a Windows path. It reads the gzipped hours directly.
+It writes the seven runs below and `gate.md`, the comparison with `results.md` including `merged_cross_broker` and `merged_repeat` per broker, and exits 1 if any figure differs.
+
+## Rerunning the spike analysis
+
+The spike captures are finished and their capture recipe, which used a restart policy ADR 0005 forbids, is gone; the analysis of the raw archive is kept here while the archive exists.
+
+Run the analysis. The committed scripts are mounted at `/spike` and run from there instead of the image's copies in `/opt/spike`, so the image never needs a rebuild. `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting `/data` into a Windows path. It reads the gzipped hours directly.
 
 ```
 MSYS_NO_PATHCONV=1 docker run --rm \
