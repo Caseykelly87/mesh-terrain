@@ -303,6 +303,20 @@ DELIVERIES: list[tuple[str, str, str, str, Builder]] = [
         ),
     ),
     (
+        "decrypted_portnum_zero",
+        "public",
+        f"{HOUR}:00:24.000000+00:00",
+        e_topic(),
+        lambda: encrypted(0, b"", 0x1013),
+    ),
+    (
+        "decrypted_portnum_above_max",
+        "public",
+        f"{HOUR}:00:25.000000+00:00",
+        e_topic(),
+        lambda: encrypted(portnums_pb2.MAX + 1, b"", 0x1014),
+    ),
+    (
         "json",
         "public",
         f"{HOUR}:00:20.000000+00:00",
