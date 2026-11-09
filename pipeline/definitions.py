@@ -1,4 +1,4 @@
-"""The Dagster code location: dbt assets and the dbt CLI resource, nothing else yet.
+"""The Dagster code location: the raw snapshot loader, the dbt assets and the dbt CLI resource.
 
 The dbt manifest is produced at load time rather than baked into the image. The
 project has no models yet and parsing it takes about two seconds; a manifest
@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from dagster import AssetExecutionContext, Definitions
 from dagster_dbt import DbtCliResource, DbtProject, dbt_assets
 
+from ingester.assets import raw_mqtt_snapshot
 from pipeline.common.logging import configure_logging, get_logger
 from pipeline.common.settings import get_settings
 
@@ -48,6 +49,6 @@ def mesh_terrain_dbt_assets(
 
 
 defs = Definitions(
-    assets=[mesh_terrain_dbt_assets],
+    assets=[raw_mqtt_snapshot, mesh_terrain_dbt_assets],
     resources={"dbt": DbtCliResource(project_dir=dbt_project)},
 )
