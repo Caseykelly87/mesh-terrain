@@ -21,6 +21,10 @@ The stack's data lives in Docker volumes, storage that Docker keeps apart from a
 
 To run the pre-commit hooks on every commit: `uv run pre-commit install`.
 
+## Data credits
+
+Elevation and lidar: USGS 3DEP (public domain). Canopy height: High Resolution Canopy Height Maps by WRI and Meta, version 2, released under CC BY 4.0 on the AWS Open Data registry and under the DINOv3 licence by its authors; both apply and both are carried into every map that uses it. Buildings and roads: OpenStreetMap contributors (ODbL). Boundary: US Census TIGER. Meshtastic packet data: a single capture from 2026-10-22 to 2026-10-25 from the public broker and the MeshSTL regional broker under their terms of use, held privately; only aggregated, pseudonymised derivatives are published.
+
 ## Layout
 
 | Path | Purpose |

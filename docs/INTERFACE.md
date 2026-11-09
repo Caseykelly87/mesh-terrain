@@ -28,6 +28,7 @@ YAML, every field explicit, no defaults hidden in code:
 | `rx_points` | path to a GeoParquet point layer of receivers (`rx_id`, geometry) |
 | `snapshots` | ids of the terrain snapshots to use: DEM always; DSM source (EPT project) and canopy optional. Each id is a folder with its manifest present; the engine needs no database row |
 | `endpoint_draws` | number of position draws when a site or receiver carries `box_half_width_m`; 1 for points |
+| `seed` | integer seed for every random draw in the run; recorded in the manifest (`snp_01`) |
 | `calibration` | optional: path to an observations layer (`site_id`, `rx_id`, `observed_loss_db`); when present a calibration artifact is written, predictions are not changed. The acceptance run sets it to the synthetic fixture `fixtures/observations.parquet` |
 | `output_dir` | folder that receives `<run_id>/` |
 
@@ -64,6 +65,7 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
   "run_id": "test-tile",
   "created_at": "2026-11-20T15:04:05Z",
   "config_sha256": "...",
+  "seed": 20261108,
   "models": {"itm": "NTIA ITM 1.4", "p1812": "Py1812 6c9061dd, P.1812-8"},
   "snapshots": [
     {"id": "3dep-1m-mo-saintlouis-2017-x71y428", "manifest_sha256": "..."},
@@ -75,7 +77,7 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
     {"path": "fixtures/receivers_500.parquet", "sha256": "..."},
     {"path": "fixtures/observations.parquet", "sha256": "..."}
   ],
-  "artifacts": [{"path": "predictions.parquet", "sha256": "...", "rows": 1000}]
+  "artifacts": [{"path": "predictions.parquet", "sha256": "...", "content_sha256": "...", "rows": 1000}]
 }
 ```
 
@@ -83,7 +85,7 @@ Rules:
 
 - `manifest_version` follows semantic versioning. A minor bump adds a field; a major bump changes or removes one. A reader that knows 1.x reads every 1.y.
 - `schema_version` is the version of the artifact columns; `engine_version` is the package version. Both are recorded so a reader can tell a column change from a numerical change.
-- Every input and artifact carries its sha256. Two runs with the same config and snapshots produce identical artifact checksums; that is the reproducibility test. `make check` and CI run it on a committed 1 km sub-tile fixture (a few megabytes, no network); the full 10 km test tile, about 3 GB of downloads, is a documented manual acceptance run.
+- Every input and artifact carries its file sha256, and every artifact also carries a `content_sha256`: the hash of its rows (Parquet, in row order) or its cell values (COG), not of the file, because Parquet and COG writers embed timestamps. Two runs with the same config, seed and snapshots produce identical `content_sha256` values; that is the reproducibility test (`snp_01`). `make check` and CI run it on a committed 1 km sub-tile fixture (a few megabytes, no network); the full 10 km test tile (about 2.2 to 2.9 GB of EPT streamed through PDAL and not kept, about 0.5 GB kept) is a documented manual acceptance run.
 - The manifest is written last. Its presence means the run completed.
 
 ## Loading without the database
