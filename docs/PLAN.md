@@ -25,7 +25,7 @@ Both constraints and the funnel they create are stated plainly in the write-up. 
 
 ## Operating model: snapshots
 
-Every input is a snapshot: a folder with an id, a capture date, a source URL, a licence and a sha256 manifest of its files, recorded in `raw.snapshot` under contract rule `snp_01`. A refresh is a new snapshot id, never an overwrite. Re-running the pipeline against the same snapshot ids reproduces the same artifacts. Snapshots live on the host under `C:/Users/Casey/mesh-terrain-data/snapshots/<id>/`, outside every Docker volume, so `make nuke` cannot touch them. They are not in git or LFS and are never published.
+Every input is a snapshot: a folder with an id, a capture date, a source URL, a licence and a sha256 manifest of its files, recorded in `raw.snapshot` under contract rule `snp_01`. A refresh is a new snapshot id, never an overwrite. Re-running the pipeline against the same snapshot ids reproduces the same artifacts. Snapshots live on the host under `C:/Users/Casey/mesh-terrain-data/snapshots/<id>/`, outside every Docker volume, so `make nuke` cannot touch them. A run writes into `<id>.partial/` and renames it only after the manifest is written. The one way a finished snapshot changes is Casey's approved removal of a listed set of files (`ing_02`), such as the real-id archive after the reproduction gate: the manifest is rewritten after the change and the snapshot README records the date, the list and the approval. They are not in git or LFS and are never published.
 
 Snapshot sources, each started by one documented make target or command and never on a schedule:
 
