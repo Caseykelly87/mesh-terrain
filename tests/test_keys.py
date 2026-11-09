@@ -60,13 +60,13 @@ def test_stripped_and_whole_copies_give_two_keys() -> None:
     assert delivery_key(KEY, TOPIC, stripped_header) != delivery_key(KEY, TOPIC, PAYLOAD)
 
 
-def test_parse_hmac_key_accepts_64_hex_characters() -> None:
+def test_parse_hmac_key_accepts_32_random_bytes_written_as_64_hex_characters() -> None:
     assert parse_hmac_key(KEY.hex()) == KEY
     assert parse_hmac_key(KEY.hex().upper()) == KEY
 
 
-@pytest.mark.parametrize("value", ["", "abc", "zz" * 32, "00" * 31])
-def test_parse_hmac_key_rejects_short_or_non_hex_values(value: str) -> None:
+@pytest.mark.parametrize("value", ["", "abc", "zz" * 32, "00" * 31, "00" * 33])
+def test_parse_hmac_key_rejects_anything_but_64_hex_characters(value: str) -> None:
     with pytest.raises(ValueError) as caught:
         parse_hmac_key(value)
     # The error must never echo the secret.
