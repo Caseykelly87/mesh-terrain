@@ -46,6 +46,8 @@ EXPECTED_NAMES = {
     "stat",
     "other_topic",
     "map_unparsed",
+    "decrypted_portnum_zero",
+    "decrypted_portnum_above_max",
     "both_brokers",
     "repeat",
     "stripped_public_whole_meshstl",
