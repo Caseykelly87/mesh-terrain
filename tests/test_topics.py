@@ -48,6 +48,11 @@ def test_landed_topic_leaves_no_node_id_anywhere() -> None:
     assert pseudonym(KEY, 0x0A0B0C0E) in landed
 
 
+def test_landed_topic_leaves_a_longer_hex_run_alone() -> None:
+    # Nine hex digits after "!" is not a node id, so nothing is hashed.
+    assert landed_topic("msh/US/!0a0b0c0d1/2/map/", KEY) == "msh/US/!0a0b0c0d1/2/map/"
+
+
 def test_landed_topic_without_a_gateway_segment_is_unchanged() -> None:
     assert landed_topic("msh/US/2/e/LongFast", KEY) == "msh/US/2/e/LongFast"
     assert landed_topic("msh/US/Example/2/map/", KEY) == "msh/US/Example/2/map/"
@@ -57,8 +62,19 @@ def test_landed_topic_without_a_gateway_segment_is_unchanged() -> None:
     ("topic", "expected"),
     [
         ("msh/US/2/e/LongFast/!0a0b0c0d", "LongFast"),
+        ("msh/US/Example/2/e/ShortTurbo/!0a0b0c0d", "ShortTurbo"),
+        ("msh/US/Example/2/e/ShortSlow/!0a0b0c0d", "ShortSlow"),
+        ("msh/US/Example/2/e/ShortFast/!0a0b0c0d", "ShortFast"),
         ("msh/US/Example/2/e/MediumSlow/!0a0b0c0d", "MediumSlow"),
-        ("msh/US/Example/2/c/ShortTurbo/!0a0b0c0d", "ShortTurbo"),
+        ("msh/US/Example/2/e/MediumFast/!0a0b0c0d", "MediumFast"),
+        ("msh/US/Example/2/e/LongSlow/!0a0b0c0d", "LongSlow"),
+        ("msh/US/Example/2/c/LongMod/!0a0b0c0d", "LongMod"),
+        ("msh/US/2/json/LongFast/!0a0b0c0d", "LongFast"),
+        ("msh/US/2/e/LongModerate/!0a0b0c0d", None),
+        ("msh/US/2/e/LongTurbo/!0a0b0c0d", None),
+        ("msh/US/2/e/VeryLongSlow/!0a0b0c0d", None),
+        ("msh/US/2/e/VLongSlow/!0a0b0c0d", None),
+        ("msh/US/2/e/Invalid/!0a0b0c0d", None),
         ("msh/US/2/e/LongFast", "LongFast"),
         ("msh/US/2/e/PKI/!0a0b0c0d", None),
         ("msh/US/2/e/InventedChannel/!0a0b0c0d", None),
