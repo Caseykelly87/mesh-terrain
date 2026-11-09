@@ -68,8 +68,8 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
   "seed": 20261108,
   "models": {"itm": "NTIA ITM 1.4", "p1812": "Py1812 6c9061dd, P.1812-8"},
   "snapshots": [
-    {"id": "3dep-1m-mo-saintlouis-2017-x71y428", "manifest_sha256": "..."},
-    {"id": "ept-mo-stlouis-2017-x71y428", "manifest_sha256": "..."},
+    {"id": "3dep-1m-mo-saintlouis-2017-x72y429", "manifest_sha256": "..."},
+    {"id": "ept-mo-stlouis-2017-x72y429", "manifest_sha256": "..."},
     {"id": "canopy-v2-0231113111", "manifest_sha256": "..."}
   ],
   "inputs": [
