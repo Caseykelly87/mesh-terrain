@@ -301,6 +301,8 @@ def write_reduction_metadata(
         "end_at": None,
         "max_raw_bytes": None,
         "stop_reason": "reduction_complete",
+        "description": "A single capture from 2026-10-22 to 2026-10-25, reduced from the ADR "
+        "0003 spike archive (public broker and MeshSTL broker).",
         "windows": windows,
         "unreadable_lines": {b.value: reduction.unreadable[b.value] for b in Broker},
         "outside_window": {b.value: reduction.outside[b.value] for b in Broker},

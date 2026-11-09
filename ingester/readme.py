@@ -20,6 +20,10 @@ def _window_line(broker: str, window: list[str | None]) -> str:
     start, end = window
     if start is None and end is None:
         return f"- {broker}: every record of the capture files."
+    if start is None:
+        return (
+            f"- {broker}: records received from the start of the run up to, not including, {end}."
+        )
     return f"- {broker}: records received from {start} up to, not including, {end}."
 
 
@@ -32,8 +36,8 @@ def render_readme(metadata: dict[str, Any]) -> str:
         "table and UTC hour (ADR 0005). Node, gateway and neighbour ids are HMAC-SHA-256 "
         "pseudonyms under NODE_ID_HMAC_KEY; no payload bytes, text, names or public keys.",
         "",
-        f"Captured from {metadata['capture_date']}: a single capture from 2026-10-22 to "
-        "2026-10-25. Brokers: " + ", ".join(metadata["brokers"]) + ".",
+        f"Capture date: {metadata['capture_date']}. {metadata['description']}",
+        "Brokers: " + ", ".join(metadata["brokers"]) + ".",
         f"Source URLs: {', '.join(metadata['source_url'])}.",
         "",
         f"Licence: {metadata['licence']}",
