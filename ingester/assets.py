@@ -47,8 +47,10 @@ def _connect() -> psycopg.Connection:
     )
 
 
+# Dagster reads the return annotation to build the asset's outputs and rejects
+# MaterializeResult[None], so the bare class stays and mypy is told why.
 @asset(key=["raw", "mqtt_snapshot"], check_specs=CHECKS, group_name="raw")
-def raw_mqtt_snapshot(config: SnapshotConfig) -> MaterializeResult[None]:
+def raw_mqtt_snapshot(config: SnapshotConfig) -> MaterializeResult:  # type: ignore[type-arg]
     """Load one snapshot's delivery and count tables into raw, insert-only."""
     folder = load.snapshot_folder(get_ingester_settings().snapshots_dir, config.snapshot_id)
     with _connect() as conn:
