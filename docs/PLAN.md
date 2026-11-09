@@ -90,7 +90,7 @@ The sequence is the original one with the smallest changes that fit the snapshot
 
 ### Phase 0: Foundation
 
-Exit: `docker compose up` brings up PostGIS, MinIO, Dagster; CI green; ITM spike decided (ADR 0002); the spike and its ADRs 0003 and 0005 accepted. Done except PR #13.
+Exit: `docker compose up` brings up PostGIS, MinIO, Dagster; CI green; ITM spike decided (ADR 0002); the spike and its ADRs 0003 and 0005 accepted; the plan restated for the snapshot model. Done (PR #14, tag `phase-0`).
 
 ### Phase 1: Snapshot and reduction
 
