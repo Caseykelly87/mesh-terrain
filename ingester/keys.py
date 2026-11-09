@@ -17,24 +17,24 @@ _NODE_ID_MAX = 2**32 - 1
 
 
 def parse_hmac_key(value: str) -> bytes:
-    """Decode NODE_ID_HMAC_KEY from hex.
+    """Decode NODE_ID_HMAC_KEY, 32 random bytes written as 64 hex characters.
 
     Args:
-        value: The key as hex, at least 64 characters (32 bytes), any case.
+        value: The key as 64 hex characters, any case.
 
     Returns:
-        The key bytes.
+        The 32 key bytes.
 
     Raises:
-        ValueError: if the value is not hex or decodes to fewer than 32 bytes.
-            The message never contains the value.
+        ValueError: if the value is not hex or is not 32 bytes. The message
+            never contains the value.
     """
     try:
         key = bytes.fromhex(value)
     except ValueError:
         raise ValueError("NODE_ID_HMAC_KEY is not hex") from None
-    if len(key) < KEY_BYTES:
-        raise ValueError(f"NODE_ID_HMAC_KEY must be at least {KEY_BYTES} bytes as hex")
+    if len(key) != KEY_BYTES:
+        raise ValueError("NODE_ID_HMAC_KEY must be 32 random bytes written as 64 hex characters")
     return key
 
 
