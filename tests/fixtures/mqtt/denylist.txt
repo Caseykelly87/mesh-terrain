@@ -1,0 +1,9 @@
+# Node ids no fixture may carry. Built from nothing real: the two reserved
+# values firmware gives special meaning (0, no sender; ffffffff, broadcast) and
+# three placeholder patterns that hand-written test data tends to reach for.
+# Every fixture id must also lie in the invented range f1c70000 to f1c7ffff.
+!00000000
+!ffffffff
+!deadbeef
+!12345678
+!0a0b0c0d
