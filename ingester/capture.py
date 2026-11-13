@@ -25,7 +25,13 @@ from typing import Any
 import structlog
 
 from ingester.allowlist import DECODER_VERSION, SCHEMA_VERSION
-from ingester.counts import BrokerHourCounts, CopyCounts, DroppedCounts, hour_of
+from ingester.counts import (
+    BrokerHourCounts,
+    CopyCounts,
+    DroppedCounts,
+    PortnumRuleTally,
+    hour_of,
+)
 from ingester.decoder import CopyDelivery, StoredDelivery, decode_delivery
 from ingester.finalise import (
     COUNT_TABLES,
@@ -90,6 +96,7 @@ class CaptureRun:
         self.lock = threading.Lock()
         self.index = SightingIndex()
         self.deliveries = BrokerHourCounts()
+        self.portnum_rule = PortnumRuleTally()
         self.minutes: dict[int, tuple[float, float]] = {}
         self.flushes: Counter[tuple[str, datetime]] = Counter()
         # Batches taken from the buffer and not yet written; a failed flush leaves them here.
@@ -112,9 +119,10 @@ class CaptureRun:
         with self.lock:
             self.received += 1
             self.pending += 1
+            self.deliveries.receive(received_at, self.params.source)
             self._note_minute(received_at)
             if isinstance(decoded, StoredDelivery):
-                self._keep_row(received_at, decoded.row)
+                self._keep_row(received_at, decoded)
                 return
             self.deliveries.add(received_at, self.params.source, "counted")
             if isinstance(decoded, CopyDelivery):
@@ -129,13 +137,20 @@ class CaptureRun:
         low, high = self.minutes.get(minute, (at_s, at_s))
         self.minutes[minute] = (min(low, at_s), max(high, at_s))
 
-    def _keep_row(self, received_at: datetime, row: dict[str, Any]) -> None:
+    def _keep_row(self, received_at: datetime, decoded: StoredDelivery) -> None:
+        row = decoded.row
         outcome = self.index.add(row["delivery_key"], self.params.source)
         self.deliveries.add(received_at, self.params.source, outcome)
-        if outcome == "stored":
-            is_public = self.params.source is Broker.PUBLIC
-            flags = {"seen_public": is_public, "seen_meshstl": not is_public}
-            self.rows.append({"snapshot_id": self.params.snapshot_id, **row, **flags})
+        if decoded.decrypted_portnum_rule:
+            self.portnum_rule.add_delivery(self.params.source)
+        if outcome != "stored":
+            return
+        is_public = self.params.source is Broker.PUBLIC
+        self.deliveries.add_row(received_at, seen_public=is_public, seen_meshstl=not is_public)
+        if decoded.decrypted_portnum_rule:
+            self.portnum_rule.add_row(seen_public=is_public, seen_meshstl=not is_public)
+        flags = {"seen_public": is_public, "seen_meshstl": not is_public}
+        self.rows.append({"snapshot_id": self.params.snapshot_id, **row, **flags})
 
     def maybe_flush(self) -> None:
         """Flush when the interval has passed or the buffer is full."""
@@ -216,6 +231,7 @@ class CaptureRun:
             "description": "One capture run, started by hand, from one broker.",
             "windows": {source: [None, self.params.end_at.isoformat()]},
             "meshstl_approval": self.params.meshstl_approval,
+            "decrypt_failed_portnum_rule": self.portnum_rule.manifest([self.params.source]),
         }
         write_metadata(self.partial, self._info(), self.deliveries.rows(), hours, run)
         folder = finish(self.partial)

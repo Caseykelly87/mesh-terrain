@@ -1,11 +1,12 @@
 """Dagster asset that loads one snapshot into raw, with its contract checks (ADR 0005).
 
 Started by hand with the snapshot id as run config; there is no schedule and
-no sensor. The asset loads in one transaction, then reports three checks:
+no sensor. The asset loads in one transaction, then reports four checks:
 `ing_07_second_load` (a second load inserts nothing), `ing_03_reconcile` (raw
-rows and counts against the manifest per hour, and the manifest's balance per
-hour and broker) and `ing_04_decode_rate` (warn below 90 percent, never
-blocking, since the MeshSTL broker's own channel is decrypt_failed by design).
+rows and counts against the manifest per hour and broker, ingester.load.reconcile),
+`snp_01_content_hash` (each raw table's data content hash against the manifest)
+and `ing_04_decode_rate` (warn below 90 percent, never blocking, since the
+MeshSTL broker's own channel is decrypt_failed by design).
 """
 
 import psycopg
@@ -26,6 +27,7 @@ DECODE_RATE_WARN = 0.90
 CHECKS = [
     AssetCheckSpec("ing_07_second_load", asset=["raw", "mqtt_snapshot"]),
     AssetCheckSpec("ing_03_reconcile", asset=["raw", "mqtt_snapshot"]),
+    AssetCheckSpec("snp_01_content_hash", asset=["raw", "mqtt_snapshot"]),
     AssetCheckSpec("ing_04_decode_rate", asset=["raw", "mqtt_snapshot"]),
 ]
 
@@ -59,6 +61,7 @@ def raw_mqtt_snapshot(config: SnapshotConfig) -> MaterializeResult:  # type: ign
         with conn.transaction():
             again = load.load_snapshot(conn, folder)
         problems = load.reconcile(conn, folder)
+        hash_problems = load.hash_problems(conn, folder)
         rates = load.decode_rates(conn, config.snapshot_id)
         counts = load.row_counts(conn, config.snapshot_id)
     low = {flag: rate for flag, rate in rates.items() if rate < DECODE_RATE_WARN}
@@ -74,6 +77,11 @@ def raw_mqtt_snapshot(config: SnapshotConfig) -> MaterializeResult:  # type: ign
                 check_name="ing_03_reconcile",
                 passed=not problems,
                 metadata={"problems": problems[:20], "problem_count": len(problems)},
+            ),
+            AssetCheckResult(
+                check_name="snp_01_content_hash",
+                passed=not hash_problems,
+                metadata={"problems": hash_problems},
             ),
             AssetCheckResult(
                 check_name="ing_04_decode_rate",

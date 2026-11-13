@@ -7,12 +7,19 @@ snapshot in raw.snapshot and copies each table through a temporary table
 with `on conflict do nothing` on the contract keys. Rows are only ever
 inserted, so a second load adds nothing. The caller owns the transaction.
 
-Checks for the asset: reconcile (ing_03, against the manifest's deliveries per
-hour and broker), decode_rates (ing_04) and content_hashes (snp_01; the
-registration time is left out, since it differs on every load).
+Checks, run by the asset and by the load command: reconcile (ing_03, raw
+against the manifest's deliveries per hour and broker), decode_rates (ing_04)
+and hash_problems (snp_01: each raw table's data content hash against the
+manifest's). The command exits non-zero when reconcile or the hashes find a
+problem.
+
+What reconcile can split by broker: the stored rows, since each carries both
+broker flags. The count tables carry no broker (their keys are the contract's),
+so counted deliveries are checked per hour only.
 """
 
 import argparse
+import struct
 import time
 import uuid
 from collections import Counter
@@ -174,32 +181,67 @@ def row_counts(conn: psycopg.Connection, snapshot_id: str) -> dict[str, int]:
     return counts
 
 
+BALANCE_PARTS = ("stored", "counted", "merged_cross_broker", "merged_repeat")
+
+
 def reconcile(conn: psycopg.Connection, folder: Path) -> list[str]:
-    """ing_03: raw rows and counts against the manifest per hour, and its balance per broker.
+    """ing_03: raw against the manifest's deliveries per hour and broker.
+
+    Checks, each line of the result naming what failed and where:
+    `unbalanced: hour broker` when received differs from stored plus counted
+    plus both merged counts; `flagged: hour broker` when the raw rows of the
+    hour carrying the broker's flag differ from rows_with_flag;
+    `cross_broker: broker` when the raw rows carrying the broker's flag differ
+    from its stored plus merged_cross_broker deliveries over the snapshot;
+    `stored: hour` and `counted: hour` when raw rows or counts differ from the
+    manifest's sums over both brokers.
 
     Returns:
-        One line per problem; empty when everything balances.
+        One line per problem, sorted; empty when everything balances.
     """
     manifest = read_manifest(folder)
-    snapshot_id = manifest["snapshot_id"]
-    stored: Counter[str] = Counter()
-    counted: Counter[str] = Counter()
-    problems = []
-    for row in manifest["deliveries"]:
-        parts = ("stored", "counted", "merged_cross_broker", "merged_repeat")
-        if row["received"] != sum(row[part] for part in parts):
-            problems.append(f"unbalanced: {row['hour']} {row['broker']}")
-        stored[row["hour"]] += row["stored"]
-        counted[row["hour"]] += row["counted"]
-    raw_rows = _stored_per_hour(conn, snapshot_id)
-    raw_counted = _counted_per_hour(conn, snapshot_id)
-    problems += [
-        f"stored: {h}" for h in stored.keys() | raw_rows.keys() if stored[h] != raw_rows[h]
+    rows = manifest["deliveries"]
+    flagged = _flagged_per_hour(conn, manifest["snapshot_id"])
+    problems = [
+        f"unbalanced: {row['hour']} {row['broker']}"
+        for row in rows
+        if row["received"] != sum(row[part] for part in BALANCE_PARTS)
     ]
-    problems += [
-        f"counted: {h}" for h in counted.keys() | raw_counted.keys() if counted[h] != raw_counted[h]
-    ]
+    problems += _differences("flagged", _manifest_sum(rows, "rows_with_flag", True), flagged)
+    problems += _differences("cross_broker", _first_and_cross(rows), _per_broker(flagged))
+    stored = _stored_per_hour(conn, manifest["snapshot_id"])
+    problems += _differences("stored", _manifest_sum(rows, "stored", False), stored)
+    counted = _counted_per_hour(conn, manifest["snapshot_id"])
+    problems += _differences("counted", _manifest_sum(rows, "counted", False), counted)
     return sorted(problems)
+
+
+def _manifest_sum(rows: list[dict[str, Any]], field: str, by_broker: bool) -> Counter[str]:
+    totals: Counter[str] = Counter()
+    for row in rows:
+        totals[f"{row['hour']} {row['broker']}" if by_broker else row["hour"]] += row[field]
+    return totals
+
+
+def _first_and_cross(rows: list[dict[str, Any]]) -> Counter[str]:
+    """Per broker, its first sightings plus the rows it joined after the other broker."""
+    totals: Counter[str] = Counter()
+    for row in rows:
+        totals[row["broker"]] += row["stored"] + row["merged_cross_broker"]
+    return totals
+
+
+def _per_broker(per_hour: Counter[str]) -> Counter[str]:
+    totals: Counter[str] = Counter()
+    for key, count in per_hour.items():
+        totals[key.split(" ")[1]] += count
+    return totals
+
+
+def _differences(name: str, expected: Counter[str], found: Counter[str]) -> list[str]:
+    return [
+        f"{name}: {key}" for key in expected.keys() | found.keys() if expected[key] != found[key]
+    ]
 
 
 def _stored_per_hour(conn: psycopg.Connection, snapshot_id: str) -> Counter[str]:
@@ -209,6 +251,21 @@ def _stored_per_hour(conn: psycopg.Connection, snapshot_id: str) -> Counter[str]
         (snapshot_id,),
     ).fetchall()
     return Counter({f"{hour:%Y-%m-%dT%H}": int(count) for hour, count in rows})
+
+
+def _flagged_per_hour(conn: psycopg.Connection, snapshot_id: str) -> Counter[str]:
+    """Raw rows carrying each broker's flag, by "hour broker"."""
+    rows = conn.execute(
+        "select date_trunc('hour', received_at at time zone 'UTC'), "
+        "count(*) filter (where seen_public), count(*) filter (where seen_meshstl) "
+        "from raw.mqtt_message where snapshot_id = %s group by 1",
+        (snapshot_id,),
+    ).fetchall()
+    found: Counter[str] = Counter()
+    for hour, public, meshstl in rows:
+        found[f"{hour:%Y-%m-%dT%H} public"] += int(public)
+        found[f"{hour:%Y-%m-%dT%H} meshstl"] += int(meshstl)
+    return +found
 
 
 def _counted_per_hour(conn: psycopg.Connection, snapshot_id: str) -> Counter[str]:
@@ -248,12 +305,25 @@ def decode_rates(conn: psycopg.Connection, snapshot_id: str) -> dict[str, float]
     }
 
 
+def _float32(value: Any) -> Any:
+    """A float4 as the float32 the Parquet file held; PostgreSQL sends the shortest text."""
+    if isinstance(value, list):
+        return [_float32(item) for item in value]
+    return None if value is None else struct.unpack("<f", struct.pack("<f", value))[0]
+
+
 def content_hashes(conn: psycopg.Connection, snapshot_id: str) -> dict[str, str]:
-    """Data content hash of each raw table's rows for one snapshot (snp_01)."""
+    """Data content hash of each raw table's rows for one snapshot (snp_01).
+
+    The three landed tables hash as their Parquet files do (ingester.parquet),
+    so they compare with the manifest; raw.snapshot leaves out registered_at,
+    which differs on every load.
+    """
     columns_by_table = {table: allowlist(table) for table in LOAD_ORDER}
     columns_by_table["snapshot"] = list(SNAPSHOT_CONTENT_COLUMNS)
     hashes = {}
     for table, columns in columns_by_table.items():
+        real = [c.name for c in TABLES.get(table, ()) if c.sql_type in {"real", "real[]"}]
         query = sql.SQL("select {} from {} where snapshot_id = %s").format(
             sql.SQL(", ").join(sql.Identifier(name) for name in columns),
             sql.Identifier("raw", table),
@@ -261,9 +331,29 @@ def content_hashes(conn: psycopg.Connection, snapshot_id: str) -> dict[str, str]
         total = 0
         with conn.cursor(row_factory=psycopg.rows.dict_row) as cursor:
             for row in cursor.execute(query, (snapshot_id,)):
-                total = (total + row_digest(row, columns)) % 2**256
+                as_parquet = {**row, **{name: _float32(row[name]) for name in real}}
+                total = (total + row_digest(as_parquet, columns)) % 2**256
         hashes[table] = f"{total:064x}"
     return hashes
+
+
+def hash_problems(conn: psycopg.Connection, folder: Path) -> list[str]:
+    """snp_01: one `content_hash: table` line per raw table whose hash differs from the manifest."""
+    manifest = read_manifest(folder)
+    found = content_hashes(conn, manifest["snapshot_id"])
+    expected = manifest["content_hashes"]
+    return [f"content_hash: {table}" for table in LOAD_ORDER if found[table] != expected[table]]
+
+
+def report(
+    snapshot_id: str, inserted: dict[str, int], problems: list[str], rates: dict[str, float]
+) -> int:
+    """Log the load's outcome; 1 when there is any problem, else 0."""
+    if problems:
+        log.error("load_problems", snapshot_id=snapshot_id, inserted=inserted, problems=problems)
+        return 1
+    log.info("load_done", snapshot_id=snapshot_id, inserted=inserted, decode_rates=rates)
+    return 0
 
 
 def main() -> None:
@@ -285,15 +375,9 @@ def main() -> None:
     ) as conn:
         with conn.transaction():
             inserted = load_snapshot(conn, folder)
-        problems = reconcile(conn, folder)
+        problems = reconcile(conn, folder) + hash_problems(conn, folder)
         rates = decode_rates(conn, args.snapshot_id)
-    log.info(
-        "load_done",
-        snapshot_id=args.snapshot_id,
-        inserted=inserted,
-        problems=problems,
-        decode_rates=rates,
-    )
+    raise SystemExit(report(args.snapshot_id, inserted, problems, rates))
 
 
 if __name__ == "__main__":

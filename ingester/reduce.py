@@ -15,6 +15,8 @@ Rows whose key MeshSTL also delivered are held back until every file is read,
 so their broker flags are final before they are written; every other row is
 public-only and is written as a flush file when its hour is done. Each hour's
 flush files are merged into one file after the merge check (ADR 0005 item 6).
+With several workers, at most one hour per worker is decoded ahead of the hour
+being merged, so finished hours never pile up in memory.
 
 Run with `python -I -m ingester.reduce` so nothing in the archive folders can
 shadow a module. It prints and logs counts only: never a topic, id or payload.
@@ -25,18 +27,25 @@ import base64
 import gzip
 import heapq
 import json
-from collections import Counter
-from collections.abc import Iterator
-from concurrent.futures import ProcessPoolExecutor
+from collections import Counter, deque
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import Executor, Future, ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
 import structlog
 
 from ingester.allowlist import DECODER_VERSION, SCHEMA_VERSION
-from ingester.counts import BrokerHourCounts, CopyCounts, DroppedCounts, hour_of
+from ingester.counts import (
+    BrokerHourCounts,
+    CopyCounts,
+    DroppedCounts,
+    PortnumRuleTally,
+    hour_of,
+)
 from ingester.decoder import CopyDelivery, StoredDelivery, decode_delivery
 from ingester.finalise import (
     DELIVERY_TABLE,
@@ -52,7 +61,14 @@ from ingester.settings import get_ingester_settings
 from ingester.sightings import Broker, SightingIndex
 from ingester.snapshot import flush_file, hour_file, sha256_file, start_snapshot
 
-__all__ = ["DEFAULT_INFO", "LICENCE", "SnapshotInfo", "Source", "reduce_capture"]
+__all__ = [
+    "DEFAULT_INFO",
+    "LICENCE",
+    "SnapshotInfo",
+    "Source",
+    "ordered_results",
+    "reduce_capture",
+]
 
 log = structlog.get_logger(component="ingester.reduce")
 
@@ -62,7 +78,9 @@ LICENCE = (
     "Only aggregated, pseudonymised derivatives are published."
 )
 SNAPSHOT_ID = "meshtastic-capture-2026-10-22"
-# The MeshSTL capture's agreed 24 hours: 2026-10-23T22:09:00Z to 2026-10-24T22:08:59Z.
+# The MeshSTL capture's agreed 24 hours: from 2026-10-23T22:09:00Z up to, not including,
+# 2026-10-24T22:09:00Z. No record falls in the second before either bound, so the
+# spike's [22:08:59, 22:08:59) selects the same records.
 MESHSTL_WINDOW = (
     datetime(2026, 10, 23, 22, 9, tzinfo=UTC),
     datetime(2026, 10, 24, 22, 9, tzinfo=UTC),
@@ -110,12 +128,14 @@ class FileResult:
 
     hour: str
     broker: Broker
-    rows: list[tuple[datetime, str, dict[str, Any]]] = field(default_factory=list)
+    # (received_at, broker, row, failed by the portnum rule)
+    rows: list[tuple[datetime, str, dict[str, Any], bool]] = field(default_factory=list)
     copies: CopyCounts = field(default_factory=CopyCounts)
     dropped: DroppedCounts = field(default_factory=DroppedCounts)
     counted: BrokerHourCounts = field(default_factory=BrokerHourCounts)
     minutes: dict[int, tuple[float, float]] = field(default_factory=dict)
     statuses: Counter[str] = field(default_factory=Counter)
+    portnum_rule: PortnumRuleTally = field(default_factory=PortnumRuleTally)
     unreadable: int = 0
     outside: int = 0
     source: dict[str, Any] = field(default_factory=dict)
@@ -168,22 +188,32 @@ def decode_file(task: tuple[str, Source, Path]) -> FileResult:
             result.outside += 1
             continue
         _note_minute(result, received_at)
-        decoded = decode_delivery(topic, payload, received_at, _WORKER_KEY)
-        if isinstance(decoded, StoredDelivery):
-            result.rows.append((received_at, source.broker.value, decoded.row))
-            result.statuses[decoded.row["decode_status"]] += 1
-            continue
-        result.counted.add(received_at, source.broker, "counted")
-        if isinstance(decoded, CopyDelivery):
-            result.copies.add(
-                received_at, decoded.topic, decoded.gateway_pseudonym, decoded.gateway_low_byte
-            )
-            result.statuses["internet_copy"] += 1
-        else:
-            result.dropped.add(received_at, decoded.topic_class, decoded.reason)
-            result.statuses[decoded.reason] += 1
+        result.counted.receive(received_at, source.broker)
+        _take_delivery(
+            result, received_at, decode_delivery(topic, payload, received_at, _WORKER_KEY)
+        )
     result.rows.sort(key=lambda item: item[0])
     return result
+
+
+def _take_delivery(result: FileResult, received_at: datetime, decoded: Any) -> None:
+    """Add one decoded delivery to a file's rows or counts."""
+    if isinstance(decoded, StoredDelivery):
+        rule = decoded.decrypted_portnum_rule
+        result.rows.append((received_at, result.broker.value, decoded.row, rule))
+        result.statuses[decoded.row["decode_status"]] += 1
+        if rule:
+            result.portnum_rule.add_delivery(result.broker)
+        return
+    result.counted.add(received_at, result.broker, "counted")
+    if isinstance(decoded, CopyDelivery):
+        result.copies.add(
+            received_at, decoded.topic, decoded.gateway_pseudonym, decoded.gateway_low_byte
+        )
+        result.statuses["internet_copy"] += 1
+    else:
+        result.dropped.add(received_at, decoded.topic_class, decoded.reason)
+        result.statuses[decoded.reason] += 1
 
 
 def meshstl_keys(sources: list[Source], key: bytes) -> set[str]:
@@ -217,24 +247,29 @@ class Reduction:
         self.sources: dict[str, list[dict[str, Any]]] = {}
         self.held: list[dict[str, Any]] = []
         self.flushes: Counter[datetime] = Counter()
+        self.portnum_rule = PortnumRuleTally()
+        self.portnum_rule_keys: list[str] = []
 
     def take(self, results: list[FileResult]) -> None:
         """Merge the files of one hour in received_at order and write its public-only rows."""
         for result in results:
             self._absorb_counts(result)
         written: dict[datetime, list[dict[str, Any]]] = {}
-        for received_at, broker, row in heapq.merge(
+        for received_at, broker, row, rule in heapq.merge(
             *(result.rows for result in results), key=lambda item: item[0]
         ):
             outcome = self.index.add(row["delivery_key"], Broker(broker))
             self.deliveries.add(received_at, Broker(broker), outcome)
             if outcome != "stored":
                 continue
+            if rule:
+                self.portnum_rule_keys.append(row["delivery_key"])
             full = {"snapshot_id": self.info.snapshot_id, **row}
             if row["delivery_key"] in self.shared_keys:
                 self.held.append(full)
             else:
                 full.update(seen_public=True, seen_meshstl=False)
+                self.deliveries.add_row(received_at, seen_public=True, seen_meshstl=False)
                 written.setdefault(hour_of(received_at), []).append(full)
         for hour, rows in written.items():
             self._flush(hour, rows)
@@ -248,6 +283,7 @@ class Reduction:
         for minute, (low, high) in result.minutes.items():
             known = minutes.get(minute, (low, high))
             minutes[minute] = (min(known[0], low), max(known[1], high))
+        self.portnum_rule.merge(result.portnum_rule)
         self.unreadable[broker] += result.unreadable
         self.outside[broker] += result.outside
         self.sources.setdefault(broker, []).append(result.source)
@@ -264,11 +300,14 @@ class Reduction:
         held: dict[datetime, list[dict[str, Any]]] = {}
         for row in self.held:
             row["seen_public"], row["seen_meshstl"] = self.index.flags(row["delivery_key"])
+            self.deliveries.add_row(row["received_at"], row["seen_public"], row["seen_meshstl"])
             held.setdefault(hour_of(row["received_at"]), []).append(row)
         for hour, rows in held.items():
             self._flush(hour, rows)
         for hour in sorted(self.flushes):
             merge_hour(self.partial, hour, self.flushes[hour])
+        for key in self.portnum_rule_keys:
+            self.portnum_rule.add_row(*self.index.flags(key))
 
 
 def write_count_tables(reduction: Reduction) -> None:
@@ -307,6 +346,7 @@ def write_reduction_metadata(
         "unreadable_lines": {b.value: reduction.unreadable[b.value] for b in Broker},
         "outside_window": {b.value: reduction.outside[b.value] for b in Broker},
         "source_files": reduction.sources,
+        "decrypt_failed_portnum_rule": reduction.portnum_rule.manifest(list(Broker)),
     }
     return write_metadata(
         reduction.partial, reduction.info, reduction.deliveries.rows(), hours, run
@@ -321,19 +361,41 @@ def _tasks(sources: list[Source]) -> list[list[tuple[str, Source, Path]]]:
     return [by_hour[hour] for hour in sorted(by_hour)]
 
 
-def _results(groups: list[list[tuple[str, Source, Path]]], key: bytes, workers: int) -> Any:
+def ordered_results[T, R](
+    pool: Executor, function: Callable[[T], R], groups: Iterable[list[T]], limit: int
+) -> Iterator[list[R]]:
+    """The results of each group's tasks, in group order, with at most limit groups waiting.
+
+    Args:
+        pool: Runs the tasks.
+        function: Applied to every task.
+        groups: Tasks grouped by hour, in hour order.
+        limit: Groups submitted and not yet handed back; at least 1.
+    """
+    pending: deque[list[Future[R]]] = deque()
+    remaining = iter(groups)
+    for group in remaining:
+        pending.append([pool.submit(function, task) for task in group])
+        if len(pending) >= limit:
+            break
+    while pending:
+        results = [future.result() for future in pending.popleft()]
+        for group in islice(remaining, 1):
+            pending.append([pool.submit(function, task) for task in group])
+        yield results
+
+
+def _results(
+    groups: list[list[tuple[str, Source, Path]]], key: bytes, workers: int
+) -> Iterator[list[FileResult]]:
     """FileResults grouped by hour, in hour order."""
     if workers <= 1:
         _set_worker_key(key)
         for group in groups:
             yield [decode_file(task) for task in group]
         return
-    flat = [task for group in groups for task in group]
-    sizes = [len(group) for group in groups]
     with ProcessPoolExecutor(workers, initializer=_set_worker_key, initargs=(key,)) as pool:
-        stream = pool.map(decode_file, flat)
-        for size in sizes:
-            yield [next(stream) for _ in range(size)]
+        yield from ordered_results(pool, decode_file, groups, limit=workers)
 
 
 def reduce_capture(

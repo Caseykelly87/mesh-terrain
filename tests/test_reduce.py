@@ -157,7 +157,8 @@ def test_rows_with_each_flag_are_recorded_per_hour_and_broker(tmp_path: Path) ->
         found[(hour, "public")] += int(row["seen_public"])
         found[(hour, "meshstl")] += int(row["seen_meshstl"])
     deliveries = read_manifest(folder)["deliveries"]
-    assert {(row["hour"], row["broker"]): row["rows_with_flag"] for row in deliveries} == found
+    recorded = {(row["hour"], row["broker"]): row["rows_with_flag"] for row in deliveries}
+    assert {key: count for key, count in recorded.items() if count} == +found
 
 
 def test_the_portnum_rule_count_is_in_the_manifest(tmp_path: Path) -> None:
