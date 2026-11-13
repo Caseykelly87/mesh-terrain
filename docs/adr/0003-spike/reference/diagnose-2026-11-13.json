@@ -1,0 +1,468 @@
+{
+ "1(a) shared rule on MeshSTL": {
+  "MeshSTL deliveries the public broker sighted first": 78,
+  "changed link-hours with no traced cause": 0,
+  "difference": 35.0367,
+  "figures with the shared rule, recomputed": {
+   "funnel": "3863 / 3184 / 697 / 523",
+   "gateway-only fallback": "1465 (192; 24, 13, 26)",
+   "keep 30 minutes, 3 km": "281 (32; 4, 4, 5)",
+   "keep 30 minutes, 500 m": "469 (57; 6, 6, 7)",
+   "observed hours": "23.998",
+   "positions ignored": "2328 (332; 39, 22, 43)",
+   "stationarity window, 3 km": "309 (42; 4, 4, 5)",
+   "stationarity window, 500 m": "499 (68; 6, 6, 7)"
+  },
+  "figures with the two rules, recomputed": {
+   "funnel": "3863 / 3184 / 740 / 563",
+   "gateway-only fallback": "1488 (195; 25, 14, 27)",
+   "keep 30 minutes, 3 km": "281 (32; 4, 4, 5)",
+   "keep 30 minutes, 500 m": "504 (59; 6, 6, 7)",
+   "observed hours": "23.998",
+   "positions ignored": "2328 (332; 39, 22, 43)",
+   "stationarity window, 3 km": "309 (42; 4, 4, 5)",
+   "stationarity window, 500 m": "534 (70; 6, 6, 7)"
+  },
+  "keep 30 minutes at 500 m, week, two rules / shared": [
+   503.6939,
+   468.6572
+  ],
+  "link-hours gained with the shared rule": [],
+  "link-hours lost with the shared rule": [
+   {
+    "day class": "weekday",
+    "hour (UTC)": "2026-10-23T22",
+    "median 500 m or more in the other tally": false,
+    "packets here / in the other tally": [
+     6,
+     0
+    ],
+    "receipt time shifts, s": [],
+    "receipts by what happened in the other tally": {
+     "relayer has no usable position within 30 minutes": 7
+    },
+    "usable position samples near the receipts, gateway here / other": [
+     2,
+     2
+    ],
+    "usable position samples near the receipts, relayer here / other": [
+     1,
+     0
+    ],
+    "week contribution": 17.5183
+   },
+   {
+    "day class": "weekday",
+    "hour (UTC)": "2026-10-23T23",
+    "median 500 m or more in the other tally": false,
+    "packets here / in the other tally": [
+     11,
+     0
+    ],
+    "receipt time shifts, s": [],
+    "receipts by what happened in the other tally": {
+     "relayer has no usable position within 30 minutes": 15
+    },
+    "usable position samples near the receipts, gateway here / other": [
+     1,
+     1
+    ],
+    "usable position samples near the receipts, relayer here / other": [
+     1,
+     0
+    ],
+    "week contribution": 17.5183
+   }
+  ],
+  "reference (c), two rules": {
+   "funnel": "3863 / 3184 / 740 / 563",
+   "gateway-only fallback": "1488 (195; 25, 14, 27)",
+   "keep 30 minutes, 3 km": "281 (32; 4, 4, 5)",
+   "keep 30 minutes, 500 m": "504 (59; 6, 6, 7)",
+   "observed hours": "23.998",
+   "positions ignored": "2328 (332; 39, 22, 43)",
+   "stationarity window, 3 km": "309 (42; 4, 4, 5)",
+   "stationarity window, 500 m": "534 (70; 6, 6, 7)"
+  },
+  "reference, shared rule": {
+   "funnel": "3863 / 3184 / 697 / 523",
+   "gateway-only fallback": "1465 (192; 24, 13, 26)",
+   "keep 30 minutes, 3 km": "281 (32; 4, 4, 5)",
+   "keep 30 minutes, 500 m": "469 (57; 6, 6, 7)",
+   "observed hours": "23.998",
+   "positions ignored": "2328 (332; 39, 22, 43)",
+   "stationarity window, 3 km": "309 (42; 4, 4, 5)",
+   "stationarity window, 500 m": "499 (68; 6, 6, 7)"
+  },
+  "sum of the changed link-hours' week contributions": 35.0366,
+  "their decode status or portnum": {
+   "MAP_REPORT_APP": 77,
+   "decrypt_failed": 1
+  },
+  "their shift to the public time, s: median, 90th percentile, maximum": [
+   100967.0,
+   145182.322,
+   176400.42
+  ]
+ },
+ "1(b) byte check": {
+  "meshstl": {
+   "groups whose bytes differ, all": 0,
+   "groups whose bytes differ, sample": 0,
+   "members in merged groups": 22256,
+   "members in the sample": 2038,
+   "merged groups": 10847,
+   "sample size": 1000
+  },
+  "public": {
+   "groups whose bytes differ, all": 0,
+   "groups whose bytes differ, sample": 0,
+   "members in merged groups": 3659280,
+   "members in the sample": 17590,
+   "merged groups": 64162,
+   "sample size": 1000
+  }
+ },
+ "1(c) copies rule alone, figures": {
+  "meshstl_24h": {
+   "funnel": "3863 / 3184 / 919 / 719",
+   "gateway-only fallback": "1502 (200; 26, 14, 28)",
+   "keep 30 minutes, 3 km": "281 (32; 4, 4, 5)",
+   "keep 30 minutes, 500 m": "560 (74; 6, 6, 7)",
+   "observed hours": "23.998",
+   "positions ignored": "2328 (332; 39, 22, 43)",
+   "stationarity window, 3 km": "309 (42; 4, 4, 5)",
+   "stationarity window, 500 m": "617 (89; 6, 6, 7)"
+  },
+  "meshstl_with_public_positions": {
+   "funnel": "3863 / 3184 / 932 / 732",
+   "gateway-only fallback": "1505 (201; 26, 14, 28)",
+   "keep 30 minutes, 3 km": "281 (32; 4, 4, 5)",
+   "keep 30 minutes, 500 m": "560 (74; 6, 6, 7)",
+   "observed hours": "23.998",
+   "positions ignored": "2328 (332; 39, 22, 43)",
+   "stationarity window, 3 km": "309 (42; 4, 4, 5)",
+   "stationarity window, 500 m": "617 (89; 6, 6, 7)"
+  },
+  "public_full": {
+   "funnel": "5755 / 4600 / 672 / 317",
+   "gateway-only fallback": "853 (320; 23, 16, 28)",
+   "keep 30 minutes, 3 km": "107 (41; 1, 3, 3)",
+   "keep 30 minutes, 500 m": "111 (42; 2, 4, 4)",
+   "observed hours": "63.527",
+   "positions ignored": "1195 (447; 36, 25, 46)",
+   "stationarity window, 3 km": "162 (60; 3, 5, 5)",
+   "stationarity window, 500 m": "168 (62; 4, 6, 6)"
+  },
+  "public_roots_mo_il_meshstl": {
+   "funnel": "5604 / 4597 / 660 / 305",
+   "gateway-only fallback": "853 (320; 23, 16, 28)",
+   "keep 30 minutes, 3 km": "101 (39; 1, 3, 3)",
+   "keep 30 minutes, 500 m": "104 (40; 2, 4, 4)",
+   "observed hours": "63.527",
+   "positions ignored": "1195 (447; 36, 25, 46)",
+   "stationarity window, 3 km": "178 (65; 3, 5, 5)",
+   "stationarity window, 500 m": "185 (67; 4, 6, 6)"
+  },
+  "public_roots_mo_meshstl": {
+   "funnel": "5604 / 4597 / 660 / 305",
+   "gateway-only fallback": "853 (320; 23, 16, 28)",
+   "keep 30 minutes, 3 km": "101 (39; 1, 3, 3)",
+   "keep 30 minutes, 500 m": "104 (40; 2, 4, 4)",
+   "observed hours": "63.517",
+   "positions ignored": "1195 (447; 36, 25, 46)",
+   "stationarity window, 3 km": "178 (65; 3, 5, 5)",
+   "stationarity window, 500 m": "185 (67; 4, 6, 6)"
+  },
+  "public_shared_24h": {
+   "funnel": "2153 / 1745 / 318 / 177",
+   "gateway-only fallback": "962 (128; 18, 10, 19)",
+   "keep 30 minutes, 3 km": "177 (21; 1, 2, 2)",
+   "keep 30 minutes, 500 m": "177 (21; 1, 2, 2)",
+   "observed hours": "24.000",
+   "positions ignored": "1256 (170; 26, 15, 27)",
+   "stationarity window, 3 km": "228 (29; 2, 2, 3)",
+   "stationarity window, 500 m": "228 (29; 2, 2, 3)"
+  },
+  "public_with_meshstl_positions": {
+   "funnel": "2239 / 1803 / 573 / 424",
+   "gateway-only fallback": "1000 (131; 19, 11, 20)",
+   "keep 30 minutes, 3 km": "177 (21; 1, 2, 2)",
+   "keep 30 minutes, 500 m": "344 (44; 2, 3, 3)",
+   "observed hours": "24.000",
+   "positions ignored": "1299 (175; 28, 16, 29)",
+   "stationarity window, 3 km": "228 (29; 2, 2, 3)",
+   "stationarity window, 500 m": "399 (53; 3, 3, 4)"
+  }
+ },
+ "1(c) copies with a payload": {
+  "meshstl": 0,
+  "public": 1192
+ },
+ "1(c) figures that move, (b) / copies rule alone / (c)": {
+  "meshstl_24h": {
+   "funnel": {
+    "b": "3863 / 3184 / 919 / 719",
+    "c": "3863 / 3184 / 740 / 563",
+    "copies rule alone": "3863 / 3184 / 919 / 719"
+   },
+   "gateway-only fallback": {
+    "b": "1502 (200; 26, 14, 28)",
+    "c": "1488 (195; 25, 14, 27)",
+    "copies rule alone": "1502 (200; 26, 14, 28)"
+   },
+   "keep 30 minutes, 500 m": {
+    "b": "560 (74; 6, 6, 7)",
+    "c": "504 (59; 6, 6, 7)",
+    "copies rule alone": "560 (74; 6, 6, 7)"
+   },
+   "stationarity window, 500 m": {
+    "b": "617 (89; 6, 6, 7)",
+    "c": "534 (70; 6, 6, 7)",
+    "copies rule alone": "617 (89; 6, 6, 7)"
+   }
+  },
+  "meshstl_with_public_positions": {
+   "funnel": {
+    "b": "3863 / 3184 / 932 / 732",
+    "c": "3863 / 3184 / 740 / 563",
+    "copies rule alone": "3863 / 3184 / 932 / 732"
+   },
+   "gateway-only fallback": {
+    "b": "1505 (201; 26, 14, 28)",
+    "c": "1488 (195; 25, 14, 27)",
+    "copies rule alone": "1505 (201; 26, 14, 28)"
+   },
+   "keep 30 minutes, 500 m": {
+    "b": "560 (74; 6, 6, 7)",
+    "c": "504 (59; 6, 6, 7)",
+    "copies rule alone": "560 (74; 6, 6, 7)"
+   },
+   "stationarity window, 500 m": {
+    "b": "617 (89; 6, 6, 7)",
+    "c": "534 (70; 6, 6, 7)",
+    "copies rule alone": "617 (89; 6, 6, 7)"
+   }
+  },
+  "public_full": {
+   "funnel": {
+    "b": "5755 / 4600 / 672 / 317",
+    "c": "5755 / 4600 / 584 / 277",
+    "copies rule alone": "5755 / 4600 / 672 / 317"
+   },
+   "gateway-only fallback": {
+    "b": "853 (320; 23, 16, 28)",
+    "c": "744 (275; 22, 16, 27)",
+    "copies rule alone": "853 (320; 23, 16, 28)"
+   },
+   "keep 30 minutes, 3 km": {
+    "b": "107 (41; 1, 3, 3)",
+    "c": "100 (38; 1, 3, 3)",
+    "copies rule alone": "107 (41; 1, 3, 3)"
+   },
+   "keep 30 minutes, 500 m": {
+    "b": "111 (42; 2, 4, 4)",
+    "c": "100 (38; 1, 3, 3)",
+    "copies rule alone": "111 (42; 2, 4, 4)"
+   },
+   "stationarity window, 3 km": {
+    "b": "162 (60; 3, 5, 5)",
+    "c": "159 (59; 3, 5, 5)",
+    "copies rule alone": "162 (60; 3, 5, 5)"
+   },
+   "stationarity window, 500 m": {
+    "b": "168 (62; 4, 6, 6)",
+    "c": "159 (59; 3, 5, 5)",
+    "copies rule alone": "168 (62; 4, 6, 6)"
+   }
+  },
+  "public_roots_mo_il_meshstl": {
+   "funnel": {
+    "b": "5604 / 4597 / 660 / 305",
+    "c": "5604 / 4597 / 572 / 265",
+    "copies rule alone": "5604 / 4597 / 660 / 305"
+   },
+   "gateway-only fallback": {
+    "b": "853 (320; 23, 16, 28)",
+    "c": "744 (275; 22, 16, 27)",
+    "copies rule alone": "853 (320; 23, 16, 28)"
+   },
+   "keep 30 minutes, 3 km": {
+    "b": "101 (39; 1, 3, 3)",
+    "c": "94 (36; 1, 3, 3)",
+    "copies rule alone": "101 (39; 1, 3, 3)"
+   },
+   "keep 30 minutes, 500 m": {
+    "b": "104 (40; 2, 4, 4)",
+    "c": "94 (36; 1, 3, 3)",
+    "copies rule alone": "104 (40; 2, 4, 4)"
+   },
+   "stationarity window, 500 m": {
+    "b": "185 (67; 4, 6, 6)",
+    "c": "178 (65; 3, 5, 5)",
+    "copies rule alone": "185 (67; 4, 6, 6)"
+   }
+  },
+  "public_roots_mo_meshstl": {
+   "funnel": {
+    "b": "5604 / 4597 / 660 / 305",
+    "c": "5604 / 4597 / 572 / 265",
+    "copies rule alone": "5604 / 4597 / 660 / 305"
+   },
+   "gateway-only fallback": {
+    "b": "853 (320; 23, 16, 28)",
+    "c": "744 (275; 22, 16, 27)",
+    "copies rule alone": "853 (320; 23, 16, 28)"
+   },
+   "keep 30 minutes, 3 km": {
+    "b": "101 (39; 1, 3, 3)",
+    "c": "94 (36; 1, 3, 3)",
+    "copies rule alone": "101 (39; 1, 3, 3)"
+   },
+   "keep 30 minutes, 500 m": {
+    "b": "104 (40; 2, 4, 4)",
+    "c": "94 (36; 1, 3, 3)",
+    "copies rule alone": "104 (40; 2, 4, 4)"
+   },
+   "stationarity window, 500 m": {
+    "b": "185 (67; 4, 6, 6)",
+    "c": "178 (65; 3, 5, 5)",
+    "copies rule alone": "185 (67; 4, 6, 6)"
+   }
+  },
+  "public_shared_24h": {
+   "funnel": {
+    "b": "2153 / 1745 / 318 / 177",
+    "c": "2153 / 1745 / 281 / 157",
+    "copies rule alone": "2153 / 1745 / 318 / 177"
+   },
+   "gateway-only fallback": {
+    "b": "962 (128; 18, 10, 19)",
+    "c": "879 (109; 16, 9, 17)",
+    "copies rule alone": "962 (128; 18, 10, 19)"
+   }
+  },
+  "public_with_meshstl_positions": {
+   "funnel": {
+    "b": "2239 / 1803 / 573 / 424",
+    "c": "2239 / 1803 / 528 / 395",
+    "copies rule alone": "2239 / 1803 / 573 / 424"
+   },
+   "gateway-only fallback": {
+    "b": "1000 (131; 19, 11, 20)",
+    "c": "962 (123; 17, 10, 18)",
+    "copies rule alone": "1000 (131; 19, 11, 20)"
+   }
+  }
+ },
+ "1(d) repeats": {
+  "meshstl": {
+   "first to last, 90th percentile s": 0.064,
+   "first to last, maximum s": 82802.872,
+   "first to last, median s": 0.06,
+   "gaps of 10 s or more in the stream": 3000,
+   "groups merged": 10847,
+   "groups with a member more than 30 minutes after the first": 59,
+   "late repeats by decode status or portnum": {
+    "ATAK_PLUGIN": 0,
+    "MAP_REPORT_APP": 474,
+    "NEIGHBORINFO_APP": 0,
+    "NODEINFO_APP": 0,
+    "NODE_STATUS_APP": 0,
+    "POSITION_APP": 0,
+    "ROUTING_APP": 0,
+    "STORE_FORWARD_APP": 0,
+    "TELEMETRY_APP": 0,
+    "TEXT_MESSAGE_APP": 0,
+    "TRACEROUTE_APP": 0,
+    "decrypt_failed": 0
+   },
+   "repeat deliveries": 11409,
+   "repeat deliveries by decode status or portnum": {
+    "ATAK_PLUGIN": 14,
+    "MAP_REPORT_APP": 781,
+    "NEIGHBORINFO_APP": 52,
+    "NODEINFO_APP": 1525,
+    "NODE_STATUS_APP": 13,
+    "POSITION_APP": 2376,
+    "ROUTING_APP": 1640,
+    "STORE_FORWARD_APP": 595,
+    "TELEMETRY_APP": 702,
+    "TEXT_MESSAGE_APP": 19,
+    "TRACEROUTE_APP": 1210,
+    "decrypt_failed": 2482
+   },
+   "repeat deliveries by delay from the first": {
+    "<= 1 s": 10844,
+    "<= 10 s": 39,
+    "<= 1800 s": 4,
+    "<= 60 s": 48,
+    "<= inf s": 474
+   },
+   "repeat deliveries more than 30 minutes after the first": 474,
+   "repeat deliveries with exactly the first one's received_at": 0,
+   "repeats within 5 minutes after such a gap": 11376,
+   "share of observed time within 5 minutes after a gap": 10.3985,
+   "share of repeats within 5 minutes after a gap": 0.9971
+  },
+  "public": {
+   "first to last, 90th percentile s": 165605.707,
+   "first to last, maximum s": 228698.091,
+   "first to last, median s": 2307.258,
+   "gaps of 10 s or more in the stream": 3,
+   "groups merged": 64162,
+   "groups with a member more than 30 minutes after the first": 35519,
+   "late repeats by decode status or portnum": {
+    "MAP_REPORT_APP": 186399,
+    "NODEINFO_APP": 339224,
+    "POSITION_APP": 738188,
+    "ROUTING_APP": 200763,
+    "TELEMETRY_APP": 237740,
+    "TEXT_MESSAGE_APP": 131375,
+    "TRACEROUTE_APP": 82689,
+    "decrypt_failed": 532242,
+    "stripped": 1081156
+   },
+   "repeat deliveries": 3595118,
+   "repeat deliveries by decode status or portnum": {
+    "MAP_REPORT_APP": 193001,
+    "NODEINFO_APP": 348586,
+    "POSITION_APP": 752917,
+    "ROUTING_APP": 202757,
+    "TELEMETRY_APP": 245154,
+    "TEXT_MESSAGE_APP": 133772,
+    "TRACEROUTE_APP": 88622,
+    "decrypt_failed": 538085,
+    "stripped": 1092224
+   },
+   "repeat deliveries by delay from the first": {
+    "<= 1 s": 2645,
+    "<= 10 s": 4847,
+    "<= 1800 s": 49489,
+    "<= 60 s": 8361,
+    "<= inf s": 3529776
+   },
+   "repeat deliveries more than 30 minutes after the first": 3529776,
+   "repeat deliveries with exactly the first one's received_at": 0,
+   "repeats within 5 minutes after such a gap": 10791,
+   "share of observed time within 5 minutes after a gap": 0.0026,
+   "share of repeats within 5 minutes after a gap": 0.003
+  }
+ },
+ "5 SNR cases, stored deliveries": {
+  "meshstl": {
+   "rx_snr 0.0, rx_rssi 0 (both null)": 5383,
+   "rx_snr 0.0, rx_rssi set": 30,
+   "rx_snr nonzero, rx_rssi 0": 22
+  },
+  "public": {
+   "rx_snr 0.0, rx_rssi 0 (both null)": 356470,
+   "rx_snr 0.0, rx_rssi set": 2281,
+   "rx_snr nonzero, rx_rssi 0": 4846
+  }
+ },
+ "files read": {
+  "meshstl": 35,
+  "public": 64
+ }
+}
