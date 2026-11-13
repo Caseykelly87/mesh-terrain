@@ -95,16 +95,48 @@ def merge_count_hour(partial: Path, table: str, hour: datetime, flushes: int) ->
     log.info("merge", table=table, hour=f"{hour:%Y-%m-%dT%H}", count=len(merged))
 
 
+Minutes = dict[int, tuple[float, float]]
+
+
+def note_minute(minutes: Minutes, at_s: float) -> None:
+    """Widen the first and last receipt of at_s's minute to include it."""
+    minute = int(at_s // 60)
+    low, high = minutes.get(minute, (at_s, at_s))
+    minutes[minute] = (min(low, at_s), max(high, at_s))
+
+
+def merge_minutes(into: Minutes, other: Minutes) -> None:
+    """Add another set of minute bounds to into."""
+    for minute, (low, high) in other.items():
+        known = into.get(minute, (low, high))
+        into[minute] = (min(known[0], low), max(known[1], high))
+
+
+def _rows(minutes: Minutes) -> list[list[float]]:
+    return [[minute, low, high] for minute, (low, high) in sorted(minutes.items())]
+
+
 def write_coverage(
-    partial: Path, minutes: dict[str, dict[int, tuple[float, float]]]
+    partial: Path,
+    minutes: dict[str, Minutes],
+    root_minutes: dict[str, dict[str, Minutes]] | None = None,
 ) -> dict[str, float]:
-    """coverage.json, and the observed hours per broker it implies (15-minute gap rule)."""
-    coverage = {
-        broker: [[minute, low, high] for minute, (low, high) in sorted(by_minute.items())]
-        for broker, by_minute in sorted(minutes.items())
+    """coverage.json and coverage_roots.json; returns observed hours per broker (15-minute gaps).
+
+    Args:
+        partial: The `<id>.partial/` folder.
+        minutes: Per broker, the first and last receipt of every minute.
+        root_minutes: The same per broker and regional topic root (topics.COVERAGE_ROOTS).
+    """
+    coverage = {broker: _rows(by_minute) for broker, by_minute in sorted(minutes.items())}
+    by_root = {
+        broker: {root: _rows(by_minute) for root, by_minute in sorted(roots.items())}
+        for broker, roots in sorted((root_minutes or {}).items())
+        if roots
     }
-    path = partial / "coverage.json"
-    path.write_text(json.dumps(coverage, separators=(",", ":")) + "\n", encoding="utf-8")
+    for name, content in (("coverage.json", coverage), ("coverage_roots.json", by_root)):
+        text = json.dumps(content, separators=(",", ":")) + "\n"
+        (partial / name).write_text(text, encoding="utf-8")
     return {broker: observed_hours(rows) for broker, rows in coverage.items()}
 
 
