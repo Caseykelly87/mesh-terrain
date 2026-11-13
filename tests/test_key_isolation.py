@@ -11,7 +11,9 @@ from ingester.settings import get_ingester_settings
 
 
 def test_the_environment_holds_no_key() -> None:
-    assert "NODE_ID_HMAC_KEY" not in os.environ
+    # A bare `not in os.environ` would print the whole environment, key included, on failure.
+    present = "NODE_ID_HMAC_KEY" in os.environ
+    assert present is False
 
 
 def test_the_settings_read_no_key() -> None:

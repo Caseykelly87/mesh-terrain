@@ -8,6 +8,10 @@ SHELL := bash
 # variables Compose uses. The file is created from .env.example by `make up`.
 -include .env
 export
+# The HMAC key is the one secret no recipe needs from the environment: the
+# commands that pseudonymise read it from .env through their settings, and the
+# tests must never see it (Casey, 2026-11-13).
+unexport NODE_ID_HMAC_KEY
 
 # Some Windows hosts run antivirus or a proxy that re-signs HTTPS traffic; uv's
 # bundled root store then rejects PyPI with "invalid peer certificate". The
