@@ -43,7 +43,9 @@ def fixture_records() -> list[dict[str, str]]:
     return [json.loads(line) for line in FIXTURES.read_text(encoding="utf-8").splitlines()]
 
 
-def write_archive(root: Path, outside_window: bool = False) -> list[Source]:
+def write_archive(
+    root: Path, outside_window: bool = False, regional_record: bool = False
+) -> list[Source]:
     """Public hours gzipped, MeshSTL hours plain, as the spike stored them."""
     public, meshstl = root / "public", root / "meshstl"
     public.mkdir(parents=True)
@@ -53,6 +55,9 @@ def write_archive(root: Path, outside_window: bool = False) -> list[Source]:
     if outside_window:
         late = dict(records[0], broker="meshstl", received_at="2026-01-01T09:00:00+00:00")
         records.append(late)
+    if regional_record:
+        topic = records[0]["topic"].replace("msh/US/Example/", "msh/US/MO/")
+        records.append(dict(records[0], topic=topic, received_at="2026-01-01T07:20:00+00:00"))
     for record in records:
         folder = public if record["broker"] == "public" else meshstl
         hour = record["received_at"][:13]
@@ -223,6 +228,15 @@ def test_coverage_holds_receipt_minutes_per_broker(tmp_path: Path) -> None:
     assert set(coverage) == {"public", "meshstl"}
     first_minute = int(datetime(2026, 1, 1, 7, tzinfo=UTC).timestamp() // 60)
     assert coverage["public"][0][0] == first_minute
+
+
+def test_coverage_of_each_regional_root_is_recorded(tmp_path: Path) -> None:
+    # analyze.py's --roots runs count observed time from records under those roots only.
+    sources = write_archive(tmp_path / "archive", regional_record=True)
+    folder = reduce_capture(sources, tmp_path / "snapshots", INFO, KEY, workers=1)
+    roots = json.loads((folder / "coverage_roots.json").read_text("utf-8"))
+    at_s = datetime(2026, 1, 1, 7, 20, tzinfo=UTC).timestamp()
+    assert roots == {"public": {"MO": [[int(at_s // 60), at_s, at_s]]}}
 
 
 def test_content_hashes_are_in_the_manifest_and_reproduce(tmp_path: Path) -> None:
