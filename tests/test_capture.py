@@ -205,7 +205,7 @@ def test_the_retry_warning_names_the_table_hour_and_path(
     [warning] = [entry for entry in logs if entry["event"] == "flush_retry"]
     assert warning["table"] == "mqtt_copy_count"
     assert warning["hour"] == "2026-01-01T07"
-    assert warning["path"].endswith(".flush-1.parquet")
+    assert warning["path"] == "2026-01-01T07.flush-00001.parquet"
 
 
 def test_the_capture_date_is_the_day_the_run_started(tmp_path: Path) -> None:
