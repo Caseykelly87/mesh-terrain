@@ -76,8 +76,9 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       # Casey decided that nothing in this project starts on its own (PR #12),
-      # so a restart policy other than "no" fails here. The Phase 1 ingester
-      # will use on-failure; exclude it from this check when it lands.
+      # so a restart policy other than "no" fails here. Capture runs are started
+      # by hand and are not Compose services (ADR 0005 item 1), so nothing is
+      # exempt.
       - name: check that no service restarts on its own
         run: |
           make env
