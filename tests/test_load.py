@@ -11,11 +11,12 @@ from pathlib import Path
 
 import psycopg
 import pytest
+import structlog
 from test_reduce import INFO, KEY, SNAPSHOT_ID, table_rows, write_archive
 
 from ingester import load
 from ingester.reduce import reduce_capture
-from ingester.snapshot import SnapshotError
+from ingester.snapshot import SnapshotError, read_manifest
 from pipeline.common.settings import get_settings
 
 LOADER_SOURCE = Path(load.__file__).read_text(encoding="utf-8")
@@ -107,12 +108,60 @@ def test_reconciliation_passes_on_a_loaded_snapshot(
     assert load.reconcile(conn, snapshot) == []
 
 
+def test_an_extra_count_row_is_a_reconcile_problem(
+    conn: psycopg.Connection, snapshot: Path
+) -> None:
+    load.load_snapshot(conn, snapshot)
+    conn.execute(
+        "insert into raw.mqtt_dropped_count values "
+        "(%s, '2026-01-01T07:00:00+00:00', 'other', 'json', 1, '1', 1)",
+        (SNAPSHOT_ID,),
+    )
+    assert load.reconcile(conn, snapshot) == ["counted: 2026-01-01T07"]
+
+
+def test_a_wrong_broker_flag_is_a_reconcile_problem_for_that_broker(
+    conn: psycopg.Connection, snapshot: Path
+) -> None:
+    load.load_snapshot(conn, snapshot)
+    conn.execute(
+        "update raw.mqtt_message set seen_meshstl = true "
+        "where snapshot_id = %s and decode_status = 'stripped'",
+        (SNAPSHOT_ID,),
+    )
+    # Per hour against rows_with_flag, and per broker against stored plus merged_cross_broker.
+    assert load.reconcile(conn, snapshot) == [
+        "cross_broker: meshstl",
+        "flagged: 2026-01-01T07 meshstl",
+    ]
+
+
 def test_decode_rate_per_broker_flag(conn: psycopg.Connection, snapshot: Path) -> None:
-    # ing_04: ok over stored radio deliveries that carried a payload.
+    # ing_04: ok over stored radio deliveries on e topics that carried a payload. Public:
+    # 14 of 24 (the 10 others are unknown_port, decrypt_failed and malformed fixtures).
+    # MeshSTL: 3 of 4 (the wrong-key fixture fails).
     load.load_snapshot(conn, snapshot)
     rates = load.decode_rates(conn, SNAPSHOT_ID)
-    assert set(rates) == {"seen_public", "seen_meshstl"}
-    assert all(0.0 <= rate <= 1.0 for rate in rates.values())
+    assert rates == {"seen_public": 14 / 24, "seen_meshstl": 3 / 4}
+
+
+def test_raw_content_hashes_equal_the_manifest(conn: psycopg.Connection, snapshot: Path) -> None:
+    # snp_01: float4 columns come back from the warehouse as the float32 the Parquet held.
+    load.load_snapshot(conn, snapshot)
+    hashes = load.content_hashes(conn, SNAPSHOT_ID)
+    manifest = read_manifest(snapshot)["content_hashes"]
+    assert {table: hashes[table] for table in manifest} == manifest
+    assert load.hash_problems(conn, snapshot) == []
+
+
+def test_the_load_command_fails_on_any_problem() -> None:
+    with structlog.testing.capture_logs() as logs:
+        assert load.report(SNAPSHOT_ID, {}, ["counted: 2026-01-01T07"], {}) == 1
+        assert load.report(SNAPSHOT_ID, {}, [], {}) == 0
+    assert [(entry["event"], entry["log_level"]) for entry in logs] == [
+        ("load_problems", "error"),
+        ("load_done", "info"),
+    ]
 
 
 def test_content_hashes_leave_out_registered_at(conn: psycopg.Connection, snapshot: Path) -> None:

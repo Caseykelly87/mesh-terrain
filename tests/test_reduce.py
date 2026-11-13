@@ -4,6 +4,7 @@ import gzip
 import json
 import re
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ import pytest
 
 from ingester.allowlist import TABLES, arrow_schema
 from ingester.parquet import content_hash
-from ingester.reduce import LICENCE, SnapshotInfo, Source, reduce_capture
+from ingester.reduce import LICENCE, SnapshotInfo, Source, ordered_results, reduce_capture
 from ingester.sightings import Broker
 from ingester.snapshot import (
     MANIFEST_NAME,
@@ -145,6 +146,51 @@ def test_deliveries_balance_per_hour_and_broker(tmp_path: Path) -> None:
     copies = sum(row["copy_count"] for row in table_rows(folder, "mqtt_copy_count"))
     dropped = sum(row["delivery_count"] for row in table_rows(folder, "mqtt_dropped_count"))
     assert counted == copies + dropped
+
+
+def test_rows_with_each_flag_are_recorded_per_hour_and_broker(tmp_path: Path) -> None:
+    # The loader's ing_03 check compares raw rows with each broker flag against these.
+    folder = reduce_fixtures(tmp_path)
+    found: Counter[tuple[str, str]] = Counter()
+    for row in table_rows(folder, "mqtt_message"):
+        hour = f"{row['received_at']:%Y-%m-%dT%H}"
+        found[(hour, "public")] += int(row["seen_public"])
+        found[(hour, "meshstl")] += int(row["seen_meshstl"])
+    deliveries = read_manifest(folder)["deliveries"]
+    assert {(row["hour"], row["broker"]): row["rows_with_flag"] for row in deliveries} == found
+
+
+def test_the_portnum_rule_count_is_in_the_manifest(tmp_path: Path) -> None:
+    # Two public fixtures decrypt to portnum 0 and to one above the enum's maximum.
+    rule = read_manifest(reduce_fixtures(tmp_path))["decrypt_failed_portnum_rule"]
+    assert rule == {
+        "deliveries": {"public": 2, "meshstl": 0},
+        "rows": {"seen_public": 2, "seen_meshstl": 0},
+    }
+
+
+def test_two_workers_give_the_same_snapshot(tmp_path: Path) -> None:
+    sources = write_archive(tmp_path / "archive")
+    one = reduce_capture(sources, tmp_path / "one", INFO, KEY, workers=1)
+    two = reduce_capture(sources, tmp_path / "two", INFO, KEY, workers=2)
+    first, second = read_manifest(one), read_manifest(two)
+    for name in ("content_hashes", "deliveries", "observed_hours", "decrypt_failed_portnum_rule"):
+        assert first[name] == second[name], name
+
+
+def test_groups_in_flight_are_bounded_and_come_back_in_order() -> None:
+    submitted: list[int] = []
+
+    class CountingPool(ThreadPoolExecutor):
+        def submit(self, fn: Any, /, *args: Any, **kwargs: Any) -> Any:
+            submitted.append(args[0])
+            return super().submit(fn, *args, **kwargs)
+
+    groups = [[number] for number in range(10)]
+    with CountingPool(4) as pool:
+        for taken, results in enumerate(ordered_results(pool, abs, groups, limit=3), 1):
+            assert results == [taken - 1]
+            assert len(submitted) <= taken + 3
 
 
 def test_unreadable_lines_are_recorded_not_counted_as_deliveries(tmp_path: Path) -> None:

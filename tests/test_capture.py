@@ -115,6 +115,24 @@ def test_a_repeat_is_merged_and_the_hours_balance(tmp_path: Path) -> None:
     assert len(rows) == sum(row["stored"] for row in deliveries)
 
 
+def test_received_counts_every_delivery_before_end_at(tmp_path: Path) -> None:
+    run, _ = run_through(tmp_path)
+    deliveries = read_manifest(run.finish("end_at"))["deliveries"]
+    sent: dict[str, int] = {}
+    for record in public_records():
+        hour = record["received_at"][:13]
+        sent[hour] = sent.get(hour, 0) + 1
+    assert {row["hour"]: row["received"] for row in deliveries} == sent
+    for row in deliveries:
+        assert row["rows_with_flag"] == row["stored"]
+
+
+def test_the_portnum_rule_count_is_in_the_capture_manifest(tmp_path: Path) -> None:
+    run, _ = run_through(tmp_path)
+    rule = read_manifest(run.finish("end_at"))["decrypt_failed_portnum_rule"]
+    assert rule == {"deliveries": {"public": 2}, "rows": {"seen_public": 2}}
+
+
 def test_merged_counts_equal_the_flushed_counts(tmp_path: Path) -> None:
     run, _ = run_through(tmp_path, flush_every=2)
     folder = run.finish("end_at")
