@@ -22,12 +22,15 @@ metres, `rx_snr` in dB, `rx_rssi` in dBm, `rx_time`, `position_time` and
 
 Not set lands as null. Where the protobuf field has presence (Position
 `latitude_i`, `longitude_i`, `altitude`, MapReport fields read as optional) the
-decoder asks the message; the MeshPacket header fields `packet_id`,
-`relay_node`, `hop_start`, `rx_time` and `rx_rssi` have no presence, and 0
-there means unset, so 0 lands as null. `rx_snr` of 0.0 is null only when
-`rx_rssi` is 0 too, because 0.0 dB is a valid reading; `channel` keeps 0, a
-real channel hash. `hop_limit` stays not null: 0 is a real value, the public
-broker's rewrite of every default-key packet (docs/PLAN.md).
+decoder asks the message. The MeshPacket header fields have no presence, so a
+0 there is null only where 0 cannot be a reading: `packet_id` (firmware never
+sends id 0), `relay_node` (0 is firmware's "no relay node"), `rx_time` (0 is
+1970, a gateway with no clock) and `rx_rssi` (0 is the value a gateway reports
+with no radio reading). `rx_snr` of 0.0 is null only when `rx_rssi` is 0 too,
+because 0.0 dB is a valid reading. `hop_start` (0 from older firmware and from
+a sender with hop limit 0), `hop_limit` (0 is the public broker's rewrite of
+every default-key packet, docs/PLAN.md) and `channel` (a real channel hash)
+land as received. ADR 0005, amendment of 2026-11-13, lists every field.
 
 Every column filled from a protobuf uint32 field is bigint, so no value the
 wire format allows can fail the Parquet write.
