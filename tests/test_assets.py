@@ -16,6 +16,7 @@ def test_the_raw_snapshot_asset_and_its_checks_are_defined() -> None:
     assert key in graph.get_all_asset_keys()
     checks = {AssetCheckKey(key, name) for name in ("ing_07_second_load", "ing_03_reconcile")}
     checks.add(AssetCheckKey(key, "ing_04_decode_rate"))
+    checks.add(AssetCheckKey(key, "snp_01_content_hash"))
     assert checks <= set(graph.asset_check_keys)
 
 
