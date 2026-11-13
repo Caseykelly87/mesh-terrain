@@ -180,12 +180,17 @@ def test_packet_id_zero_lands_as_null() -> None:
     assert row("packet_id_zero")["packet_id"] is None
 
 
-@pytest.mark.parametrize("field", ["relay_node", "hop_start", "rx_time", "rx_snr", "rx_rssi"])
+@pytest.mark.parametrize("field", ["relay_node", "rx_time", "rx_snr", "rx_rssi"])
 def test_unset_header_fields_land_as_null(field: str) -> None:
     unset = row("unset_header")
     assert unset[field] is None
     assert unset["hop_limit"] == 3
     assert unset["modem_preset"] == "MediumFast"
+
+
+def test_hop_start_zero_is_kept() -> None:
+    # 0 is what older firmware leaves and also what a sender with hop limit 0 sends.
+    assert row("unset_header")["hop_start"] == 0
 
 
 def test_channel_hash_zero_is_kept() -> None:

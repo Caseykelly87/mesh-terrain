@@ -110,8 +110,8 @@ def test_no_column_can_hold_bytes_text_names_or_keys(table: str) -> None:
 
 
 # Header fields with no protobuf presence where the decoder lands 0 as null ("not set").
-# rx_snr is null only when rx_rssi is 0 too; channel keeps 0, a real hash.
-UNSET_IS_NULL = ("packet_id", "relay_node", "hop_start", "rx_time", "rx_snr", "rx_rssi")
+# rx_snr is null only when rx_rssi is 0 too; channel and hop_start keep 0, a real value.
+UNSET_IS_NULL = ("packet_id", "relay_node", "rx_time", "rx_snr", "rx_rssi")
 # Columns filled from protobuf uint32 fields (meshtastic mesh.proto, telemetry.proto, mqtt.proto).
 UINT32_COLUMNS = (
     "packet_id",
