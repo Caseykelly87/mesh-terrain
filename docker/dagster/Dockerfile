@@ -64,8 +64,12 @@ COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
+# Every package pipeline/definitions.py imports must be here: the webserver
+# stays healthy when the code location fails to import, and only make
+# check-definitions catches a missing one.
 COPY pipeline/ pipeline/
 COPY terrain/ terrain/
+COPY ingester/ ingester/
 COPY dbt/ dbt/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
