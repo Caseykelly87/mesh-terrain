@@ -89,10 +89,15 @@ def build_client(run: CaptureRun, topics: list[str], user: str, password: str) -
     return client
 
 
+def needs_meshstl_approval(host: str, source: str) -> bool:
+    """True for the MeshSTL broker under any spelling of its host, or any run that says meshstl."""
+    return source == Broker.MESHSTL.value or host.lower().rstrip(".") == MESHSTL_HOST
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
-    if args.host == MESHSTL_HOST and not args.meshstl_approved_by_casey:
-        log.error("meshstl_needs_approval", host=args.host)
+    if needs_meshstl_approval(args.host, args.source) and not args.meshstl_approved_by_casey:
+        log.error("meshstl_needs_approval", host=args.host, source=args.source)
         return 2
     settings = get_ingester_settings()
     params = RunParameters(

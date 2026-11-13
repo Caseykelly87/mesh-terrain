@@ -5,9 +5,10 @@ delivery to CaptureRun.receive and asks maybe_flush and stop_reason once a
 second. This module holds no network code, so it runs on a fake clock in
 tests. Each delivery is decoded at once by ingester.decoder; only allowlisted
 fields and counts stay in memory, and nothing received at or after END_AT is
-kept. A flush writes one file per table and hour; a write that fails is
-retried once with the buffer kept, and a second failure raises, leaving the
-`.partial` folder without a manifest. At exit the flush files are merged per
+kept. A flush writes one file per table and hour; each file that fails is
+retried once, and a second failure raises with the unwritten batches kept and
+the written ones never written again, leaving the `.partial` folder without a
+manifest. At exit the flush files are merged per
 hour and the README and manifest record the parameters and the stop reason
 (ADR 0005 items 1 and 6).
 """
@@ -43,6 +44,9 @@ from ingester.sightings import Broker, SightingIndex
 from ingester.snapshot import flush_file, start_snapshot
 
 log = structlog.get_logger(component="ingester.capture")
+
+# (table, hour, rows) of one flush file.
+Batch = tuple[str, datetime, list[dict[str, Any]]]
 
 
 @dataclass(frozen=True)
@@ -80,6 +84,7 @@ class CaptureRun:
         self.params = params
         self.key = key
         self.now = now
+        self.started_at = now()
         self.policy = FlushPolicy(interval_s, max_records, clock)
         self.partial = start_snapshot(root, params.snapshot_id)
         self.lock = threading.Lock()
@@ -87,6 +92,8 @@ class CaptureRun:
         self.deliveries = BrokerHourCounts()
         self.minutes: dict[int, tuple[float, float]] = {}
         self.flushes: Counter[tuple[str, datetime]] = Counter()
+        # Batches taken from the buffer and not yet written; a failed flush leaves them here.
+        self.unwritten: list[Batch] = []
         self.received = 0
         self._reset_buffers()
 
@@ -141,18 +148,21 @@ class CaptureRun:
         return stop_reason(self.now(), self.params.end_at, used, self.params.max_raw_bytes)
 
     def flush(self) -> None:
-        """Write the buffer as flush files; retry once, then raise with the buffer kept."""
+        """Write the buffer as flush files, one per table and hour.
+
+        Each file gets one retry. A batch is dropped from the buffer only once
+        it is written, so a second failure raises with every unwritten batch
+        kept and no written batch is ever written again.
+        """
         with self.lock:
-            batches = self._batches()
-            try:
-                self._write(batches)
-            except OSError as first:
-                log.warning("flush_retry", error=first.__class__.__name__)
-                self._write(batches)
+            self.unwritten += self._batches()
             self._reset_buffers()
+            while self.unwritten:
+                self._write(*self.unwritten[0])
+                self.unwritten.pop(0)
             self.policy.flushed()
 
-    def _batches(self) -> list[tuple[str, datetime, list[dict[str, Any]]]]:
+    def _batches(self) -> list[Batch]:
         snapshot = {"snapshot_id": self.params.snapshot_id}
         versions = {"decoder_version": DECODER_VERSION, "schema_version": SCHEMA_VERSION}
         by_key: dict[tuple[str, datetime], list[dict[str, Any]]] = {}
@@ -166,22 +176,28 @@ class CaptureRun:
             by_key.setdefault(("mqtt_dropped_count", drop.hour), []).append(row)
         return [(table, hour, rows) for (table, hour), rows in sorted(by_key.items())]
 
-    def _write(self, batches: list[tuple[str, datetime, list[dict[str, Any]]]]) -> None:
-        for table, hour, rows in batches:
-            number = self.flushes[(table, hour)] + 1
-            path = flush_file(self.partial, table, hour, number)
-            started = time.monotonic()
+    def _write(self, table: str, hour: datetime, rows: list[dict[str, Any]]) -> None:
+        """Write one flush file, retrying once at the same path."""
+        number = self.flushes[(table, hour)] + 1
+        path = flush_file(self.partial, table, hour, number)
+        started = time.monotonic()
+        try:
             size = write_rows(path, table, rows)
-            self.flushes[(table, hour)] = number
-            duration_s = round(time.monotonic() - started, 3)
-            log.info(
-                "flush",
+        except OSError as first:
+            # Safe to retry: the same path is rewritten whole, and a second failure raises.
+            log.warning(
+                "flush_retry",
                 table=table,
-                count=len(rows),
-                bytes=size,
+                hour=f"{hour:%Y-%m-%dT%H}",
                 path=path.name,
-                duration_s=duration_s,
+                error=first.__class__.__name__,
             )
+            size = write_rows(path, table, rows)
+        self.flushes[(table, hour)] = number
+        duration_s = round(time.monotonic() - started, 3)
+        log.info(
+            "flush", table=table, count=len(rows), bytes=size, path=path.name, duration_s=duration_s
+        )
 
     def finish(self, reason: str) -> Path:
         """Flush, merge every hour, write coverage, README and manifest, and rename."""
@@ -209,7 +225,7 @@ class CaptureRun:
     def _info(self) -> SnapshotInfo:
         return SnapshotInfo(
             snapshot_id=self.params.snapshot_id,
-            capture_date=f"{self.now():%Y-%m-%d}",
+            capture_date=f"{self.started_at:%Y-%m-%d}",
             source_url=[f"mqtt://{self.params.host}:{self.params.port}"],
             licence=self.params.licence,
             brokers=[self.params.host],
