@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from meshtastic.protobuf import portnums_pb2
 
 from ingester.allowlist import DECODE_STATUSES, DECODER_VERSION, SCHEMA_VERSION, allowlist
 from ingester.decoder import (
@@ -26,7 +27,14 @@ GATEWAY_TWO = 0xF1C70002
 SENDER = 0xF1C70011
 NEIGHBOUR = 0xF1C70033
 NODE_PATTERN = re.compile(r"![0-9a-f]{8}")
-INVENTED_WORDS = ("kestrel", "Invented Fixture Node", "IFN1", "0.0.0.invented")
+INVENTED_WORDS = (
+    "kestrel",
+    "Invented Fixture Node",
+    "IFN1",
+    "0.0.0.invented",
+    "InventedGatewayName",
+)
+UINT32_MAX = 2**32 - 1
 
 
 def records() -> list[dict[str, str]]:
@@ -159,6 +167,8 @@ def test_text_message_is_a_row_with_its_portnum_and_no_text() -> None:
         ("bad_position_payload", "malformed", 3),
         ("decrypted_portnum_zero", "decrypt_failed", None),
         ("decrypted_portnum_above_max", "decrypt_failed", None),
+        ("decrypted_portnum_negative", "malformed", -3),
+        ("plaintext_portnum_above_max", "unknown_port", portnums_pb2.MAX + 1),
     ],
 )
 def test_decode_status(name: str, status: str, portnum: int | None) -> None:
@@ -170,14 +180,68 @@ def test_packet_id_zero_lands_as_null() -> None:
     assert row("packet_id_zero")["packet_id"] is None
 
 
-@pytest.mark.parametrize(
-    "field", ["relay_node", "hop_start", "rx_time", "rx_snr", "rx_rssi", "channel"]
-)
+@pytest.mark.parametrize("field", ["relay_node", "hop_start", "rx_time", "rx_snr", "rx_rssi"])
 def test_unset_header_fields_land_as_null(field: str) -> None:
     unset = row("unset_header")
     assert unset[field] is None
     assert unset["hop_limit"] == 3
     assert unset["modem_preset"] == "MediumFast"
+
+
+def test_channel_hash_zero_is_kept() -> None:
+    # About one channel in 256 hashes to 0, so 0 is a value, not "unset".
+    assert row("unset_header")["channel"] == 0
+    assert row("snr_zero_with_rssi")["channel"] == 0
+
+
+def test_snr_of_zero_is_kept_when_rssi_is_set() -> None:
+    # 0.0 dB is a valid reading; only a packet with no radio metadata (rssi 0) has a null snr.
+    reading = row("snr_zero_with_rssi")
+    assert reading["rx_snr"] == 0.0
+    assert reading["rx_rssi"] == -97
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("relay_node", UINT32_MAX), ("hop_start", UINT32_MAX), ("hop_limit", UINT32_MAX)],
+)
+def test_uint32_header_values_land_whole(field: str, value: int) -> None:
+    assert row("uint32_maximum_values")[field] == value
+
+
+def test_uint32_payload_values_land_whole() -> None:
+    assert row("uint32_maximum_values")["battery_level"] == UINT32_MAX
+    assert row("uint32_maximum_precision")["precision_bits"] == UINT32_MAX
+
+
+def test_a_custom_gateway_segment_does_not_land() -> None:
+    custom = row("custom_gateway_segment")
+    assert custom["topic"] == "msh/US/Example/2/e/LongFast/unrecognised"
+    assert custom["gateway_pseudonym"] == pseudonym(KEY, GATEWAY)
+
+
+def test_mapreport_with_zero_coordinates_lands_no_position() -> None:
+    report = row("mapreport_zero_coordinates")
+    assert report["decode_status"] == "ok"
+    assert report["position_source"] is None
+    assert report["latitude_i"] is None and report["precision_bits"] is None
+
+
+def test_telemetry_without_device_metrics_lands_no_metrics() -> None:
+    metrics = row("telemetry_without_device_metrics")
+    assert metrics["decode_status"] == "ok"
+    columns = ("channel_utilization", "air_util_tx", "uptime_s", "battery_level")
+    assert all(metrics[column] is None for column in columns)
+
+
+def test_only_the_decrypted_portnum_rule_is_flagged() -> None:
+    # The gate reports how many decrypt_failed rows the portnum 0 or above-maximum rule made.
+    flagged = set()
+    for record in records():
+        result = decode(record)
+        if isinstance(result, StoredDelivery) and result.decrypted_portnum_rule:
+            flagged.add(record["name"])
+    assert flagged == {"decrypted_portnum_zero", "decrypted_portnum_above_max"}
 
 
 def test_an_internet_copy_is_counted_with_its_gateway() -> None:

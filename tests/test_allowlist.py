@@ -8,6 +8,7 @@ the decoder.
 import re
 from pathlib import Path
 
+import pyarrow as pa
 import pytest
 
 from ingester.allowlist import (
@@ -16,6 +17,7 @@ from ingester.allowlist import (
     SCHEMA_VERSION,
     TABLES,
     allowlist,
+    arrow_schema,
 )
 
 DDL_PATH = Path(__file__).resolve().parents[1] / "ingester" / "sql" / "raw_tables.sql"
@@ -107,8 +109,29 @@ def test_no_column_can_hold_bytes_text_names_or_keys(table: str) -> None:
         assert not FORBIDDEN.search(name), name
 
 
-# Header fields with no protobuf presence: the decoder lands 0 as null ("not set").
-UNSET_IS_NULL = ("packet_id", "relay_node", "hop_start", "rx_time", "rx_snr", "rx_rssi", "channel")
+# Header fields with no protobuf presence where the decoder lands 0 as null ("not set").
+# rx_snr is null only when rx_rssi is 0 too; channel keeps 0, a real hash.
+UNSET_IS_NULL = ("packet_id", "relay_node", "hop_start", "rx_time", "rx_snr", "rx_rssi")
+# Columns filled from protobuf uint32 fields (meshtastic mesh.proto, telemetry.proto, mqtt.proto).
+UINT32_COLUMNS = (
+    "packet_id",
+    "relay_node",
+    "hop_start",
+    "hop_limit",
+    "rx_time",
+    "channel",
+    "precision_bits",
+    "position_time",
+    "uptime_s",
+    "battery_level",
+)
+
+
+@pytest.mark.parametrize("name", UINT32_COLUMNS)
+def test_uint32_columns_hold_the_largest_uint32(name: str) -> None:
+    # A narrower column would make the Parquet writer raise and abort a reduction.
+    field = arrow_schema("mqtt_message").field(name)
+    assert pa.array([2**32 - 1], type=field.type).to_pylist() == [2**32 - 1]
 
 
 @pytest.mark.parametrize("name", UNSET_IS_NULL)
