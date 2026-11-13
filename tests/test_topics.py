@@ -53,6 +53,28 @@ def test_landed_topic_leaves_a_longer_hex_run_alone() -> None:
     assert landed_topic("msh/US/!0a0b0c0d1/2/map/", KEY) == "msh/US/!0a0b0c0d1/2/map/"
 
 
+@pytest.mark.parametrize(
+    "topic",
+    [
+        "msh/US/Example/2/e/LongFast/InventedGatewayName",
+        "msh/US/Example/2/e/LongFast/!0a0b0c0d/extra",
+        "msh/US/Example/2/e/LongFast/!0a0b0c0d1",
+        "msh/US/Example/2/c/LongFast/someone",
+    ],
+)
+def test_a_gateway_segment_that_is_not_one_node_id_lands_as_a_token(topic: str) -> None:
+    # Whatever a gateway publishes after the channel may name its operator.
+    prefix = topic.split("/2/")[0]
+    kind = topic.split("/")[4]
+    assert landed_topic(topic, KEY) == f"{prefix}/2/{kind}/LongFast/unrecognised"
+
+
+def test_a_map_topic_with_a_segment_after_map_lands_as_a_token() -> None:
+    assert landed_topic("msh/US/2/map/InventedName", KEY) == "msh/US/2/map/unrecognised"
+    landed = landed_topic("msh/US/2/map/!0a0b0c0d", KEY)
+    assert landed == "msh/US/2/map/" + pseudonym(KEY, 0x0A0B0C0D)
+
+
 def test_landed_topic_without_a_gateway_segment_is_unchanged() -> None:
     assert landed_topic("msh/US/2/e/LongFast", KEY) == "msh/US/2/e/LongFast"
     assert landed_topic("msh/US/Example/2/map/", KEY) == "msh/US/Example/2/map/"

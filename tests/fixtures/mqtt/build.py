@@ -93,7 +93,7 @@ def plaintext(portnum: int, payload: bytes, packet_id: int, **header: object) ->
     return envelope(mesh_packet)
 
 
-def position() -> bytes:
+def position(precision_bits: int = 16) -> bytes:
     message = mesh_pb2.Position(
         latitude_i=LATITUDE_I,
         longitude_i=LONGITUDE_I,
@@ -101,12 +101,12 @@ def position() -> bytes:
         time=1767250700,
         location_source=mesh_pb2.Position.LOC_INTERNAL,
         altitude_source=mesh_pb2.Position.ALT_INTERNAL,
-        precision_bits=16,
+        precision_bits=precision_bits,
     )
     return message.SerializeToString()
 
 
-def map_report() -> bytes:
+def map_report(latitude_i: int = LATITUDE_I + 1000, longitude_i: int = LONGITUDE_I + 1000) -> bytes:
     message = mqtt_pb2.MapReport(
         long_name=INVENTED_NAME,
         short_name=INVENTED_SHORT,
@@ -115,8 +115,8 @@ def map_report() -> bytes:
         firmware_version="0.0.0.invented",
         region=config_pb2.Config.LoRaConfig.US,
         modem_preset=config_pb2.Config.LoRaConfig.LONG_FAST,
-        latitude_i=LATITUDE_I + 1000,
-        longitude_i=LONGITUDE_I + 1000,
+        latitude_i=latitude_i,
+        longitude_i=longitude_i,
         altitude=45,
         position_precision=13,
         num_online_local_nodes=7,
@@ -144,14 +144,20 @@ def neighbor_info() -> bytes:
     return message.SerializeToString()
 
 
-def telemetry() -> bytes:
+def telemetry(battery_level: int = 87) -> bytes:
     message = telemetry_pb2.Telemetry(time=1767250750)
     metrics = message.device_metrics
-    metrics.battery_level = 87
+    metrics.battery_level = battery_level
     metrics.voltage = 4.01
     metrics.channel_utilization = 12.5
     metrics.air_util_tx = 1.75
     metrics.uptime_seconds = 86400
+    return message.SerializeToString()
+
+
+def environment_telemetry() -> bytes:
+    message = telemetry_pb2.Telemetry(time=1767250760)
+    message.environment_metrics.temperature = 21.5
     return message.SerializeToString()
 
 
@@ -166,6 +172,14 @@ def stripped(packet_id: int) -> bytes:
     return envelope(packet(packet_id))
 
 
+def custom_gateway_segment() -> bytes:
+    mesh_packet = packet(0x101B)
+    mesh_packet.encrypted = encrypt(
+        mesh_pb2.Data(portnum=portnums_pb2.ROUTING_APP).SerializeToString(), 0x101B, SENDER
+    )
+    return envelope(mesh_packet)
+
+
 def map_topic_report() -> bytes:
     mesh_packet = packet(0x1015, hop_start=0, relay_node=0, rx_snr=0.0, rx_rssi=0, rx_time=0)
     mesh_packet.decoded.portnum = portnums_pb2.MAP_REPORT_APP
@@ -175,6 +189,7 @@ def map_topic_report() -> bytes:
 
 Builder = Callable[[], bytes]
 TEXT = portnums_pb2.TEXT_MESSAGE_APP
+UINT32_MAX = 2**32 - 1
 # (name, broker, received_at, topic, builder)
 DELIVERIES: list[tuple[str, str, str, str, Builder]] = [
     (
@@ -315,6 +330,69 @@ DELIVERIES: list[tuple[str, str, str, str, Builder]] = [
         f"{HOUR}:00:25.000000+00:00",
         e_topic(),
         lambda: encrypted(portnums_pb2.MAX + 1, b"", 0x1014),
+    ),
+    (
+        "decrypted_portnum_negative",
+        "public",
+        f"{HOUR}:00:26.000000+00:00",
+        e_topic(),
+        lambda: encrypted(-3, b"", 0x1016),
+    ),
+    (
+        "plaintext_portnum_above_max",
+        "public",
+        f"{HOUR}:00:27.000000+00:00",
+        e_topic(),
+        lambda: plaintext(portnums_pb2.MAX + 1, b"", 0x1017),
+    ),
+    (
+        "snr_zero_with_rssi",
+        "public",
+        f"{HOUR}:00:28.000000+00:00",
+        e_topic(),
+        lambda: encrypted(portnums_pb2.ROUTING_APP, b"", 0x1018, rx_snr=0.0, channel=0),
+    ),
+    (
+        "uint32_maximum_values",
+        "public",
+        f"{HOUR}:00:29.000000+00:00",
+        e_topic(),
+        lambda: encrypted(
+            portnums_pb2.TELEMETRY_APP,
+            telemetry(battery_level=UINT32_MAX),
+            0x1019,
+            relay_node=UINT32_MAX,
+            hop_start=UINT32_MAX,
+            hop_limit=UINT32_MAX,
+        ),
+    ),
+    (
+        "uint32_maximum_precision",
+        "public",
+        f"{HOUR}:00:30.000000+00:00",
+        e_topic(),
+        lambda: encrypted(portnums_pb2.POSITION_APP, position(precision_bits=UINT32_MAX), 0x101A),
+    ),
+    (
+        "custom_gateway_segment",
+        "public",
+        f"{HOUR}:00:31.000000+00:00",
+        f"{ROOT}/2/e/LongFast/InventedGatewayName",
+        custom_gateway_segment,
+    ),
+    (
+        "mapreport_zero_coordinates",
+        "public",
+        f"{HOUR}:00:32.000000+00:00",
+        e_topic(),
+        lambda: encrypted(portnums_pb2.MAP_REPORT_APP, map_report(0, 0), 0x101C),
+    ),
+    (
+        "telemetry_without_device_metrics",
+        "public",
+        f"{HOUR}:00:33.000000+00:00",
+        e_topic(),
+        lambda: encrypted(portnums_pb2.TELEMETRY_APP, environment_telemetry(), 0x101D),
     ),
     (
         "json",
