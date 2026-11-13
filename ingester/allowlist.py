@@ -23,10 +23,14 @@ metres, `rx_snr` in dB, `rx_rssi` in dBm, `rx_time`, `position_time` and
 Not set lands as null. Where the protobuf field has presence (Position
 `latitude_i`, `longitude_i`, `altitude`, MapReport fields read as optional) the
 decoder asks the message; the MeshPacket header fields `packet_id`,
-`relay_node`, `hop_start`, `rx_time`, `rx_snr`, `rx_rssi` and `channel` have
-no presence, and 0 there means unset, so 0 lands as null. `hop_limit` stays
-not null: 0 is a real value, the public broker's rewrite of every default-key
-packet (docs/PLAN.md).
+`relay_node`, `hop_start`, `rx_time` and `rx_rssi` have no presence, and 0
+there means unset, so 0 lands as null. `rx_snr` of 0.0 is null only when
+`rx_rssi` is 0 too, because 0.0 dB is a valid reading; `channel` keeps 0, a
+real channel hash. `hop_limit` stays not null: 0 is a real value, the public
+broker's rewrite of every default-key packet (docs/PLAN.md).
+
+Every column filled from a protobuf uint32 field is bigint, so no value the
+wire format allows can fail the Parquet write.
 """
 
 from dataclasses import dataclass
@@ -64,9 +68,9 @@ MQTT_MESSAGE = (
     Column("origin_pseudonym", "text"),
     Column("origin_low_byte", "smallint"),
     Column("packet_id", "bigint", nullable=True),
-    Column("relay_node", "smallint", nullable=True),
-    Column("hop_start", "smallint", nullable=True),
-    Column("hop_limit", "smallint"),
+    Column("relay_node", "bigint", nullable=True),
+    Column("hop_start", "bigint", nullable=True),
+    Column("hop_limit", "bigint"),
     Column("via_mqtt", "boolean"),
     Column("rx_time", "bigint", nullable=True),
     Column("rx_snr", "real", nullable=True),
@@ -78,7 +82,7 @@ MQTT_MESSAGE = (
     Column("latitude_i", "integer", nullable=True),
     Column("longitude_i", "integer", nullable=True),
     Column("altitude_m", "integer", nullable=True),
-    Column("precision_bits", "smallint", nullable=True),
+    Column("precision_bits", "bigint", nullable=True),
     Column("position_time", "bigint", nullable=True),
     Column("location_source", "text", nullable=True),
     Column("altitude_source", "text", nullable=True),
@@ -91,7 +95,7 @@ MQTT_MESSAGE = (
     Column("channel_utilization", "real", nullable=True),
     Column("air_util_tx", "real", nullable=True),
     Column("uptime_s", "bigint", nullable=True),
-    Column("battery_level", "integer", nullable=True),
+    Column("battery_level", "bigint", nullable=True),
     *_versions(),
 )
 

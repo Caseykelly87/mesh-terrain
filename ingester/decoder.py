@@ -17,6 +17,11 @@ wrong-key signs the ADR 0003 spike used); `malformed` for a portnum below 1 in
 a packet that parsed, or a payload that fails to parse as its portnum's
 message; `unknown_port` for a portnum the pinned enum does not name; `ok`
 otherwise. A decode failure is a status, never an exception.
+
+Radio metadata (the lead's rule, for warehouse-eng to confirm): `rx_rssi` of 0
+means no reading and lands as null; `rx_snr` of 0.0 lands as null only when
+`rx_rssi` is 0 too, since 0.0 dB is a valid reading; `channel` lands as
+received, 0 included, since about one channel hash in 256 is 0.
 """
 
 import base64
@@ -54,14 +59,21 @@ DECODED_COLUMNS = tuple(
     if name not in {"snapshot_id", "seen_public", "seen_meshstl"}
 )
 _NAMED_PORTS = frozenset(portnums_pb2.PortNum.values())
-_UNSET_IS_NULL = ("relay_node", "hop_start", "rx_time", "rx_snr", "rx_rssi", "channel")
+_UNSET_IS_NULL = ("relay_node", "hop_start", "rx_time", "rx_rssi")
+_PORTNUM_RULE = "decrypt_failed by the portnum rule"
 
 
 @dataclass(frozen=True)
 class StoredDelivery:
-    """A delivery stored as one row; row keys are DECODED_COLUMNS in order."""
+    """A delivery stored as one row; row keys are DECODED_COLUMNS in order.
+
+    decrypted_portnum_rule is true for a decrypt_failed row whose payload
+    decrypted to a portnum of 0 or above the enum's maximum; the reproduction
+    gate reports how many there are (ing_03, decided 2026-11-13).
+    """
 
     row: dict[str, Any]
+    decrypted_portnum_rule: bool = False
 
 
 @dataclass(frozen=True)
@@ -141,8 +153,7 @@ def decode_delivery(topic: str, payload: bytes, received_at: datetime, key: byte
             landed_topic(topic, key), pseudonym(key, number) if number else "", low_byte(number)
         )
     row = _header_row(topic, payload, received_at, key, envelope, gateway)
-    _decode_payload(row, envelope.packet, key)
-    return StoredDelivery(row)
+    return StoredDelivery(row, _decode_payload(row, envelope.packet, key))
 
 
 def _header_row(
@@ -174,6 +185,8 @@ def _header_row(
     )
     for name in _UNSET_IS_NULL:
         row[name] = getattr(packet, name) or None
+    row["rx_snr"] = packet.rx_snr if (packet.rx_snr or packet.rx_rssi) else None
+    row["channel"] = packet.channel
     return row
 
 
@@ -193,28 +206,30 @@ def _packet_data(packet: Any) -> tuple[Any | None, str]:
     except DecodeError:
         return None, "decrypt_failed"
     if data.portnum == 0 or data.portnum > portnums_pb2.MAX:
-        return None, "decrypt_failed"
+        return None, _PORTNUM_RULE
     return data, "ok"
 
 
-def _decode_payload(row: dict[str, Any], packet: Any, key: bytes) -> None:
+def _decode_payload(row: dict[str, Any], packet: Any, key: bytes) -> bool:
+    """Set the status and the portnum's columns; True when the portnum rule failed the row."""
     data, status = _packet_data(packet)
-    row["decode_status"] = status
+    row["decode_status"] = "decrypt_failed" if status == _PORTNUM_RULE else status
     if data is None:
-        return
+        return status == _PORTNUM_RULE
     row["portnum"] = data.portnum
     if data.portnum <= 0:
         row["decode_status"] = "malformed"
-        return
+        return False
     decode = _PORT_DECODERS.get(data.portnum)
     try:
         if decode is not None:
             decode(row, data.payload, key)
     except DecodeError:
         row["decode_status"] = "malformed"
-        return
+        return False
     if data.portnum not in _NAMED_PORTS:
         row["decode_status"] = "unknown_port"
+    return False
 
 
 def _parse(message: Message, payload: bytes) -> Any:

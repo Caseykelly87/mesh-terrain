@@ -3,7 +3,10 @@
 A Meshtastic topic is `msh/US/<root segments>/2/<class>/<channel>/!<gateway id>`.
 The class segment is `e` (or the older `c`) for a ServiceEnvelope, `json`,
 `map` or `stat`; anything else is `other`. The landed topic has every node id
-replaced by its pseudonym. The modem preset is the channel segment when it is a
+replaced by its pseudonym. Whatever follows the channel of an `e` topic, or the
+class segment of a `map` topic, lands as its pseudonym when it is one node id
+and as `unrecognised` otherwise, since a custom segment may name the gateway's
+operator. The modem preset is the channel segment when it is a
 known preset name, since only default channels are named after their preset.
 """
 
@@ -32,6 +35,7 @@ MODEM_PRESETS = frozenset(
 )
 # A node id is "!" and exactly eight hex digits; a longer hex run is not one.
 NODE_ID_PATTERN = re.compile(r"!([0-9a-fA-F]{8})(?![0-9a-fA-F])")
+UNRECOGNISED_SEGMENT = "unrecognised"
 
 
 def _class_index(parts: list[str]) -> int | None:
@@ -54,17 +58,34 @@ def topic_root(topic: str) -> str:
     return parts[2] if len(parts) > 2 else ""
 
 
+def _gateway_segment_index(parts: list[str]) -> int | None:
+    """Where the gateway segment starts: after the channel of e, after the class of map."""
+    index = _class_index(parts)
+    if index is None:
+        return None
+    offsets = {"e": 2, "map": 1}
+    offset = offsets.get(CLASS_SEGMENTS[parts[index]])
+    return None if offset is None else index + offset
+
+
 def landed_topic(topic: str, key: bytes) -> str:
-    """The topic with every `!xxxxxxxx` node id replaced by its pseudonym.
+    """The topic with every node id replaced by its pseudonym and no custom gateway segment.
 
     Args:
         topic: The topic as received.
         key: The HMAC key from keys.parse_hmac_key.
 
     Returns:
-        The topic to store; it contains no node id in any segment.
+        The topic to store; it holds no node id and nothing a gateway chose to
+        publish after the channel.
     """
-    return NODE_ID_PATTERN.sub(lambda match: pseudonym(key, int(match.group(1), 16)), topic)
+    parts = topic.split("/")
+    start = _gateway_segment_index(parts)
+    if start is not None and "/".join(parts[start:]):
+        tail = "/".join(parts[start:])
+        parts[start:] = [tail if NODE_ID_PATTERN.fullmatch(tail) else UNRECOGNISED_SEGMENT]
+    landed = "/".join(parts)
+    return NODE_ID_PATTERN.sub(lambda match: pseudonym(key, int(match.group(1), 16)), landed)
 
 
 def modem_preset(topic: str) -> str | None:
