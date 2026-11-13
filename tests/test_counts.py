@@ -97,12 +97,16 @@ def test_dropped_counts_merge_and_total() -> None:
     assert first.by_key() == {(HOUR, "json", "json"): 2, (HOUR, "stat", "stat"): 1}
 
 
-def test_broker_hour_counts_balance_received_against_its_parts() -> None:
-    # ing_03: received = stored + counted + both merged counts, per hour and broker.
+def test_broker_hour_counts_per_hour_and_broker() -> None:
+    # ing_03: received, stored, counted and both merged counts, per hour and broker.
     counts = BrokerHourCounts()
     for outcome in ("stored", "stored", "counted", "merged_repeat"):
+        counts.receive(AT, Broker.PUBLIC)
         counts.add(AT, Broker.PUBLIC, outcome)
+    counts.receive(AT, Broker.MESHSTL)
     counts.add(AT, Broker.MESHSTL, "merged_cross_broker")
+    counts.add_row(AT, seen_public=True, seen_meshstl=False)
+    counts.add_row(AT, seen_public=True, seen_meshstl=True)
     assert counts.rows() == [
         {
             "hour": "2026-10-22T16",
@@ -112,6 +116,7 @@ def test_broker_hour_counts_balance_received_against_its_parts() -> None:
             "counted": 0,
             "merged_cross_broker": 1,
             "merged_repeat": 0,
+            "rows_with_flag": 1,
         },
         {
             "hour": "2026-10-22T16",
@@ -121,8 +126,19 @@ def test_broker_hour_counts_balance_received_against_its_parts() -> None:
             "counted": 1,
             "merged_cross_broker": 0,
             "merged_repeat": 1,
+            "rows_with_flag": 2,
         },
     ]
+
+
+def test_received_is_counted_on_its_own_not_summed() -> None:
+    # Received must be able to disagree with its parts, or the ing_03 balance proves nothing.
+    counts = BrokerHourCounts()
+    counts.receive(AT, Broker.PUBLIC)
+    counts.receive(AT, Broker.PUBLIC)
+    counts.add(AT, Broker.PUBLIC, "stored")
+    [row] = counts.rows()
+    assert (row["received"], row["stored"]) == (2, 1)
 
 
 def test_broker_hour_counts_reject_an_unknown_outcome() -> None:
