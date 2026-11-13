@@ -57,7 +57,13 @@ def pseudonym(key: bytes, node_id: int) -> str:
 
 
 def low_byte(node_id: int) -> int:
-    """The node's low id byte, the value firmware puts in relay_node (0 to 255)."""
+    """The node's low id byte, 0 to 255, stored beside each pseudonym.
+
+    Firmware v2.7.11 fills relay_node with getLastByteOfNodeNum
+    (src/mesh/NodeDB.h), which is this byte except that 0 is sent as 0xFF,
+    because relay_node 0 means "no relay node". The stored byte is the node's
+    own; matching it against relay_node maps 0 to 0xFF (lnk_01, in staging).
+    """
     return node_id & 0xFF
 
 
