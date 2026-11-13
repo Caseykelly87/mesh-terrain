@@ -21,7 +21,8 @@ otherwise. A decode failure is a status, never an exception.
 Radio metadata (the lead's rule, for warehouse-eng to confirm): `rx_rssi` of 0
 means no reading and lands as null; `rx_snr` of 0.0 lands as null only when
 `rx_rssi` is 0 too, since 0.0 dB is a valid reading; `channel` lands as
-received, 0 included, since about one channel hash in 256 is 0.
+received, 0 included, since about one channel hash in 256 is 0; `hop_start`
+lands as received too, since a sender with hop limit 0 sends 0.
 """
 
 import base64
@@ -59,7 +60,7 @@ DECODED_COLUMNS = tuple(
     if name not in {"snapshot_id", "seen_public", "seen_meshstl"}
 )
 _NAMED_PORTS = frozenset(portnums_pb2.PortNum.values())
-_UNSET_IS_NULL = ("relay_node", "hop_start", "rx_time", "rx_rssi")
+_UNSET_IS_NULL = ("relay_node", "rx_time", "rx_rssi")
 _PORTNUM_RULE = "decrypt_failed by the portnum rule"
 
 
@@ -187,6 +188,7 @@ def _header_row(
         row[name] = getattr(packet, name) or None
     row["rx_snr"] = packet.rx_snr if (packet.rx_snr or packet.rx_rssi) else None
     row["channel"] = packet.channel
+    row["hop_start"] = packet.hop_start
     return row
 
 
