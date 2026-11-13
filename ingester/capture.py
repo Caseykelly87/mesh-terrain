@@ -36,10 +36,12 @@ from ingester.decoder import CopyDelivery, StoredDelivery, decode_delivery
 from ingester.finalise import (
     COUNT_TABLES,
     DELIVERY_TABLE,
+    Minutes,
     SnapshotInfo,
     finish,
     merge_count_hour,
     merge_hour,
+    note_minute,
     write_coverage,
     write_metadata,
 )
@@ -48,6 +50,7 @@ from ingester.parquet import write_rows
 from ingester.reduce import LICENCE
 from ingester.sightings import Broker, SightingIndex
 from ingester.snapshot import flush_file, start_snapshot
+from ingester.topics import COVERAGE_ROOTS, topic_root
 
 log = structlog.get_logger(component="ingester.capture")
 
@@ -97,7 +100,8 @@ class CaptureRun:
         self.index = SightingIndex()
         self.deliveries = BrokerHourCounts()
         self.portnum_rule = PortnumRuleTally()
-        self.minutes: dict[int, tuple[float, float]] = {}
+        self.minutes: Minutes = {}
+        self.root_minutes: dict[str, Minutes] = {}
         self.flushes: Counter[tuple[str, datetime]] = Counter()
         # Batches taken from the buffer and not yet written; a failed flush leaves them here.
         self.unwritten: list[Batch] = []
@@ -120,7 +124,7 @@ class CaptureRun:
             self.received += 1
             self.pending += 1
             self.deliveries.receive(received_at, self.params.source)
-            self._note_minute(received_at)
+            self._note_minute(received_at, topic)
             if isinstance(decoded, StoredDelivery):
                 self._keep_row(received_at, decoded)
                 return
@@ -131,11 +135,12 @@ class CaptureRun:
             else:
                 self.dropped.add(received_at, decoded.topic_class, decoded.reason)
 
-    def _note_minute(self, received_at: datetime) -> None:
+    def _note_minute(self, received_at: datetime, topic: str) -> None:
         at_s = received_at.timestamp()
-        minute = int(at_s // 60)
-        low, high = self.minutes.get(minute, (at_s, at_s))
-        self.minutes[minute] = (min(low, at_s), max(high, at_s))
+        note_minute(self.minutes, at_s)
+        root = topic_root(topic)
+        if root in COVERAGE_ROOTS:
+            note_minute(self.root_minutes.setdefault(root, {}), at_s)
 
     def _keep_row(self, received_at: datetime, decoded: StoredDelivery) -> None:
         row = decoded.row
@@ -223,7 +228,7 @@ class CaptureRun:
             elif table in COUNT_TABLES:
                 merge_count_hour(self.partial, table, hour, flushes)
         source = self.params.source.value
-        hours = write_coverage(self.partial, {source: self.minutes})
+        hours = write_coverage(self.partial, {source: self.minutes}, {source: self.root_minutes})
         run = {
             "end_at": self.params.end_at.isoformat(),
             "max_raw_bytes": self.params.max_raw_bytes,

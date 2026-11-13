@@ -36,6 +36,9 @@ MODEM_PRESETS = frozenset(
 # A node id is "!" and exactly eight hex digits; a longer hex run is not one.
 NODE_ID_PATTERN = re.compile(r"!([0-9a-fA-F]{8})(?![0-9a-fA-F])")
 UNRECOGNISED_SEGMENT = "unrecognised"
+# The regional roots whose observed minutes a snapshot records on their own, for the
+# ADR 0003 subscription-scope runs (analyze.py --roots).
+COVERAGE_ROOTS = ("MeshSTL", "MO", "IL")
 
 
 def _class_index(parts: list[str]) -> int | None:

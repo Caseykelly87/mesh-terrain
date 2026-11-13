@@ -5,7 +5,8 @@ Reads the public capture (gzipped hourly JSON lines) and the MeshSTL capture
 ingester.decoder, merges deliveries that share a delivery key in received_at
 order across both brokers, and writes `<root>/<id>.partial/` with one zstd
 Parquet file per table and hour, `coverage.json` (the first and last receipt
-of every minute per broker, from which observed hours are computed), a README
+of every minute per broker, from which observed hours are computed),
+`coverage_roots.json` (the same per regional topic root), a README
 and the sha256 manifest, then renames the folder. It refuses when `<id>/` or
 `<id>.partial/` exists. It has no END_AT or MAX_RAW_BYTES: those are capture
 parameters, and the manifest records them as null with the stop reason
@@ -49,9 +50,12 @@ from ingester.counts import (
 from ingester.decoder import CopyDelivery, StoredDelivery, decode_delivery
 from ingester.finalise import (
     DELIVERY_TABLE,
+    Minutes,
     SnapshotInfo,
     finish,
     merge_hour,
+    merge_minutes,
+    note_minute,
     write_coverage,
     write_metadata,
 )
@@ -60,6 +64,7 @@ from ingester.parquet import write_rows
 from ingester.settings import get_ingester_settings
 from ingester.sightings import Broker, SightingIndex
 from ingester.snapshot import flush_file, hour_file, sha256_file, start_snapshot
+from ingester.topics import COVERAGE_ROOTS, topic_root
 
 __all__ = [
     "DEFAULT_INFO",
@@ -133,7 +138,8 @@ class FileResult:
     copies: CopyCounts = field(default_factory=CopyCounts)
     dropped: DroppedCounts = field(default_factory=DroppedCounts)
     counted: BrokerHourCounts = field(default_factory=BrokerHourCounts)
-    minutes: dict[int, tuple[float, float]] = field(default_factory=dict)
+    minutes: Minutes = field(default_factory=dict)
+    root_minutes: dict[str, Minutes] = field(default_factory=dict)
     statuses: Counter[str] = field(default_factory=Counter)
     portnum_rule: PortnumRuleTally = field(default_factory=PortnumRuleTally)
     unreadable: int = 0
@@ -171,11 +177,12 @@ def read_records(path: Path, result: FileResult) -> Iterator[tuple[datetime, str
         yield received_at, record["topic"], base64.b64decode(record["payload_b64"])
 
 
-def _note_minute(result: FileResult, received_at: datetime) -> None:
+def _note_minute(result: FileResult, received_at: datetime, topic: str) -> None:
     at_s = received_at.timestamp()
-    minute = int(at_s // 60)
-    low, high = result.minutes.get(minute, (at_s, at_s))
-    result.minutes[minute] = (min(low, at_s), max(high, at_s))
+    note_minute(result.minutes, at_s)
+    root = topic_root(topic)
+    if root in COVERAGE_ROOTS:
+        note_minute(result.root_minutes.setdefault(root, {}), at_s)
 
 
 def decode_file(task: tuple[str, Source, Path]) -> FileResult:
@@ -187,7 +194,7 @@ def decode_file(task: tuple[str, Source, Path]) -> FileResult:
         if not source.keeps(received_at):
             result.outside += 1
             continue
-        _note_minute(result, received_at)
+        _note_minute(result, received_at, topic)
         result.counted.receive(received_at, source.broker)
         _take_delivery(
             result, received_at, decode_delivery(topic, payload, received_at, _WORKER_KEY)
@@ -241,7 +248,8 @@ class Reduction:
         self.deliveries = BrokerHourCounts()
         self.copies = CopyCounts()
         self.dropped = DroppedCounts()
-        self.minutes: dict[str, dict[int, tuple[float, float]]] = {}
+        self.minutes: dict[str, Minutes] = {}
+        self.root_minutes: dict[str, dict[str, Minutes]] = {}
         self.unreadable: Counter[str] = Counter()
         self.outside: Counter[str] = Counter()
         self.sources: dict[str, list[dict[str, Any]]] = {}
@@ -279,10 +287,10 @@ class Reduction:
         self.deliveries.merge(result.counted)
         self.copies.merge(result.copies)
         self.dropped.merge(result.dropped)
-        minutes = self.minutes.setdefault(broker, {})
-        for minute, (low, high) in result.minutes.items():
-            known = minutes.get(minute, (low, high))
-            minutes[minute] = (min(known[0], low), max(known[1], high))
+        merge_minutes(self.minutes.setdefault(broker, {}), result.minutes)
+        roots = self.root_minutes.setdefault(broker, {})
+        for root, minutes in result.root_minutes.items():
+            merge_minutes(roots.setdefault(root, {}), minutes)
         self.portnum_rule.merge(result.portnum_rule)
         self.unreadable[broker] += result.unreadable
         self.outside[broker] += result.outside
@@ -423,7 +431,7 @@ def reduce_capture(
         reduction.take(results)
     reduction.finish_rows()
     write_count_tables(reduction)
-    hours = write_coverage(partial, reduction.minutes)
+    hours = write_coverage(partial, reduction.minutes, reduction.root_minutes)
     write_reduction_metadata(reduction, sources, hours)
     return finish(partial)
 
