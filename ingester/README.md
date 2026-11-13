@@ -15,7 +15,7 @@ Modules:
 - `load.py` and `assets.py`: the insert-only loader and the hand-started Dagster asset `raw/mqtt_snapshot` with its `ing_07`, `ing_03` and `ing_04` checks.
 - `settings.py`: `NODE_ID_HMAC_KEY`, `SNAPSHOTS_DIR` and the MQTT credentials, read once.
 
-`NODE_ID_HMAC_KEY` is 32 random bytes written as 64 hex characters. Casey generates it with `python -c "import secrets; print(secrets.token_hex(32))"` and keeps its only other copy in his password manager. It is read once, never logged, and the reduction and the capture command refuse to start without it.
+`NODE_ID_HMAC_KEY` is 32 random bytes written as 64 hex characters. Casey generates it with `python -c "import secrets; print(secrets.token_hex(32))"` and a copy is kept off this machine by Casey. It is read once, never logged, and the reduction and the capture command refuse to start without it.
 
 Run:
 
