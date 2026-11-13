@@ -1,14 +1,17 @@
-"""Gate figure (c): the spike's analysis on the archive without the fragment, with two design rules.
+"""Gate figure (c): the spike's analysis on the archive without the fragment, with the design rules.
 
 Casey's gate rule of 2026-11-13 compares the snapshot (d) with analyze.py's
 figures on the raw files without the 2026-10-28T20 public fragment, after the
-two rules by which the snapshot differs from the spike by design:
+three rules by which the snapshot differs from the spike by design:
 
 - copies: an internet copy (via_mqtt on an `e` topic) that kept its payload is
   counted, not used, so it never reaches the tally;
 - repeats: deliveries with the same topic and payload bytes from one broker
   are one delivery, the first sighting in received_at order, as the snapshot
-  merges them under one delivery_key.
+  merges them under one delivery_key;
+- shared: a delivery both brokers carried is tallied at its first sighting on
+  either broker, the one received_at the snapshot keeps for its row (added by
+  Casey on 2026-11-13; the other broker's time is not kept).
 
 A first pass finds, per broker, every delivery that would be stored and how
 often each (topic, payload) occurs, over the whole public capture and over the
@@ -19,19 +22,16 @@ what the rules remove; everything after that (link rules, positions, figures)
 is analyze.py unchanged, through figures.headline and analyze.main.
 
 Every in-window record still counts as observed time, as in the snapshot's
-coverage.json, whatever a rule does with it. The two rules can be applied one
-at a time with --rules, to say which one moved a figure. A third, `shared`,
-is not one of Casey's two and is off by default: a row both brokers
-delivered is tallied at its first sighting on either broker, which is the
-received_at the snapshot holds for it; the result always counts how many
-rows that concerns (`shared_rows`). Hashes of
+coverage.json, whatever a rule does with it. The rules can be applied one at
+a time with --rules, to say which one moved a figure; the result always
+counts the rows both brokers carried (`shared_rows`). Hashes of
 topic and payload are kept in memory only, truncated, never written or
 printed. Output, under OUT_DIR/design-rules-<rules>/, is aggregates only.
 
 Usage, from the repository root, Git Bash:
 
     uv run --frozen --with shapely==2.2.0 --with pyproj==3.8.0 python -I \
-        docs/adr/0003-spike/reference_design_rules.py OUT_DIR [--rules copies,repeats]
+        docs/adr/0003-spike/reference_design_rules.py OUT_DIR [--rules copies,repeats,shared]
 """
 
 from __future__ import annotations
@@ -271,7 +271,7 @@ class Rules:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("out_dir", type=Path)
-    parser.add_argument("--rules", default="copies,repeats")
+    parser.add_argument("--rules", default="copies,repeats,shared")
     parser.add_argument("--public", type=Path, default=reference.DATA / "spike-capture")
     parser.add_argument("--meshstl", type=Path, default=reference.DATA / "meshstl-capture")
     args = parser.parse_args()

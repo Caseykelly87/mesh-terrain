@@ -11,11 +11,13 @@ runs. The real-id archive is never opened.
 
 Casey's gate rule of 2026-11-13: four figures per broker and run, (a)
 results.md, (b) analyze.py on the archive without the 2026-10-28T20 fragment,
-(c) the same with the two design rules (internet copies that kept a payload
-counted, not used; identical repeats merged), from reference_design_rules.py,
-and (d) this snapshot. (b) and (c) are aggregates committed under
-`reference/`. The gate passes when (c) equals (d) in every figure, and the
-exit code says so: 0 for a pass, 1 for any difference. It also reports, from
+(c) the same with the three design rules (internet copies that kept a payload
+counted, not used; identical repeats merged; a delivery both brokers carried
+timed at its first sighting on either broker, the third added by Casey on
+2026-11-13), from reference_design_rules.py, and (d) this snapshot. (b) and (c)
+are aggregates committed under `reference/`. The gate passes when (c) equals
+(d) in every figure, and the exit code says so: 0 for a pass, 1 for any
+difference. It also reports, from
 the snapshot, merged_cross_broker and merged_repeat per broker, the
 decrypt_failed deliveries and rows made by the portnum rule beside the spike's
 wrong-key count, and the rows with an SNR of 0.0.
@@ -301,8 +303,7 @@ RESULTS_MD_COUNTS = {
 }
 REFERENCES = {
     "b": "reference-without-fragment.json",
-    "c": "reference-design-rules-copies-repeats.json",
-    "c shared": "reference-design-rules-copies-repeats-shared.json",
+    "c": "reference-design-rules-copies-repeats-shared.json",
 }
 
 
@@ -329,11 +330,9 @@ def figure_rows(snapshot: Snapshot, references: dict[str, Any]) -> tuple[list[st
         found = figures.headline(snapshot.tally, name)
         for label, value in found.items():
             b, c = (references[key]["runs"][name]["figures"][label] for key in ("b", "c"))
-            shared = references.get("c shared", {}).get("runs", {}).get(name, {})
             verdict = "match" if c == value else "DIFFERS"
             differs += verdict != "match"
             row = [name, label, RESULTS_MD.get(name, {}).get(label), b, c, value, verdict]
-            row.append(shared.get("figures", {}).get(label))
             lines.append("| " + " | ".join(cell(item) for item in row) + " |")
     return lines, differs
 
@@ -389,12 +388,16 @@ def snr_rows(snapshot: Snapshot, broker: str) -> list[str]:
 
 
 def gate_report(snapshot: Snapshot, references: dict[str, Any]) -> tuple[str, int]:
-    header = "| run | figure | (a) results.md | (b) raw | (c) raw, design rules | (d) snapshot "
-    header += "| (c) and (d) | (c) with the shared rule, not in the gate |"
+    header = (
+        "| run | figure | (a) results.md | (b) raw | (c) raw, three design rules | (d) snapshot "
+    )
+    header += "| (c) and (d) |"
     figure_lines, figure_differs = figure_rows(snapshot, references)
     count_lines, count_differs = count_rows(snapshot, references)
-    lines = [header, "| --- " * 8 + "|", *figure_lines, ""]
-    lines += ["| broker | count | (a) results.md | (b) raw | (c) raw, design rules | (d) snapshot "]
+    lines = [header, "| --- " * 7 + "|", *figure_lines, ""]
+    lines += [
+        "| broker | count | (a) results.md | (b) raw | (c) raw, three design rules | (d) snapshot "
+    ]
     lines[-1] += "| (c) and (d) |"
     lines += ["| --- " * 7 + "|", *count_lines, "", "| broker | reported | snapshot |"]
     lines += ["| --- | --- | --- |", *report_rows(snapshot, references)]
