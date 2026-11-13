@@ -153,6 +153,24 @@ def test_deliveries_balance_per_hour_and_broker(tmp_path: Path) -> None:
     assert counted == copies + dropped
 
 
+def test_the_manifest_reconciles_per_broker(tmp_path: Path) -> None:
+    # ing_03 (Casey, 2026-11-13): received, stored, counted and merged per broker balance,
+    # and received equals the deliveries each broker sent.
+    folder = reduce_fixtures(tmp_path)
+    totals: dict[str, Counter[str]] = {"public": Counter(), "meshstl": Counter()}
+    for row in read_manifest(folder)["deliveries"]:
+        totals[row["broker"]].update(
+            {name: row[name] for name in row if name not in {"hour", "broker"}}
+        )
+    sent = Counter(record["broker"] for record in fixture_records())
+    for broker, found in totals.items():
+        assert found["received"] == sent[broker], broker
+        parts = ("stored", "counted", "merged_cross_broker", "merged_repeat")
+        assert found["received"] == sum(found[part] for part in parts), broker
+    assert totals["meshstl"]["merged_cross_broker"] == 1
+    assert totals["public"]["merged_repeat"] == 1
+
+
 def test_rows_with_each_flag_are_recorded_per_hour_and_broker(tmp_path: Path) -> None:
     # The loader's ing_03 check compares raw rows with each broker flag against these.
     folder = reduce_fixtures(tmp_path)
