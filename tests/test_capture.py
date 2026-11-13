@@ -1,13 +1,16 @@
 """A capture run on a fake clock: flush files, the merge at exit and the stop rules (ADR 0005)."""
 
 import base64
+import importlib.util
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pyarrow.parquet as pq
 import pytest
+import structlog
 
 from ingester import capture
 from ingester.capture import CaptureRun, RunParameters
@@ -16,6 +19,7 @@ from ingester.snapshot import MANIFEST_NAME, read_manifest, verify_manifest
 
 KEY = bytes(range(32))
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "mqtt" / "deliveries.jsonl"
+CAPTURE_COMMAND = Path(__file__).resolve().parents[1] / "docs" / "adr" / "0003-spike" / "capture.py"
 START = datetime(2026, 1, 1, 7, tzinfo=UTC)
 END_AT = datetime(2026, 1, 1, 9, tzinfo=UTC)
 
@@ -154,6 +158,97 @@ def test_a_write_failure_is_retried_once(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(capture, "write_rows", flaky)
     run.flush()
     assert list(run.partial.rglob("*.flush-*.parquet"))
+
+
+def test_a_retry_writes_only_the_batch_that_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The second write of a flush fails once; the batches before it must not be written again.
+    run, _ = run_through(tmp_path, flush_every=1000)
+    real = capture.write_rows
+    calls = {"n": 0}
+
+    def flaky(path: Path, table: str, rows: Any) -> int:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("disk hiccup")
+        return real(path, table, rows)
+
+    monkeypatch.setattr(capture, "write_rows", flaky)
+    folder = run.finish("end_at")
+    assert verify_manifest(folder) == []
+    manifest = read_manifest(folder)
+    counted = sum(row["counted"] for row in manifest["deliveries"])
+    copies = pq.read_table(folder / "mqtt_copy_count").column("copy_count").to_pylist()
+    dropped = pq.read_table(folder / "mqtt_dropped_count").column("delivery_count").to_pylist()
+    assert sum(copies) + sum(dropped) == counted
+    stored = sum(row["stored"] for row in manifest["deliveries"])
+    assert pq.read_table(folder / "mqtt_message").num_rows == stored
+
+
+def test_the_retry_warning_names_the_table_hour_and_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run, _ = run_through(tmp_path, flush_every=1000)
+    real = capture.write_rows
+    calls = {"n": 0}
+
+    def flaky(path: Path, table: str, rows: Any) -> int:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("disk hiccup")
+        return real(path, table, rows)
+
+    monkeypatch.setattr(capture, "write_rows", flaky)
+    with structlog.testing.capture_logs() as logs:
+        run.flush()
+    [warning] = [entry for entry in logs if entry["event"] == "flush_retry"]
+    assert warning["table"] == "mqtt_copy_count"
+    assert warning["hour"] == "2026-01-01T07"
+    assert warning["path"].endswith(".flush-1.parquet")
+
+
+def test_the_capture_date_is_the_day_the_run_started(tmp_path: Path) -> None:
+    # A run that crosses midnight was captured on the day it started.
+    run, fake = run_through(tmp_path)
+    fake.at = datetime(2026, 1, 2, 1, tzinfo=UTC)
+    assert read_manifest(run.finish("end_at"))["capture_date"] == "2026-01-01"
+
+
+def load_capture_command() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("capture_command", CAPTURE_COMMAND)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize(
+    ("host", "source", "refused"),
+    [
+        ("mqtt.meshstl.org", "public", True),
+        ("MQTT.MeshSTL.org", "public", True),
+        ("mqtt.meshstl.org.", "public", True),
+        ("broker.example.invalid", "meshstl", True),
+        ("mqtt.meshtastic.org", "public", False),
+    ],
+)
+def test_the_meshstl_broker_needs_casey_s_approval(
+    host: str, source: str, refused: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    command = load_capture_command()
+
+    def started() -> None:
+        raise AssertionError("the command went past its approval check")
+
+    # Anything past the refusal would read settings and connect; this test must never do that.
+    monkeypatch.setattr(command, "get_ingester_settings", started)
+    assert command.needs_meshstl_approval(host, source) is refused
+    argv = ["--host", host, "--source", source, "--topic", "msh/US/Example/#"]
+    argv += ["--end-at", "2026-01-01T09:00:00+00:00", "--snapshot-id", "example-capture"]
+    argv += ["--snapshots", str(tmp_path)]
+    if refused:
+        assert command.main(argv) == 2
 
 
 def test_a_second_write_failure_stops_without_a_manifest(
