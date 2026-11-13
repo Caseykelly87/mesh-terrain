@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import structlog
 from meshtastic.protobuf import portnums_pb2
 
 from ingester.allowlist import DECODE_STATUSES, DECODER_VERSION, SCHEMA_VERSION, allowlist
@@ -247,6 +248,21 @@ def test_only_the_decrypted_portnum_rule_is_flagged() -> None:
         if isinstance(result, StoredDelivery) and result.decrypted_portnum_rule:
             flagged.add(record["name"])
     assert flagged == {"decrypted_portnum_zero", "decrypted_portnum_above_max"}
+
+
+def test_a_via_mqtt_packet_on_a_map_topic_is_stored_not_counted() -> None:
+    # Only internet copies on e topics are counted; a map-topic delivery is a stored row.
+    report = row("via_mqtt_on_map")
+    assert report["via_mqtt"] is True
+    assert (report["decode_status"], report["position_source"]) == ("ok", "mapreport")
+
+
+def test_a_zero_packet_id_is_decrypt_failed_with_no_warning() -> None:
+    with structlog.testing.capture_logs() as logs:
+        result = row("packet_id_zero")
+    assert result["decode_status"] == "decrypt_failed"
+    loud = [entry for entry in logs if entry["log_level"] in {"warning", "error", "critical"}]
+    assert loud == []
 
 
 def test_an_internet_copy_is_counted_with_its_gateway() -> None:

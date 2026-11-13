@@ -180,6 +180,13 @@ def custom_gateway_segment() -> bytes:
     return envelope(mesh_packet)
 
 
+def via_mqtt_map_report() -> bytes:
+    mesh_packet = packet(0x101E, via_mqtt=True)
+    mesh_packet.decoded.portnum = portnums_pb2.MAP_REPORT_APP
+    mesh_packet.decoded.payload = map_report()
+    return envelope(mesh_packet)
+
+
 def map_topic_report() -> bytes:
     mesh_packet = packet(0x1015, hop_start=0, relay_node=0, rx_snr=0.0, rx_rssi=0, rx_time=0)
     mesh_packet.decoded.portnum = portnums_pb2.MAP_REPORT_APP
@@ -393,6 +400,13 @@ DELIVERIES: list[tuple[str, str, str, str, Builder]] = [
         f"{HOUR}:00:33.000000+00:00",
         e_topic(),
         lambda: encrypted(portnums_pb2.TELEMETRY_APP, environment_telemetry(), 0x101D),
+    ),
+    (
+        "via_mqtt_on_map",
+        "public",
+        f"{HOUR}:00:34.000000+00:00",
+        f"{ROOT}/2/map/",
+        via_mqtt_map_report,
     ),
     (
         "json",

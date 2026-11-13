@@ -68,6 +68,7 @@ EXPECTED_NAMES = {
     "custom_gateway_segment",
     "mapreport_zero_coordinates",
     "telemetry_without_device_metrics",
+    "via_mqtt_on_map",
     "both_brokers",
     "repeat",
     "stripped_public_whole_meshstl",
