@@ -148,31 +148,55 @@ def second_pass(
     Every in-window record still counts as observed time, as in the snapshot's
     coverage, whatever the rules do with it.
     """
-    path, start_s, end_s, roots, repeated, shift, rules = task
+    path = task[0]
+    return tally_items(records(path, -math.inf, math.inf), task)
+
+
+def tally_items(
+    items: Any, task: tuple[str, float, float, Any, Firsts, dict[bytes, float], frozenset[str]]
+) -> Any:
+    """second_pass over (at_s, kind, topic, record, line length) items of one file."""
     tally, kept = az.Tally(), set()
-    for actual_s, kind, topic, record, size in records(path, -math.inf, math.inf):
-        if roots is not None and az.topic_root(topic) not in roots:
-            continue
-        in_window = start_s <= actual_s < end_s
-        raw = base64.b64decode(record["payload_b64"])
-        outcome = classify(kind, raw)
-        at_s: float | None = actual_s
-        if outcome == "copy_with_payload" and "copies" in rules:
-            at_s = None
-        elif outcome == "stored":
-            at_s = kept_time((path, repeated, shift, rules), digest(topic, raw), actual_s, kept)
-        parsed = None
-        if at_s is not None and start_s <= at_s < end_s:
-            tally.counts[("kind", kind)] += 1
-            if kind in {"e", "map"}:
-                parsed = az.tally_record(tally, at_s, kind, record)
-        if in_window and (at_s is not None or parsed is not None):
-            tally.add_volume(actual_s, topic, kind, parsed, size)
-        elif in_window:
-            note_minute(tally, actual_s)
+    for item in items:
+        tally_item(tally, kept, item, task)
+    return finish_tally(tally)
+
+
+def finish_tally(tally: Any) -> Any:
+    """Plain dicts in place of defaultdicts, so the tally pickles, as analyze.tally_file does."""
     tally.heard, tally.boxes = dict(tally.heard), dict(tally.boxes)
     tally.regional_sets = dict(tally.regional_sets)
     return tally
+
+
+def tally_item(
+    tally: Any,
+    kept: set[bytes],
+    item: tuple[float, str, str, dict[str, Any], int],
+    task: tuple[str, float, float, Any, Firsts, dict[bytes, float], frozenset[str]],
+) -> None:
+    """One record into the tally, with the rules applied (the body of analyze.tally_file)."""
+    path, start_s, end_s, roots, repeated, shift, rules = task
+    actual_s, kind, topic, record, size = item
+    if roots is not None and az.topic_root(topic) not in roots:
+        return
+    in_window = start_s <= actual_s < end_s
+    raw = base64.b64decode(record["payload_b64"])
+    outcome = classify(kind, raw)
+    at_s: float | None = actual_s
+    if outcome == "copy_with_payload" and "copies" in rules:
+        at_s = None
+    elif outcome == "stored":
+        at_s = kept_time((path, repeated, shift, rules), digest(topic, raw), actual_s, kept)
+    parsed = None
+    if at_s is not None and start_s <= at_s < end_s:
+        tally.counts[("kind", kind)] += 1
+        if kind in {"e", "map"}:
+            parsed = az.tally_record(tally, at_s, kind, record)
+    if in_window and (at_s is not None or parsed is not None):
+        tally.add_volume(actual_s, topic, kind, parsed, size)
+    elif in_window:
+        note_minute(tally, actual_s)
 
 
 class Rules:
