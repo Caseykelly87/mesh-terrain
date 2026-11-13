@@ -83,6 +83,11 @@ jobs:
           make env
           docker compose config --format json | jq -e '[.services[].restart] | all(. == "no")'
       - run: make up
+      # make up passes when the code location fails to import, because the
+      # webserver reports the error in its UI and stays healthy. PR #15's
+      # ingester import failed that way in the image while every job was green.
+      - name: check that the Dagster code location loads in the image
+        run: make check-definitions
       # The ITM library is compiled in a build stage of the Dagster image
       # (ADR 0002); loading it and reproducing the spike's flat-path figure
       # here fails CI when that stage breaks, before terrain/itm.py exists.

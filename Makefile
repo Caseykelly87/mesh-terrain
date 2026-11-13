@@ -20,7 +20,7 @@ UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
-.PHONY: help env up down nuke check check-itm fmt reproduce dbt-deps dbt-build dbt-debug lint test
+.PHONY: help env up down nuke check check-itm check-definitions fmt reproduce dbt-deps dbt-build dbt-debug lint test
 
 help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
@@ -30,6 +30,7 @@ help:
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
 	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
 	@echo "make check-itm  load the ITM library in the Dagster image and reproduce the ADR 0002 figure"
+	@echo "make check-definitions  load the Dagster code location in the running webserver container"
 	@echo "make fmt        ruff format and autofix"
 	@echo "make reproduce  rebuild every asset from the raw zone (stub until Phase 1)"
 
@@ -87,6 +88,13 @@ check-itm: env
 	output=$$($(COMPOSE) run --rm --no-deps -T dagster-webserver python - < docs/adr/0002-itm-spike/check_itm.py); \
 	    echo "$$output"; \
 	    echo "$$output" | grep -qF "itm basic transmission loss: 151.76 dB"
+
+# The webserver stays healthy when the code location fails to import: it serves
+# the error in the UI and /server_info still answers. This loads the workspace
+# the webserver uses, in its running container, so an import that works on the
+# host but not in the image fails here. Needs make up first.
+check-definitions:
+	$(COMPOSE) exec -T dagster-webserver dagster definitions validate -w /opt/dagster/home/workspace.yaml
 
 fmt:
 	$(UV) ruff check --fix .
