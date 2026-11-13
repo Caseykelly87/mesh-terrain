@@ -30,7 +30,8 @@ help:
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
 	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
 	@echo "make check-itm  load the ITM library in the Dagster image and reproduce the ADR 0002 figure"
-	@echo "make check-definitions  load the Dagster code location in the running webserver container"
+	@echo "make check-definitions"
+	@echo "                load the Dagster code location in the running webserver container"
 	@echo "make fmt        ruff format and autofix"
 	@echo "make reproduce  rebuild every asset from the raw zone (stub until Phase 1)"
 
@@ -92,9 +93,11 @@ check-itm: env
 # The webserver stays healthy when the code location fails to import: it serves
 # the error in the UI and /server_info still answers. This loads the workspace
 # the webserver uses, in its running container, so an import that works on the
-# host but not in the image fails here. Needs make up first.
+# host but not in the image fails here. Needs make up first. The workspace path
+# is expanded inside the container: Git Bash rewrites an argument that starts
+# with / into a Windows path before docker.exe sees it.
 check-definitions:
-	$(COMPOSE) exec -T dagster-webserver dagster definitions validate -w /opt/dagster/home/workspace.yaml
+	$(COMPOSE) exec -T dagster-webserver sh -c 'dagster definitions validate -w "$$DAGSTER_HOME/workspace.yaml"'
 
 fmt:
 	$(UV) ruff check --fix .
