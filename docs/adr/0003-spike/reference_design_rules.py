@@ -2,7 +2,7 @@
 
 Casey's gate rule of 2026-11-13 compares the snapshot (d) with analyze.py's
 figures on the raw files without the 2026-10-28T20 public fragment, after the
-three rules by which the snapshot differs from the spike by design:
+four rules by which the snapshot differs from the spike by design:
 
 - copies: an internet copy (via_mqtt on an `e` topic) that kept its payload is
   counted, not used, so it never reaches the tally;
@@ -11,7 +11,12 @@ three rules by which the snapshot differs from the spike by design:
   merges them under one delivery_key;
 - shared: a delivery both brokers carried is tallied at its first sighting on
   either broker, the one received_at the snapshot keeps for its row (added by
-  Casey on 2026-11-13; the other broker's time is not kept).
+  Casey on 2026-11-13; the other broker's time is not kept);
+- unparsed: a delivery on an `e` or `map` topic whose envelope does not parse,
+  or whose sender (`from`) is 0, is counted as `unparsed` and not used, whether
+  or not it is an internet copy, and its receipt time still counts as observed
+  time (ADR 0005 item 5, as `ingester/decoder.py` applies it; added by Casey on
+  2026-11-14 for the 63 sender-0 text packets read R9 found).
 
 A first pass finds, per broker, every delivery that would be stored and how
 often each (topic, payload) occurs, over the whole public capture and over the
@@ -31,7 +36,7 @@ printed. Output, under OUT_DIR/design-rules-<rules>/, is aggregates only.
 Usage, from the repository root, Git Bash:
 
     uv run --frozen --with shapely==2.2.0 --with pyproj==3.8.0 python -I \
-        docs/adr/0003-spike/reference_design_rules.py OUT_DIR [--rules copies,repeats,shared]
+        docs/adr/0003-spike/reference_design_rules.py OUT_DIR \n        [--rules copies,repeats,shared,unparsed]
 """
 
 from __future__ import annotations
@@ -186,6 +191,8 @@ def tally_item(
     at_s: float | None = actual_s
     if outcome == "copy_with_payload" and "copies" in rules:
         at_s = None
+    elif outcome == "dropped" and kind in {"e", "map"} and "unparsed" in rules:
+        at_s = None
     elif outcome == "stored":
         at_s = kept_time((path, repeated, shift, rules), digest(topic, raw), actual_s, kept)
     parsed = None
@@ -271,7 +278,7 @@ class Rules:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("out_dir", type=Path)
-    parser.add_argument("--rules", default="copies,repeats,shared")
+    parser.add_argument("--rules", default="copies,repeats,shared,unparsed")
     parser.add_argument("--public", type=Path, default=reference.DATA / "spike-capture")
     parser.add_argument("--meshstl", type=Path, default=reference.DATA / "meshstl-capture")
     args = parser.parse_args()
