@@ -1,6 +1,6 @@
 # Reproduction of the ADR 0003 figures from the pseudonymised snapshot, November 2026
 
-The reproduction gate passed on 2026-11-14 (04:10 to 04:12 UTC): every ADR 0003 link figure, recomputed from snapshot `meshtastic-capture-2026-10-22` alone, equals the same figure computed from the real-id archive under the snapshot's design rules. This file records what was compared and what it showed. The full gate table is `reference/gate-2026-11-14.md` beside this file, and the aggregates behind each column are under `reference/` too.
+The reproduction gate passed on 2026-11-14 (04:10 to 04:12 UTC): every ADR 0003 link figure, recomputed from snapshot `meshtastic-capture-2026-10-22` alone, equals the same figure computed from the real-id archive under the snapshot's design rules. This file records what was compared and what it showed. The full gate table is `reference/gate-2026-11-14.md` beside this file, and the aggregates behind each column are under `reference/` too. In that table, as it ran, the three "rows both brokers carried" rows come from (c), the archive, not from the snapshot, although they print under the snapshot column; the gate script now labels them so.
 
 ## What the gate compares
 
@@ -43,7 +43,7 @@ Counts per broker, (c) = (d): public TEXT_MESSAGE_APP rows 7 923, internet copie
 
 ## Why (b) and (c) differ
 
-- The fragment, (a) to (b): 0.067 observed hours fewer and 5 receipts fewer. On the full public run that lifts three weekly rates by one (keep 30 minutes at 500 m 110 to 111, gateway-only 852 to 853, positions ignored 1 194 to 1 195), and the funnel's first two steps fall from 5 760 / 4 604 to 5 755 / 4 600. The link-hour counts do not change.
+- The fragment, (a) to (b): 0.067 observed hours fewer and 5 relayed radio receipts at MSA gateways fewer. On the full public run that lifts three weekly rates by one (keep 30 minutes at 500 m 110 to 111, gateway-only 852 to 853, positions ignored 1 194 to 1 195), and the funnel's first two steps fall from 5 760 / 4 604 to 5 755 / 4 600. The link-hour counts do not change.
 - Repeats, nearly all of (b) to (c). Of the deliveries that would be stored before merging (rows kept plus both merged counts), 3 595 118 of the public broker's 4 486 141, and 11 409 of MeshSTL's 22 256, are byte-identical repeats. Every merged group was checked byte for byte, and none differ (read R4). Later repeats of Position and MapReport packets gave `analyze.py` fresh position samples, so fewer receipts pass `lnk_02` (both ends usable within 30 minutes). Relayer resolution does not change.
 - Copies: moves no figure (1 192 public copies kept a payload).
 - Shared: 78 MeshSTL deliveries, 77 of them MapReports, were sighted on the public broker a median 28 hours earlier. Timed there, two weekday MeshSTL link-hours (2026-10-23T22 and T23) lose the relayer's position, 504 to 469 a week, all of the difference (read R4).
