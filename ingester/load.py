@@ -305,6 +305,25 @@ def decode_rates(conn: psycopg.Connection, snapshot_id: str) -> dict[str, float]
     }
 
 
+def zero_positions(conn: psycopg.Connection, snapshot_id: str) -> dict[str, int]:
+    """pos_03: rows with latitude_i and longitude_i both exactly 0, per broker flag and source.
+
+    A position the sender set to 0, 0 is stored as sent (the decoder keeps a set
+    field); a missing coordinate is null and is never read as 0 (Casey, 2026-11-14).
+    """
+    rows = conn.execute(
+        "select seen_public, seen_meshstl, position_source, count(*) from raw.mqtt_message "
+        "where snapshot_id = %s and latitude_i = 0 and longitude_i = 0 group by 1, 2, 3",
+        (snapshot_id,),
+    ).fetchall()
+    found: Counter[str] = Counter()
+    for seen_public, seen_meshstl, source, count in rows:
+        for flag, seen in (("seen_public", seen_public), ("seen_meshstl", seen_meshstl)):
+            if seen:
+                found[f"{flag}, {source}"] += int(count)
+    return dict(found)
+
+
 def _float32(value: Any) -> Any:
     """A float4 as the float32 the Parquet file held; PostgreSQL sends the shortest text."""
     if isinstance(value, list):
