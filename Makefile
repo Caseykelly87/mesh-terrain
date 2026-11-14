@@ -4,8 +4,9 @@ SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-# .env is exported into every recipe so dbt and pytest on the host see the same
-# variables Compose uses. The file is created from .env.example by `make up`.
+# .env is exported into every recipe, except NODE_ID_HMAC_KEY, so dbt and pytest
+# on the host see the same variables Compose uses. The file is created from
+# .env.example by `make up`.
 -include .env
 export
 # The HMAC key is the one secret no recipe needs from the environment: the

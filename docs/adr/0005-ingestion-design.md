@@ -181,7 +181,7 @@ Amended 2026-11-13, approved by Casey; the reviewer agreed with the portnum rule
 | `channel` | 0 | about one channel hash in 256 is 0 |
 | `hop_start` | 0 | older firmware leaves it 0, and a sender with hop limit 0 sends 0 |
 | `hop_limit` | 0 | the public broker's rewrite of every default-key packet |
-| `relay_node` | null | 0 is firmware's `NO_RELAY_NODE`: firmware v2.7.11 sets `relay_node` with `getLastByteOfNodeNum` (`src/mesh/NodeDB.h`), which sends a node whose low byte is 0 as 0xFF, so 0 never names a relayer; staging maps a low byte of 0 to 0xFF before matching (`lnk_01`) |
+| `relay_node` | null | 0 is firmware's `NO_RELAY_NODE`: firmware v2.7.11 sets `relay_node` with `getLastByteOfNodeNum` (`src/mesh/NodeDB.h`), which sends a node whose low byte is 0 as 0xFF, so 0 never names a relayer; staging maps an origin, gateway or neighbour low byte of 0 to 0xFF before matching (`lnk_01`) |
 | `packet_id` | null | firmware never sends id 0; such a packet cannot be decrypted |
 | `rx_time`, `position_time` | null | 0 is 1970, a node or gateway with no clock |
 | Position `latitude_i`, `longitude_i`, `altitude` | 0 | these fields have presence, so a set 0 is kept |
