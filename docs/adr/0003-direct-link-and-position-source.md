@@ -91,11 +91,10 @@ Casey accepted all four on 2026-10-31.
     - `b65382c2-4257-4139-8e70-2f6ac1f6652a.jsonl`, 4 580 568 bytes.
 
   No off-machine copy of the raw capture existed, so the raw capture no longer exists anywhere. The gate's raw-side figures, (b) and (c), can no longer be recomputed; the committed files under `docs/adr/0003-spike/reference/`, with `gate-2026-11-14.md`, are their record. After the deletion the snapshot passed its manifest check (0 problems, 195 data files).
-- `lnk_06` was widened on 2026-11-14 by Casey's decision (option A, PR #15 comments 6883121025 and 6883294736) to RSSI [-150, 0] dBm and SNR [-30, 20] dB. A reading outside those ranges, or one that is not a number, is treated as missing and fails the rule. Every figure in this ADR was computed with the spike's limits, [-140, 0] dBm and [-25, 15] dB, and the reproduction gate keeps those limits so the figures still reproduce. The reproduction from the snapshot was rerun with the new limits:
-  - in the public full run, one intermediate count moves: receipts with the relayer resolved go from 4 600 to 4 601;
-  - the two public regional-root runs show the same one-receipt change (4 597 to 4 598);
-  - that receipt drops out before the last funnel step, which stays at 277;
-  - no headline figure moves, and the MeshSTL runs do not change.
+- `lnk_06` was widened on 2026-11-14 by Casey's decision (option A, PR #15 comments 6883121025 and 6883294736) to RSSI [-150, 0] dBm and SNR [-30, 20] dB. A reading outside those ranges, or one that is not a number, is treated as missing and fails the rule. Every figure in this ADR was computed with the spike's limits, [-140, 0] dBm and [-25, 15] dB, and the reproduction gate keeps those limits so the figures still reproduce. The reproduction from the snapshot was rerun with the new limits, using `reproduce_from_snapshot.py` with `analyze.RSSI_RANGE_DBM` and `analyze.SNR_RANGE_DB` set to them. One more receipt passes `lnk_06` in each public run:
+  - It moves one funnel step: relayer resolved goes from 4 600 to 4 601 in the public full run, and from 4 597 to 4 598 in the two public regional-root runs.
+  - Its relayer has no position in the capture, so it then fails `lnk_02`. The MSA relayer counts in `results.md` table (2a) and the no-position line each rise by one: 76 to 77 relayers, 33 to 34 with no decodable position, 31 to 32 of them sending other packets.
+  - The last funnel step stays at 277, no link-hour or headline figure moves, and the MeshSTL runs do not change.
 
 ## Deduplicated figures, 2026-11-14
 
