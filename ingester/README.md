@@ -10,7 +10,7 @@ Modules:
 - `allowlist.py` and `sql/raw_tables.sql`: the columns that may land and the `raw` tables that hold them; a test keeps the two equal.
 - `counts.py` and `sightings.py`: copy, dropped and per-hour per-broker counts, and the broker flags and merged deliveries of `ing_01` and `ing_03`.
 - `snapshot.py`, `parquet.py`, `finalise.py`, `readme.py`: the `<id>.partial/` folder, zstd Parquet with the allowlist schema, data content hashes, the merge at exit, coverage, README and the sha256 manifest.
-- `reduce.py`: the batch reduction of the 2026-10-22 archive into snapshot `meshtastic-capture-2026-10-22`.
+- `reduce.py`: the batch reduction of the 2026-10-22 archive into snapshot `meshtastic-capture-2026-10-22`. Its command is wired to that archive's folders, snapshot id and MeshSTL window. It ran once, on 2026-11-14, and cannot run again because its input was deleted the same day (ADR 0003, Consequences). `reduce_capture` takes any folders of capture JSON lines, and the tests run it on the synthetic fixtures. No future capture goes through it, since ADR 0005 limits the reduction to that one archive and capture runs pseudonymise in memory; `capture.py` imports only its `LICENCE` constant.
 - `capture.py`: the core of the on-demand capture command in `docs/adr/0003-spike/capture.py`.
 - `load.py` and `assets.py`: the insert-only loader and the hand-started Dagster asset `raw/mqtt_snapshot` with its `ing_07`, `ing_03` and `ing_04` checks.
 - `settings.py`: `NODE_ID_HMAC_KEY`, `SNAPSHOTS_DIR` and the MQTT credentials, read once.
@@ -20,7 +20,7 @@ Modules:
 Run:
 
 - Tests: `make check` (the loader tests need the local stack and skip without it).
-- Reduction: `uv run --frozen python -I -m ingester.reduce`.
+- Reduction: `uv run --frozen python -I -m ingester.reduce`. It ran once, on 2026-11-14, and cannot run again: its input archive was deleted that day.
 - Load: `uv run --frozen python -m ingester.load <snapshot id>`.
 - Capture and gate: `docs/adr/0003-spike/README.md`.
 
