@@ -1,10 +1,14 @@
-# Passes the CA bundle named by CA_BUNDLE_PATH in .env to the Dagster image
-# build as the BuildKit secret ca_bundle (docker/dagster/Dockerfile says why).
-# The Makefile adds this file to every compose command only when
-# CA_BUNDLE_PATH is set. Compose has no optional build secret: an empty path
-# resolves to the project folder and the build fails reading it, so a build
-# without the bundle, as in CI, must not see this file at all.
+# Passes the CA bundle named by CA_BUNDLE_PATH in .env to the warehouse and
+# Dagster image builds as the BuildKit secret ca_bundle (the two Dockerfiles
+# say which steps mount it and why). The Makefile adds this file to every
+# compose command only when CA_BUNDLE_PATH is set. Compose has no optional
+# build secret: an empty path resolves to the project folder and the build
+# fails reading it, so a build without the bundle, as in CI, must not see
+# this file at all.
 services:
+  warehouse:
+    build:
+      secrets: [ca_bundle]
   dagster-migrate:
     build:
       secrets: [ca_bundle]

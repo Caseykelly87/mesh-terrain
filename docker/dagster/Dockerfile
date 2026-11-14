@@ -29,7 +29,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/itm-src
-RUN curl -fsSL -o itm.tar.gz "https://codeload.github.com/NTIA/itm/tar.gz/${ITM_COMMIT}" \
+# The optional ca_bundle secret reaches curl through its own --cacert option,
+# for the reason given at the uv steps below. The apt step above needs none:
+# the Debian mirror is plain http.
+RUN --mount=type=secret,id=ca_bundle,required=false \
+    if [ -s /run/secrets/ca_bundle ]; then set -- --cacert /run/secrets/ca_bundle; fi \
+    && curl -fsSL "$@" -o itm.tar.gz "https://codeload.github.com/NTIA/itm/tar.gz/${ITM_COMMIT}" \
     && echo "${ITM_SHA256}  itm.tar.gz" | sha256sum -c - \
     && tar xzf itm.tar.gz --strip-components=1 \
     && rm itm.tar.gz
