@@ -1,7 +1,7 @@
 """The Dagster code location: the raw snapshot loader, the dbt assets and the dbt CLI resource.
 
-The dbt manifest is produced at load time rather than baked into the image. The
-project has no models yet and parsing it takes about two seconds; a manifest
+The dbt manifest is produced at load time rather than baked into the image.
+Parsing the project takes about seven seconds in the container; a manifest
 generated at build time would go stale the moment warehouse-eng edits a model and
 the failure would surface as a confusing lineage mismatch in the webserver instead
 of a parse error at startup. Package installation (dbt deps) runs only when the
