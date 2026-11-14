@@ -27,7 +27,7 @@ UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
-.PHONY: help env up down nuke check check-itm check-definitions fmt reproduce dbt-deps dbt-build dbt-debug lint test
+.PHONY: help env up down nuke check check-itm check-definitions fmt reproduce load capture dbt-deps dbt-build dbt-debug lint test
 
 help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
@@ -41,6 +41,10 @@ help:
 	@echo "                load the Dagster code location in the running webserver container"
 	@echo "make fmt        ruff format and autofix"
 	@echo "make reproduce  rebuild every asset from the raw zone (stub until Phase 1)"
+	@echo "make load SNAPSHOT=<id>"
+	@echo "                load one finished snapshot from SNAPSHOTS_DIR into the raw schema"
+	@echo "make capture HOST=... SOURCE=... TOPICS='...' END_AT=... SNAPSHOT=<id>"
+	@echo "                one on-demand MQTT capture run (ADR 0005); never scheduled"
 
 env:
 	@test -f .env || cp .env.example .env
@@ -105,6 +109,20 @@ check-itm: env
 # with / into a Windows path before docker.exe sees it.
 check-definitions:
 	$(COMPOSE) exec -T dagster-webserver sh -c 'dagster definitions validate -w "$$DAGSTER_HOME/workspace.yaml"'
+
+# One on-demand capture run (ADR 0005). Example:
+# make capture HOST=mqtt.meshtastic.org SOURCE=public TOPICS='msh/US/MeshSTL/# msh/US/MO/#' \
+#   END_AT=2026-12-01T00:00:00+00:00 SNAPSHOT=meshtastic-capture-2026-11-30
+# The script reads the key from .env through its settings and refuses the
+# MeshSTL broker without Casey's approval date, which this target does not pass.
+capture:
+	$(UV) python -I docs/adr/0003-spike/capture.py --host $(HOST) --source $(SOURCE) \
+	    $(foreach topic,$(TOPICS),--topic '$(topic)') --end-at $(END_AT) \
+	    --max-raw-bytes $(or $(MAX_RAW_BYTES),10000000000) --snapshot-id $(SNAPSHOT)
+
+# Load one finished snapshot into raw; refuses a .partial folder or a manifest mismatch.
+load:
+	$(UV) python -m ingester.load $(SNAPSHOT)
 
 fmt:
 	$(UV) ruff check --fix .
