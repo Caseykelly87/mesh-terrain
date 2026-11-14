@@ -7,6 +7,8 @@ into the developer's warehouse, so this test only checks the wiring.
 
 from dagster import AssetCheckKey, AssetKey
 
+from ingester.assets import check_results
+
 
 def test_the_raw_snapshot_asset_and_its_checks_are_defined() -> None:
     from pipeline.definitions import defs
@@ -26,3 +28,16 @@ def test_nothing_is_scheduled_or_sensed() -> None:
 
     assert not list(defs.schedules or [])
     assert not list(defs.sensors or [])
+
+
+def test_rows_at_zero_zero_fail_the_pos_03_check() -> None:
+    found = {
+        "again": {"mqtt_message": 0},
+        "problems": [],
+        "hash_problems": [],
+        "zero_positions": {"seen_public, position": 119},
+        "rates": {"seen_public": 0.95, "seen_meshstl": 0.95},
+    }
+    results = {result.check_name: result for result in check_results(found)}
+    assert results["pos_03_not_both_zero"].passed is False
+    assert results["ing_03_reconcile"].passed is True

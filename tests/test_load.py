@@ -155,6 +155,27 @@ def test_a_zero_zero_position_is_counted_per_flag_and_source(
     assert found == {"seen_meshstl, position": 2, "seen_public, position": 1}
 
 
+def test_one_coordinate_at_zero_is_not_counted(conn: psycopg.Connection, snapshot: Path) -> None:
+    # pos_03 is "not both zero": a latitude of 0 with a real longitude is a position.
+    load.load_snapshot(conn, snapshot)
+    conn.execute(
+        "update raw.mqtt_message set latitude_i = 0 "
+        "where snapshot_id = %s and position_source = 'position'",
+        (SNAPSHOT_ID,),
+    )
+    assert load.zero_positions(conn, SNAPSHOT_ID) == {}
+
+
+def test_the_load_command_warns_about_positions_at_zero() -> None:
+    with structlog.testing.capture_logs() as logs:
+        load.warn_zero_positions(SNAPSHOT_ID, {"seen_public, position": 119})
+        load.warn_zero_positions(SNAPSHOT_ID, {})
+    assert [(entry["event"], entry["log_level"]) for entry in logs] == [
+        ("pos_03_positions_at_zero", "warning")
+    ]
+    assert logs[0]["rows"] == {"seen_public, position": 119}
+
+
 def test_decode_rate_per_broker_flag(conn: psycopg.Connection, snapshot: Path) -> None:
     # ing_04: ok over stored radio deliveries on e topics that carried a payload. Public:
     # 14 of 24 (the 10 others are unknown_port, decrypt_failed and malformed fixtures).
