@@ -64,4 +64,4 @@ openssl x509 -inform der -in ~/.certs/norton-root.cer -out ~/.certs/norton-root.
 cat .venv/Lib/site-packages/certifi/cacert.pem ~/.certs/norton-root.pem > ~/.certs/ca-bundle.pem
 ```
 
-Then in `.env`: `SSL_CERT_FILE=C:/Users/<you>/.certs/ca-bundle.pem` and `REQUESTS_CA_BUNDLE=C:/Users/<you>/.certs/ca-bundle.pem`. Running containers are unaffected, but an image build that downloads packages is not: see the Norton build issue under Known issues in `docs/STATUS.md`.
+Then in `.env`: `SSL_CERT_FILE=C:/Users/<you>/.certs/ca-bundle.pem` and `REQUESTS_CA_BUNDLE=C:/Users/<you>/.certs/ca-bundle.pem`. Running containers are unaffected. For the Dagster image build, also set `CA_BUNDLE_PATH=C:/Users/<you>/.certs/ca-bundle.pem`: the make targets then pass the bundle to the build as a BuildKit secret, mounted only for the steps that run uv and never stored in the image. A bare `docker compose build` does not pass it; run `make up` instead. Other download steps in the image builds do not use it yet: see the Norton build issue under Known issues in `docs/STATUS.md`.
