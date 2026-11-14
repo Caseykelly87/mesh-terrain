@@ -14,6 +14,12 @@ storage:
         env: WAREHOUSE_PASSWORD
       db_name:
         env: DAGSTER_PG_DB
+      # SQLAlchemy 2.1 picks psycopg 3 for a bare postgresql:// URL. psycopg 3
+      # binds parameters on the server, and the server rejects a parameter in
+      # dagster-postgres's NOTIFY statement, so every event write failed with
+      # a syntax error at "$1". psycopg2 interpolates on the client and comes
+      # with dagster-postgres.
+      scheme: postgresql+psycopg2
 
 # A run launches in the code server of whichever process launched it (the
 # webserver for a manual launch, the daemon for a schedule or sensor); a
