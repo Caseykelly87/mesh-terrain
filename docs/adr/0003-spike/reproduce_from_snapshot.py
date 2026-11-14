@@ -111,8 +111,10 @@ def parsed_of(row: dict[str, Any], ids: StandIns) -> Any:
         rx_snr=snr_of(row), rx_rssi=row["rx_rssi"] or 0, portnum=row["portnum"],
     )  # fmt: skip
     parsed.root = topic_root(topic)
+    # A Position field the sender left unset lands as null; analyze.py read the protobuf
+    # default, 0, so the same 0 goes back in.
     has_place = row["latitude_i"] or row["longitude_i"]
-    place = (row["latitude_i"], row["longitude_i"], row["precision_bits"])
+    place = (row["latitude_i"] or 0, row["longitude_i"] or 0, row["precision_bits"] or 0)
     if has_place and row["position_source"] == "position":
         parsed.position = place
     if has_place and row["position_source"] == "mapreport":
