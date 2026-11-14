@@ -5,7 +5,7 @@ against the warehouse; materialising it here would write a fixture snapshot
 into the developer's warehouse, so this test only checks the wiring.
 """
 
-from dagster import AssetCheckKey, AssetKey
+from dagster import AssetCheckKey, AssetCheckSeverity, AssetKey
 
 from ingester.assets import check_results
 
@@ -30,7 +30,7 @@ def test_nothing_is_scheduled_or_sensed() -> None:
     assert not list(defs.sensors or [])
 
 
-def test_rows_at_zero_zero_fail_the_pos_03_check() -> None:
+def test_rows_at_zero_zero_warn_on_the_pos_03_check() -> None:
     found = {
         "again": {"mqtt_message": 0},
         "problems": [],
@@ -39,5 +39,10 @@ def test_rows_at_zero_zero_fail_the_pos_03_check() -> None:
         "rates": {"seen_public": 0.95, "seen_meshstl": 0.95},
     }
     results = {result.check_name: result for result in check_results(found)}
+    # Casey, 2026-11-14: an accepted condition warns and reports the count; it is no error.
     assert results["pos_03_not_both_zero"].passed is False
+    assert results["pos_03_not_both_zero"].severity == AssetCheckSeverity.WARN
+    assert results["pos_03_not_both_zero"].metadata["rows_at_zero_zero"].value == {
+        "seen_public, position": 119
+    }
     assert results["ing_03_reconcile"].passed is True
