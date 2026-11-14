@@ -1,0 +1,125 @@
+{
+ "JSON keys of every record": {
+  "meshstl": [
+   "payload_b64",
+   "received_at",
+   "topic"
+  ],
+  "public": [
+   "payload_b64",
+   "received_at",
+   "topic"
+  ]
+ },
+ "MeshSTL rows first sighted on the public broker": {
+  "MeshSTL capture start (first record, UTC)": "2026-10-23T22:09:00Z",
+  "affected link-hours (1(a)) against the capture start": "2026-10-23T22 is the capture's first clock hour (from its start) and 2026-10-23T23 its second",
+  "of them within 10 minutes after the MeshSTL capture start": 1,
+  "rows the public broker sighted first": 78,
+  "their MeshSTL arrival after the capture start, s: minimum, median, maximum": [
+   171.1,
+   33771.3,
+   85692.4
+  ],
+  "their decode status or portnum": {
+   "MAP_REPORT_APP": 77,
+   "decrypt_failed": 1
+  }
+ },
+ "deciding count: public sender-0 plaintext TEXT_MESSAGE_APP deliveries, repeats not merged": 63,
+ "ended (UTC)": "2026-11-14T03:22:21Z",
+ "files read": {
+  "meshstl": 35,
+  "public": 65
+ },
+ "gaps in received_at": {
+  "meshstl": {
+   ">= 10 s": 17,
+   ">= 120 s": 1,
+   ">= 1800 s": 0,
+   ">= 300 s": 1,
+   ">= 60 s": 1,
+   ">= 600 s": 0
+  },
+  "public": {
+   ">= 10 s": 3,
+   ">= 120 s": 2,
+   ">= 1800 s": 0,
+   ">= 300 s": 1,
+   ">= 60 s": 2,
+   ">= 600 s": 1
+  }
+ },
+ "meshstl sender-0 deliveries": {},
+ "public sender-0 deliveries": {
+  "all, e, radio": 272,
+  "all, map, radio": 67,
+  "no payload": 276,
+  "plaintext, portnum TEXT_MESSAGE_APP": 63,
+  "text, e, radio": 63
+ },
+ "public sender-0 text, distinct messages": 63,
+ "repeats after subscribes or inferred reconnects": {
+  "meshstl": [
+   {
+    "gap threshold s": 120.0,
+    "inferred reconnects": 1,
+    "merged repeats within 10 minutes after the subscribe or an inferred reconnect": {
+     "e": 170,
+     "map": 5
+    },
+    "merged repeats, by topic type": {
+     "e": 10628,
+     "map": 781
+    },
+    "time inside those 10-minute windows, hours (at most)": 0.33
+   },
+   {
+    "gap threshold s": 300.0,
+    "inferred reconnects": 1,
+    "merged repeats within 10 minutes after the subscribe or an inferred reconnect": {
+     "e": 170,
+     "map": 5
+    },
+    "merged repeats, by topic type": {
+     "e": 10628,
+     "map": 781
+    },
+    "time inside those 10-minute windows, hours (at most)": 0.33
+   },
+   {
+    "gap threshold s": 600.0,
+    "inferred reconnects": 0,
+    "merged repeats within 10 minutes after the subscribe or an inferred reconnect": {
+     "e": 88,
+     "map": 1
+    },
+    "merged repeats, by topic type": {
+     "e": 10628,
+     "map": 781
+    },
+    "time inside those 10-minute windows, hours (at most)": 0.17
+   }
+  ],
+  "public": [
+   {
+    "gap threshold s": 10.0,
+    "inferred reconnects": 3,
+    "merged repeats within 10 minutes after the subscribe or an inferred reconnect": {
+     "e": 26785,
+     "map": 1349
+    },
+    "merged repeats, by topic type": {
+     "e": 3402441,
+     "map": 192677
+    },
+    "time inside those 10-minute windows, hours (at most)": 0.67
+   }
+  ]
+ },
+ "started (UTC)": "2026-11-14T03:19:14Z",
+ "subscribe (first record, UTC)": {
+  "meshstl": "2026-10-23T22:09:00Z",
+  "public": "2026-10-22T16:11:36Z"
+ }
+}
