@@ -314,7 +314,7 @@ REFERENCES = {
 
 
 def load_references(directory: Path) -> dict[str, dict[str, Any]]:
-    """(b), (c) and, when it exists, (c) with the shared rule."""
+    """(b) and (c), from REFERENCES."""
     found = {}
     for name, file in REFERENCES.items():
         path = directory / file
@@ -375,7 +375,10 @@ def report_rows(snapshot: Snapshot, references: dict[str, Any]) -> list[str]:
         lines.append(f"| {broker} | spike decrypt_failed wrong_key, (b) | {spike} |")
         lines += snr_rows(snapshot, broker)
     shared = references["c"].get("shared_rows", {})
-    lines += [f"| both | rows both brokers carried, {k} | {v} |" for k, v in shared.items()]
+    lines += [
+        f"| both | rows both brokers carried, {k}, from (c), not the snapshot | {v} |"
+        for k, v in shared.items()
+    ]
     lines += both_ends_pairs(snapshot)
     return lines
 

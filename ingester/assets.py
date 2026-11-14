@@ -8,8 +8,8 @@ rows and counts against the manifest per hour and broker, ingester.load.reconcil
 `pos_03_not_both_zero` (warning severity: how many rows sit at 0, 0, which raw
 keeps as the source sent them; Casey, 2026-11-14) and `ing_04_decode_rate`
 (warning severity below 90 percent, since the MeshSTL broker's own channel is
-decrypt_failed by design). A failed warning-severity check is reported and does
-not fail the run.
+decrypt_failed by design). No check here is blocking, so a failed check of either
+severity is reported on the asset and does not fail the run.
 """
 
 from typing import Any
