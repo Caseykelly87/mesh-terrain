@@ -80,7 +80,7 @@ It writes the seven runs below and `gate.md`, the comparison with `results.md` i
 
 ## Rerunning the spike analysis
 
-The spike captures are finished and their capture recipe, which used a restart policy ADR 0005 forbids, is gone; the analysis of the raw archive is kept here while the archive exists.
+The spike captures are finished and their capture recipe, which used a restart policy ADR 0005 forbids, is gone. The raw archive was deleted on 2026-11-14 (ADR 0003, Consequences). The commands below, and the archive scripts `reference_from_archive.py`, `reference_design_rules.py`, `diagnose_repeats.py` and `r9_sender_zero.py`, can no longer run; they stay as the record of how `results.md` and the gate's (b) and (c) were produced.
 
 Run the analysis. The committed scripts are mounted at `/spike` and run from there instead of the image's copies in `/opt/spike`, so the image never needs a rebuild. `MSYS_NO_PATHCONV=1` stops Git Bash from rewriting `/data` into a Windows path. It reads the gzipped hours directly.
 

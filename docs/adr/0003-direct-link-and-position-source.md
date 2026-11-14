@@ -79,7 +79,18 @@ Casey accepted all four on 2026-10-31.
 - `ing_03` keeps the status `stripped`; ADR 0005 changes what is stored for header-only copies.
 - `analyze.py` accepts a negative portnum from wrong-key noise as decoded (3 packets in 63.59 hours); the Phase 1 decoder rejects portnum 0 or below.
 - The capture containers had no built-in end time and ran under `--restart unless-stopped`. The public capture ran 15.5 hours past its window (to 2026-10-25T07:43Z) and MeshSTL 9.6 hours past its own, until Docker Desktop stopped. When Docker Desktop was started for a disk check on 2026-10-28, Docker restarted both: they wrote 4 minutes of data (the public fragment above, and 72 MeshSTL records) and the MeshSTL capture reconnected to a community broker outside the agreed window, until Casey stopped both and set their restart policy to `no`. `unless-stopped` restarts a container after any exit, a clean one included, and on every engine start unless it was stopped with `docker stop`; Docker Desktop quitting does not count. Fixed in PR #9: `capture.py` takes `END_AT` and `MAX_RAW_BYTES`, halts with a `HALTED.json` marker and exit 0, and refuses to start while the marker exists. Every Compose service runs with `restart: "no"` (PR #12). ADR 0005, as rescoped on 2026-11-08, replaces the marker and the restart policy with a capture run that always has a built-in end, writes a manifest and exits; `capture.py` is brought to that design in place and no capture is run before then.
-- The data is a single capture, snapshot `meshtastic-capture-2026-10-22` under `C:/Users/Casey/mesh-terrain-data/snapshots/`, both brokers, 2026-10-22 to 2026-10-25, pseudonymised per ADR 0005 once the reproduction gate has passed. It is not treated as irreplaceable: no backup is required, and if it is lost the figures in this ADR are reproducible only by a new capture under a new snapshot id. The real-id archive it was reduced from is deleted after the gate, under Casey's yes, and that date is recorded here when it happens.
+- The data is a single capture, snapshot `meshtastic-capture-2026-10-22` under `C:/Users/Casey/mesh-terrain-data/snapshots/`, both brokers, 2026-10-22 to 2026-10-25, pseudonymised per ADR 0005 once the reproduction gate has passed. It is not treated as irreplaceable: no backup is required, and if it is lost the figures in this ADR are reproducible only by a new capture under a new snapshot id. Casey keeps an off-machine copy of the snapshot.
+- The real-id archive was deleted on 2026-11-14, after the reproduction gate passed, under Casey's yes (PR #15, comments 6881270948 and 6882118525). 245 files, 3 379 978 111 bytes, were deleted. Each was deleted only after its sha256, computed just before the delete, matched the list in the PR #15 body; no file differed and none was left.
+  - 239 files were under `C:/Users/Casey/mesh-terrain-data/`: the public capture, the 2026-10-28 fragments, the Parquet conversion, the MeshSTL capture, a thin-mode test file, the gate reference outputs and the memory test.
+  - The other 6 were tool logs that held real values, all deleted on 2026-11-14:
+    - `public_results.md`, 6 312 bytes;
+    - `public_run.log`, 6 319 bytes;
+    - `agent-abe9c41c1b90aa021.jsonl`, 999 837 bytes;
+    - `abe9c41c1b90aa021.output`, 999 837 bytes, a second name for the same file;
+    - `a14082cb-cce2-460a-8ece-af2f3572a944.jsonl`, 11 233 999 bytes;
+    - `b65382c2-4257-4139-8e70-2f6ac1f6652a.jsonl`, 4 580 568 bytes.
+
+  No off-machine copy of the raw capture existed, so the raw capture no longer exists anywhere. The gate's raw-side figures, (b) and (c), can no longer be recomputed; the committed files under `docs/adr/0003-spike/reference/`, with `gate-2026-11-14.md`, are their record. After the deletion the snapshot passed its manifest check (0 problems, 195 data files).
 
 ## Deduplicated figures, 2026-11-14
 
