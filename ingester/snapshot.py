@@ -20,9 +20,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import pyarrow as pa  # type: ignore[import-untyped]
-import pyarrow.compute as pc  # type: ignore[import-untyped]
-import pyarrow.parquet as pq  # type: ignore[import-untyped]
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.parquet as pq
 import structlog
 
 log = structlog.get_logger(component="ingester.snapshot")
