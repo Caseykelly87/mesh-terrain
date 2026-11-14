@@ -20,7 +20,9 @@ unexport NODE_ID_HMAC_KEY
 # store is the same set of roots, so this is safe everywhere.
 export UV_SYSTEM_CERTS := true
 
-COMPOSE := docker compose
+# The CA bundle reaches the image build only as a BuildKit secret, and only
+# when .env names it (docker/compose.ca-bundle.yml says why it is a second file).
+COMPOSE := docker compose$(if $(CA_BUNDLE_PATH), -f docker-compose.yml -f docker/compose.ca-bundle.yml)
 UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt

@@ -59,10 +59,20 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /opt/mesh-terrain
 
+# Every RUN that downloads through uv mounts the optional ca_bundle secret: on
+# a host whose antivirus re-signs HTTPS it carries a CA bundle that includes
+# the antivirus root (README, "Running on Windows"). BuildKit mounts it for
+# that one RUN, so it never enters a layer, the image config or the history,
+# and SSL_CERT_FILE is exported inside the RUN for the same reason. Without
+# the secret, as in CI, the file is absent and the RUN is unchanged. Secrets
+# are not part of the cache key, so both builds produce the same layers.
+#
 # Dependencies first so a code change does not invalidate the package layer.
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    --mount=type=secret,id=ca_bundle,required=false \
+    if [ -s /run/secrets/ca_bundle ]; then export SSL_CERT_FILE=/run/secrets/ca_bundle; fi \
+    && uv sync --frozen --no-dev --no-install-project
 
 # Every package pipeline/definitions.py imports must be here: the webserver
 # stays healthy when the code location fails to import, and only make
@@ -72,12 +82,19 @@ COPY terrain/ terrain/
 COPY ingester/ ingester/
 COPY dbt/ dbt/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    --mount=type=secret,id=ca_bundle,required=false \
+    if [ -s /run/secrets/ca_bundle ]; then export SSL_CERT_FILE=/run/secrets/ca_bundle; fi \
+    && uv sync --frozen --no-dev
 
 # dbt packages are installed at build time so the code location loads without
 # network access; the manifest itself is parsed at load time (see
-# pipeline/definitions.py for why).
-RUN uv run --frozen --no-dev dbt deps --project-dir dbt --profiles-dir dbt
+# pipeline/definitions.py for why). dbt downloads through requests, which
+# reads REQUESTS_CA_BUNDLE and ignores SSL_CERT_FILE.
+RUN --mount=type=secret,id=ca_bundle,required=false \
+    if [ -s /run/secrets/ca_bundle ]; then \
+        export SSL_CERT_FILE=/run/secrets/ca_bundle REQUESTS_CA_BUNDLE=/run/secrets/ca_bundle; \
+    fi \
+    && uv run --frozen --no-dev dbt deps --project-dir dbt --profiles-dir dbt
 
 ENV PATH="/opt/mesh-terrain/.venv/bin:${PATH}"
 
