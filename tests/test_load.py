@@ -137,7 +137,7 @@ def test_a_wrong_broker_flag_is_a_reconcile_problem_for_that_broker(
 
 
 def test_no_stored_position_is_zero_zero(conn: psycopg.Connection, snapshot: Path) -> None:
-    # pos_03, not both zero (Casey, 2026-11-14): the fixtures store none.
+    # pos_03, no position at 0, 0 is used (Casey, 2026-11-14): the fixtures store none.
     load.load_snapshot(conn, snapshot)
     assert load.zero_positions(conn, SNAPSHOT_ID) == {}
 
@@ -156,7 +156,7 @@ def test_a_zero_zero_position_is_counted_per_flag_and_source(
 
 
 def test_one_coordinate_at_zero_is_not_counted(conn: psycopg.Connection, snapshot: Path) -> None:
-    # pos_03 is "not both zero": a latitude of 0 with a real longitude is a position.
+    # pos_03 concerns a position at 0, 0: a latitude of 0 with a real longitude is a position.
     load.load_snapshot(conn, snapshot)
     conn.execute(
         "update raw.mqtt_message set latitude_i = 0 "

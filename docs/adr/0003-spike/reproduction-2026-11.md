@@ -1,6 +1,6 @@
 # Reproduction of the ADR 0003 figures from the pseudonymised snapshot, November 2026
 
-The reproduction gate passed on 2026-11-14 (04:10 to 04:12 UTC): every ADR 0003 link figure, recomputed from snapshot `meshtastic-capture-2026-10-22` alone, equals the same figure computed from the real-id archive under the snapshot's design rules. This file records what was compared and what it showed. The full output is `C:/Users/Casey/mesh-terrain-data/gate-reference/gate-2026-11-14/gate.md` (on the deletion list); the aggregates behind each column are under `reference/` beside this file.
+The reproduction gate passed on 2026-11-14 (04:10 to 04:12 UTC): every ADR 0003 link figure, recomputed from snapshot `meshtastic-capture-2026-10-22` alone, equals the same figure computed from the real-id archive under the snapshot's design rules. This file records what was compared and what it showed. The full gate table is `reference/gate-2026-11-14.md` beside this file, and the aggregates behind each column are under `reference/` too.
 
 ## What the gate compares
 
@@ -15,7 +15,7 @@ Casey's rule of 2026-11-13: four figures for every run and figure.
   - unparsed: a delivery on an `e` or `map` topic whose envelope does not parse, or whose sender is 0, is counted as `unparsed` and not used.
 - (d) the snapshot: pseudonymised Parquet, read after its sha256 manifest check. Each pseudonym becomes a stand-in number that keeps the node's low byte, so `analyze.py` resolves relayers exactly as on real ids.
 
-The gate passes only when (c) equals (d) in every figure. It does: 56 link figures over seven runs, and 7 counts.
+The gate passes only when (c) equals (d) in every figure. It does: 56 figures (for each of the seven runs, the observed hours, six link-hour measures and the funnel) and 7 counts.
 
 ## Headline figures, MSA, link-hours a week
 
@@ -39,15 +39,15 @@ Weekday-weighted, with observed link-hours and distinct (relayers, gateways, pai
 | public with MeshSTL positions, keep 30 minutes, 500 m | 344 | 344 | 338 |
 | roots MO, IL and MeshSTL, keep 30 minutes, 500 m | 104 | 104 | 94 |
 
-Counts per broker, (c) = (d): public TEXT_MESSAGE_APP rows 7 923, internet copies counted 74 250 603, stored deliveries 4 486 141, repeats merged 3 595 118; MeshSTL text rows 19, stored deliveries 22 256, repeats merged 11 409.
+Counts per broker, (c) = (d): public TEXT_MESSAGE_APP rows 7 923, internet copies counted 74 250 603, deliveries before merging 4 486 141 (the gate's "stored deliveries": rows kept plus both merged counts), repeats merged 3 595 118; MeshSTL text rows 19, deliveries before merging 22 256, repeats merged 11 409.
 
 ## Why (b) and (c) differ
 
-- The fragment, (a) to (b): 0.067 observed hours fewer, which lifts four weekly rates by one. No observed count changes.
-- Repeats, nearly all of (b) to (c). 3 595 118 of the public broker's 4 486 141 stored deliveries, and 11 409 of MeshSTL's 22 256, are byte-identical repeats. Every merged group was checked byte for byte, and none differ (read R4). Later repeats of Position and MapReport packets gave `analyze.py` fresh position samples, so fewer receipts pass `lnk_02` (both ends usable within 30 minutes). Relayer resolution does not change.
+- The fragment, (a) to (b): 0.067 observed hours fewer and 5 receipts fewer. On the full public run that lifts three weekly rates by one (keep 30 minutes at 500 m 110 to 111, gateway-only 852 to 853, positions ignored 1 194 to 1 195), and the funnel's first two steps fall from 5 760 / 4 604 to 5 755 / 4 600. The link-hour counts do not change.
+- Repeats, nearly all of (b) to (c). Of the deliveries that would be stored before merging (rows kept plus both merged counts), 3 595 118 of the public broker's 4 486 141, and 11 409 of MeshSTL's 22 256, are byte-identical repeats. Every merged group was checked byte for byte, and none differ (read R4). Later repeats of Position and MapReport packets gave `analyze.py` fresh position samples, so fewer receipts pass `lnk_02` (both ends usable within 30 minutes). Relayer resolution does not change.
 - Copies: moves no figure (1 192 public copies kept a payload).
 - Shared: 78 MeshSTL deliveries, 77 of them MapReports, were sighted on the public broker a median 28 hours earlier. Timed there, two weekday MeshSTL link-hours (2026-10-23T22 and T23) lose the relayer's position, 504 to 469 a week, all of the difference (read R4).
-- Unparsed: moves only the public text count, 7 986 to 7 923. The 63 are public plaintext text packets with sender 0, which `analyze.py` counted and the decoder does not store (read R9).
+- Unparsed: moves only the public text count, 7 986 to 7 923. The 63 are public plaintext text packets with sender 0, which `analyze.py` counted and the decoder does not store. The four-rule reference file carries no tally of its own for this rule; the 63 are recorded in read R9 (`reference/r9-2026-11-14.json`).
 
 ## Also measured from the snapshot
 

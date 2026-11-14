@@ -293,7 +293,7 @@ def main() -> None:
     target = out_dir / (sys.argv[4] if len(sys.argv) > 4 else "r9-2026-11-14.json")
     if target.exists():
         raise SystemExit(f"{target} exists; a rerun writes a new file")
-    # For a smoke run on the synthetic fixtures only; the real run takes the defaults.
+    # Folders for a smoke run on the synthetic fixtures; R9 and R9b passed the archive's own.
     public_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else DATA / "spike-capture"
     meshstl_dir = Path(sys.argv[3]) if len(sys.argv) > 3 else DATA / "meshstl-capture"
     out_dir.mkdir(parents=True, exist_ok=True)
