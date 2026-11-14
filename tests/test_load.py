@@ -136,6 +136,25 @@ def test_a_wrong_broker_flag_is_a_reconcile_problem_for_that_broker(
     ]
 
 
+def test_no_stored_position_is_zero_zero(conn: psycopg.Connection, snapshot: Path) -> None:
+    # pos_03, not both zero (Casey, 2026-11-14): the fixtures store none.
+    load.load_snapshot(conn, snapshot)
+    assert load.zero_positions(conn, SNAPSHOT_ID) == {}
+
+
+def test_a_zero_zero_position_is_counted_per_flag_and_source(
+    conn: psycopg.Connection, snapshot: Path
+) -> None:
+    load.load_snapshot(conn, snapshot)
+    conn.execute(
+        "update raw.mqtt_message set latitude_i = 0, longitude_i = 0 "
+        "where snapshot_id = %s and position_source = 'position' and seen_meshstl",
+        (SNAPSHOT_ID,),
+    )
+    found = load.zero_positions(conn, SNAPSHOT_ID)
+    assert found == {"seen_meshstl, position": 2, "seen_public, position": 1}
+
+
 def test_decode_rate_per_broker_flag(conn: psycopg.Connection, snapshot: Path) -> None:
     # ing_04: ok over stored radio deliveries on e topics that carried a payload. Public:
     # 14 of 24 (the 10 others are unknown_port, decrypt_failed and malformed fixtures).
