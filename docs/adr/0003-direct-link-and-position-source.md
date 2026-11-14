@@ -21,7 +21,7 @@ Terms:
 - radio delivery: an envelope that parses, has a sender, and has via_mqtt false. The reviewer's 82 812 is the radio deliveries in the clock hour 2026-10-22T18Z, the gateway's own packets included; `analyze.py` prints it in the hourly table.
 - radio receipt: a distinct (gateway, sender, packet id) among radio deliveries, the gateway's own packets excluded. Every link figure uses the radio receipts that carry `relay_node`: 461 099 of 546 360 on the public broker.
 - default key: the publicly documented key of the default channel, which anyone can decrypt.
-- relay_node: the low byte of the id of the node that last transmitted the packet by radio. A packet heard straight from its sender carries the sender's own low byte.
+- relay_node: the low byte of the id of the node that last transmitted the packet by radio (0xFF when that byte is 0). A packet heard straight from its sender carries the sender's own low byte.
 - NeighborInfo: a packet a node broadcasts listing the nodes it hears directly, with a signal-to-noise ratio (SNR) each. The public broker never forwards it; the MeshSTL broker does (104 packets in 24 hours, 11 reporters, 28 pairs, median SNR 6.0 dB).
 - precision_bits: how many of the 32 bits of a position's integer latitude and longitude the node keeps. At St. Louis, 16 bits is a box of plus or minus 365 m north-south, 13 bits plus or minus 2.9 km. A position box is that square; two boxes overlap when they share ground, and then the distance is a range from 0 m to the larger box's diagonal.
 - stationary node: a node whose every position in the capture is the same box. The capture stands in for the trailing 7-day window the warehouse applies (with one capture, the window is the capture), but the spike also sees positions sent after a receipt, so it looks ahead; relayer candidates likewise come from the whole capture, not the trailing 24 hours.
@@ -80,3 +80,23 @@ Casey accepted all four on 2026-10-31.
 - `analyze.py` accepts a negative portnum from wrong-key noise as decoded (3 packets in 63.59 hours); the Phase 1 decoder rejects portnum 0 or below.
 - The capture containers had no built-in end time and ran under `--restart unless-stopped`. The public capture ran 15.5 hours past its window (to 2026-10-25T07:43Z) and MeshSTL 9.6 hours past its own, until Docker Desktop stopped. When Docker Desktop was started for a disk check on 2026-10-28, Docker restarted both: they wrote 4 minutes of data (the public fragment above, and 72 MeshSTL records) and the MeshSTL capture reconnected to a community broker outside the agreed window, until Casey stopped both and set their restart policy to `no`. `unless-stopped` restarts a container after any exit, a clean one included, and on every engine start unless it was stopped with `docker stop`; Docker Desktop quitting does not count. Fixed in PR #9: `capture.py` takes `END_AT` and `MAX_RAW_BYTES`, halts with a `HALTED.json` marker and exit 0, and refuses to start while the marker exists. Every Compose service runs with `restart: "no"` (PR #12). ADR 0005, as rescoped on 2026-11-08, replaces the marker and the restart policy with a capture run that always has a built-in end, writes a manifest and exits; `capture.py` is brought to that design in place and no capture is run before then.
 - The data is a single capture, snapshot `meshtastic-capture-2026-10-22` under `C:/Users/Casey/mesh-terrain-data/snapshots/`, both brokers, 2026-10-22 to 2026-10-25, pseudonymised per ADR 0005 once the reproduction gate has passed. It is not treated as irreplaceable: no backup is required, and if it is lost the figures in this ADR are reproducible only by a new capture under a new snapshot id. The real-id archive it was reduced from is deleted after the gate, under Casey's yes, and that date is recorded here when it happens.
+
+## Deduplicated figures, 2026-11-14
+
+`docs/adr/0003-spike/results.md` stays as the historical record. The figures below are the same measures on the pseudonymised snapshot, which the reproduction gate proved equal to the archive under the snapshot's four design rules (`docs/adr/0003-spike/reproduction-2026-11.md`). They differ from `results.md` for one main reason: 80 percent of the public broker's deliveries before merging, and half of MeshSTL's, are byte-identical repeats. The spike counted every repeat, and later repeats of Position and MapReport packets gave it fresh position samples. The snapshot keeps the first sighting only, and a delivery both brokers carried is timed at its first sighting on either broker. The fragment of 2026-10-28 is also left out.
+
+Position rule, link-hours a week in the MSA, combined link rule, weekday-weighted (distinct relayers, gateways, pairs), deduplicated:
+
+| Position rule | Public, 63.53 h, 500 m | Public, 63.53 h, 3 km | Public, shared 24 h, 500 m | Public, shared 24 h, 3 km | MeshSTL, 24 h, 500 m | MeshSTL, 24 h, 3 km |
+| --- | --- | --- | --- | --- | --- | --- |
+| keep 30 minutes (`lnk_02` as written) | 100 (1, 3, 3) | 100 (1, 3, 3) | 177 (1, 2, 2) | 177 (1, 2, 2) | 469 (6, 6, 7) | 281 (4, 4, 5) |
+| stationarity window | 159 (3, 5, 5) | 159 (3, 5, 5) | 228 (2, 2, 3) | 228 (2, 2, 3) | 499 (6, 6, 7) | 309 (4, 4, 5) |
+| gateway-only fallback | 744 (22, 16, 27) | n/a, no distance | 879 (16, 9, 17) | n/a, no distance | 1 465 (24, 13, 26) | n/a, no distance |
+
+No decision changes:
+
+- **Link source:** relayer resolution is unchanged. Of the radio receipts with `relay_node` at MSA gateways, the same number resolve: public 4 600 of 5 755, MeshSTL 3 184 of 3 863.
+- **Position source:** MeshSTL still gives far more link-hours than the public broker, 469 against 100 a week at 500 m and 281 against 100 at 3 km.
+- **Position rule:** the stationarity window still gives at least as many link-hours as the 30-minute rule everywhere, 159 against 100 on the public broker and 499 against 469 on MeshSTL at 500 m.
+- **Area:** the MSA stays. The 3 km figures under the stationarity rule are 159 public and 309 MeshSTL, and the widening trigger was retired on 2026-11-08 in any case.
+- **The 8 both-ends pairs:** the union of the pairs positioned at both ends under the stationarity rule at 500 m (`docs/measurements-2026-11-08.md`) is still 8: public 5 (was 6), MeshSTL 7, shared 4 (was 5). From the counts alone (shared falls by one while the union holds), the pair the public broker no longer reaches is inferred to be one MeshSTL carries. The union is computed on pseudonyms, so it is checked by count, not against the spike's real-id pair list.

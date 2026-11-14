@@ -1,0 +1,116 @@
+{
+ "counts": {
+  "meshstl": {
+   "TEXT_MESSAGE_APP envelopes": 38,
+   "decrypt_failed: pki": 192,
+   "decrypt_failed: wrong_key": 4768,
+   "decrypt_failed: zero_id_or_from": 0,
+   "internet copies": 0
+  },
+  "public": {
+   "TEXT_MESSAGE_APP envelopes": 142003,
+   "decrypt_failed: pki": 295509,
+   "decrypt_failed: wrong_key": 433079,
+   "decrypt_failed: zero_id_or_from": 0,
+   "internet copies": 74314521
+  }
+ },
+ "files_read": {
+  "meshstl": 35,
+  "public": 65
+ },
+ "runs": {
+  "meshstl_24h": {
+   "differs_from_printed_table": [],
+   "figures": {
+    "funnel": "3863 / 3184 / 919 / 719",
+    "gateway-only fallback": "1502 (200; 26, 14, 28)",
+    "keep 30 minutes, 3 km": "281 (32; 4, 4, 5)",
+    "keep 30 minutes, 500 m": "560 (74; 6, 6, 7)",
+    "observed hours": "23.998",
+    "positions ignored": "2328 (332; 39, 22, 43)",
+    "stationarity window, 3 km": "309 (42; 4, 4, 5)",
+    "stationarity window, 500 m": "617 (89; 6, 6, 7)"
+   }
+  },
+  "meshstl_with_public_positions": {
+   "differs_from_printed_table": [],
+   "figures": {
+    "funnel": "3863 / 3184 / 932 / 732",
+    "gateway-only fallback": "1505 (201; 26, 14, 28)",
+    "keep 30 minutes, 3 km": "281 (32; 4, 4, 5)",
+    "keep 30 minutes, 500 m": "560 (74; 6, 6, 7)",
+    "observed hours": "23.998",
+    "positions ignored": "2328 (332; 39, 22, 43)",
+    "stationarity window, 3 km": "309 (42; 4, 4, 5)",
+    "stationarity window, 500 m": "617 (89; 6, 6, 7)"
+   }
+  },
+  "public_full": {
+   "differs_from_printed_table": [],
+   "figures": {
+    "funnel": "5760 / 4604 / 672 / 317",
+    "gateway-only fallback": "852 (320; 23, 16, 28)",
+    "keep 30 minutes, 3 km": "107 (41; 1, 3, 3)",
+    "keep 30 minutes, 500 m": "110 (42; 2, 4, 4)",
+    "observed hours": "63.594",
+    "positions ignored": "1194 (447; 36, 25, 46)",
+    "stationarity window, 3 km": "162 (60; 3, 5, 5)",
+    "stationarity window, 500 m": "168 (62; 4, 6, 6)"
+   }
+  },
+  "public_roots_mo_il_meshstl": {
+   "differs_from_printed_table": [],
+   "figures": {
+    "funnel": "5609 / 4601 / 660 / 305",
+    "gateway-only fallback": "852 (320; 23, 16, 28)",
+    "keep 30 minutes, 3 km": "101 (39; 1, 3, 3)",
+    "keep 30 minutes, 500 m": "104 (40; 2, 4, 4)",
+    "observed hours": "63.594",
+    "positions ignored": "1194 (447; 36, 25, 46)",
+    "stationarity window, 3 km": "178 (65; 3, 5, 5)",
+    "stationarity window, 500 m": "185 (67; 4, 6, 6)"
+   }
+  },
+  "public_roots_mo_meshstl": {
+   "differs_from_printed_table": [],
+   "figures": {
+    "funnel": "5609 / 4601 / 660 / 305",
+    "gateway-only fallback": "852 (320; 23, 16, 28)",
+    "keep 30 minutes, 3 km": "101 (39; 1, 3, 3)",
+    "keep 30 minutes, 500 m": "104 (40; 2, 4, 4)",
+    "observed hours": "63.583",
+    "positions ignored": "1194 (447; 36, 25, 46)",
+    "stationarity window, 3 km": "178 (65; 3, 5, 5)",
+    "stationarity window, 500 m": "185 (67; 4, 6, 6)"
+   }
+  },
+  "public_shared_24h": {
+   "differs_from_printed_table": [],
+   "figures": {
+    "funnel": "2153 / 1745 / 318 / 177",
+    "gateway-only fallback": "962 (128; 18, 10, 19)",
+    "keep 30 minutes, 3 km": "177 (21; 1, 2, 2)",
+    "keep 30 minutes, 500 m": "177 (21; 1, 2, 2)",
+    "observed hours": "24.000",
+    "positions ignored": "1256 (170; 26, 15, 27)",
+    "stationarity window, 3 km": "228 (29; 2, 2, 3)",
+    "stationarity window, 500 m": "228 (29; 2, 2, 3)"
+   }
+  },
+  "public_with_meshstl_positions": {
+   "differs_from_printed_table": [],
+   "figures": {
+    "funnel": "2239 / 1803 / 573 / 424",
+    "gateway-only fallback": "1000 (131; 19, 11, 20)",
+    "keep 30 minutes, 3 km": "177 (21; 1, 2, 2)",
+    "keep 30 minutes, 500 m": "344 (44; 2, 3, 3)",
+    "observed hours": "24.000",
+    "positions ignored": "1299 (175; 28, 16, 29)",
+    "stationarity window, 3 km": "228 (29; 2, 2, 3)",
+    "stationarity window, 500 m": "399 (53; 3, 3, 4)"
+   }
+  }
+ },
+ "variant": "with-fragment"
+}
