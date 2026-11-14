@@ -112,7 +112,9 @@ def parsed_of(row: dict[str, Any], ids: StandIns) -> Any:
     )  # fmt: skip
     parsed.root = topic_root(topic)
     # A Position field the sender left unset lands as null; analyze.py read the protobuf
-    # default, 0, so the same 0 goes back in.
+    # default, 0, so the same 0 goes back in. That applies inside this gate only, to match
+    # the spike (Casey, 2026-11-14): nothing downstream reads a missing coordinate as 0,
+    # and staging keeps it null.
     has_place = row["latitude_i"] or row["longitude_i"]
     place = (row["latitude_i"] or 0, row["longitude_i"] or 0, row["precision_bits"] or 0)
     if has_place and row["position_source"] == "position":
