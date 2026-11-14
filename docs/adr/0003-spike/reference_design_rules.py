@@ -36,7 +36,8 @@ printed. Output, under OUT_DIR/design-rules-<rules>/, is aggregates only.
 Usage, from the repository root, Git Bash:
 
     uv run --frozen --with shapely==2.2.0 --with pyproj==3.8.0 python -I \
-        docs/adr/0003-spike/reference_design_rules.py OUT_DIR \n        [--rules copies,repeats,shared,unparsed]
+        docs/adr/0003-spike/reference_design_rules.py OUT_DIR \
+        [--rules copies,repeats,shared,unparsed]
 """
 
 from __future__ import annotations
