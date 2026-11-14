@@ -19,6 +19,12 @@ x-dagster-environment: &dagster-environment
   RAW_BUCKET: ${RAW_BUCKET}
   LOG_FORMAT: json
 
+# Snapshots live on the host, outside every Docker volume, so make nuke cannot
+# reach them (docs/PLAN.md, "Operating model"). Read-only because nothing
+# overwrites a snapshot (snp_01); only the capture and reduction commands on the
+# host write one. The migrate service reads no snapshot and does not mount it.
+x-snapshots-volume: &snapshots-volume ${SNAPSHOTS_HOST_DIR:?set SNAPSHOTS_HOST_DIR in .env (see .env.example)}:/snapshots:ro
+
 # Every service sets restart: "no", so nothing in this project starts unless
 # `make up` starts it. The Docker engine restarts always containers, and
 # unless-stopped containers not stopped by hand, whenever it starts;
@@ -112,7 +118,11 @@ services:
       context: .
       dockerfile: docker/dagster/Dockerfile
     command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/opt/dagster/home/workspace.yaml"]
-    environment: *dagster-environment
+    environment:
+      <<: *dagster-environment
+      SNAPSHOTS_DIR: /snapshots
+    volumes:
+      - *snapshots-volume
     ports:
       - "${DAGSTER_PORT}:3000"
     restart: "no"
@@ -142,7 +152,11 @@ services:
       context: .
       dockerfile: docker/dagster/Dockerfile
     command: ["dagster-daemon", "run", "-w", "/opt/dagster/home/workspace.yaml"]
-    environment: *dagster-environment
+    environment:
+      <<: *dagster-environment
+      SNAPSHOTS_DIR: /snapshots
+    volumes:
+      - *snapshots-volume
     restart: "no"
     depends_on:
       dagster-migrate:

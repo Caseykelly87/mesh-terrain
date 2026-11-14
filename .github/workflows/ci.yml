@@ -75,6 +75,13 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --frozen
+      # .env.example names Casey's snapshots folder. The runner mounts an empty
+      # folder instead, which is enough to check that the mount is read-only.
+      - name: point the snapshot mount at an empty folder
+        run: |
+          make env
+          mkdir -p "$RUNNER_TEMP/snapshots"
+          sed -i "s|^SNAPSHOTS_HOST_DIR=.*|SNAPSHOTS_HOST_DIR=$RUNNER_TEMP/snapshots|" .env
       # Casey decided that nothing in this project starts on its own (PR #12),
       # so a restart policy other than "no" fails here. Capture runs are started
       # by hand and are not Compose services (ADR 0005 item 1), so nothing is
@@ -89,6 +96,14 @@ jobs:
       # ingester import failed that way in the image while every job was green.
       - name: check that the Dagster code location loads in the image
         run: make check-definitions
+      # Nothing overwrites a snapshot (snp_01); the read-only mount is what
+      # stops an asset from doing it, so this fails if the :ro goes.
+      - name: check that the snapshots folder is mounted read-only
+        run: |
+          for service in dagster-webserver dagster-daemon; do
+            docker compose exec -T "$service" sh -c \
+              'test "$SNAPSHOTS_DIR" = /snapshots && test -d /snapshots && ! touch /snapshots/probe 2> /dev/null'
+          done
       # The ITM library is compiled in a build stage of the Dagster image
       # (ADR 0002); loading it and reproducing the spike's flat-path figure
       # here fails CI when that stage breaks, before terrain/itm.py exists.
