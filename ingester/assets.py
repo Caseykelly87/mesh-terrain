@@ -5,9 +5,11 @@ no sensor. The asset loads in one transaction, then reports five checks:
 `ing_07_second_load` (a second load inserts nothing), `ing_03_reconcile` (raw
 rows and counts against the manifest per hour and broker, ingester.load.reconcile),
 `snp_01_content_hash` (each raw table's data content hash against the manifest),
-`pos_03_not_both_zero` (no stored position at exactly 0, 0; Casey, 2026-11-14)
-and `ing_04_decode_rate` (warn below 90 percent, never blocking, since the
-MeshSTL broker's own channel is decrypt_failed by design).
+`pos_03_not_both_zero` (warning severity: how many rows sit at 0, 0, which raw
+keeps as the source sent them; Casey, 2026-11-14) and `ing_04_decode_rate`
+(warning severity below 90 percent, since the MeshSTL broker's own channel is
+decrypt_failed by design). A failed warning-severity check is reported and does
+not fail the run.
 """
 
 from typing import Any
@@ -101,6 +103,8 @@ def check_results(found: dict[str, Any]) -> list[AssetCheckResult]:
         AssetCheckResult(
             check_name="pos_03_not_both_zero",
             passed=not found["zero_positions"],
+            severity=AssetCheckSeverity.WARN,
+            description=f"{sum(found['zero_positions'].values())} rows at 0, 0 (raw keeps them)",
             metadata={"rows_at_zero_zero": found["zero_positions"]},
         ),
         AssetCheckResult(
