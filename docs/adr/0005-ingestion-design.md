@@ -207,9 +207,9 @@ Amended 2026-11-13, approved by Casey; the reviewer agreed with the portnum rule
 
 ## Consequences
 
-Contract rows, approved by Casey on 2026-11-08 and carried by `docs/data-quality-contract.md` since 40be918, copied here as the record of what this ADR decided:
+`prv_01` amended 2026-11-14 in PR #19, which merged only with Casey's approval on that PR. The exception for the 2026-10-22 archive is removed because the archive was deleted that day (ADR 0003, Consequences). The table carries the amended text; the 2026-11-08 text named the archive as the one exception until the reproduction gate passed and Casey approved its deletion.
 
-`prv_01` amended 2026-11-14 in PR #19, with Casey's approval recorded on that PR. The exception for the 2026-10-22 archive is removed because the archive was deleted that day (ADR 0003, Consequences). The row below carries the amended text; the 2026-11-08 text named the archive as the one exception until the reproduction gate passed and Casey approved its deletion.
+Contract rows, approved by Casey on 2026-11-08 and carried by `docs/data-quality-contract.md` since 40be918, copied here as the record of what this ADR decided:
 
 | Id | Rule | Enforced by |
 | --- | --- | --- |
