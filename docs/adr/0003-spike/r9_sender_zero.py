@@ -20,7 +20,7 @@ delivery_key does.
 Usage, from the repository root, Git Bash:
 
     uv run --frozen --with shapely==2.2.0 --with pyproj==3.8.0 python -I \
-        docs/adr/0003-spike/r9_sender_zero.py OUT_DIR
+        docs/adr/0003-spike/r9_sender_zero.py OUT_DIR [PUBLIC_DIR MESHSTL_DIR NAME]
 """
 
 from __future__ import annotations
@@ -56,6 +56,8 @@ AFTER_S = 600.0
 # connection, not a quiet spell. MeshSTL runs at about one record every 3.6 s,
 # so its gaps are tried at several lengths and none is certain.
 GAP_S = {"public": (10.0,), "meshstl": (120.0, 300.0, 600.0)}
+# Gaps kept from each file for the profile; the thresholds above select among them.
+SMALLEST_GAP_S = 10.0
 TEXT = portnums_pb2.TEXT_MESSAGE_APP
 
 
@@ -159,8 +161,9 @@ def scan_file(task: tuple[str, str, float, float, bool]) -> Scan:
     stream.sort()
     if stream:
         scan.first_last = (stream[0], stream[-1])
-        low = min(GAP_S[broker])
-        scan.gaps = [(a, b) for a, b in zip(stream, stream[1:], strict=False) if b - a >= low]
+        scan.gaps = [
+            (a, b) for a, b in zip(stream, stream[1:], strict=False) if b - a >= SMALLEST_GAP_S
+        ]
     return scan
 
 
@@ -286,6 +289,10 @@ def gap_profile(data: Broker) -> dict[str, int]:
 
 def main() -> None:
     out_dir = Path(sys.argv[1])
+    # The output file name; a rerun takes a new name so no earlier output is overwritten.
+    target = out_dir / (sys.argv[4] if len(sys.argv) > 4 else "r9-2026-11-14.json")
+    if target.exists():
+        raise SystemExit(f"{target} exists; a rerun writes a new file")
     # For a smoke run on the synthetic fixtures only; the real run takes the defaults.
     public_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else DATA / "spike-capture"
     meshstl_dir = Path(sys.argv[3]) if len(sys.argv) > 3 else DATA / "meshstl-capture"
@@ -321,7 +328,7 @@ def main() -> None:
         "ended (UTC)": f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ}",
     }
     text_out = json.dumps(result, indent=1, sort_keys=True)
-    (out_dir / "r9-2026-11-14.json").write_text(text_out + "\n", encoding="utf-8")
+    target.write_text(text_out + "\n", encoding="utf-8")
     print(text_out)
 
 
