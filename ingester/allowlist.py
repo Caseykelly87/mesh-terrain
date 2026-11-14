@@ -38,7 +38,7 @@ wire format allows can fail the Parquet write.
 
 from dataclasses import dataclass
 
-import pyarrow as pa  # type: ignore[import-untyped]
+import pyarrow as pa
 
 SCHEMA_VERSION = 1
 DECODER_VERSION = "1"

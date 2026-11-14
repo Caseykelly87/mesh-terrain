@@ -58,6 +58,21 @@ strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
+# pyarrow, protobuf and meshtastic carry no py.typed marker. Each imported
+# module is listed by name, so a new untyped import still fails until someone
+# decides how to type it. follow_untyped_imports fails here: mypy cannot see
+# pyarrow's public names, which come from compiled modules, and protobuf's
+# runtime is unannotated, which strict mode rejects at every call.
+[[tool.mypy.overrides]]
+module = [
+    "google.protobuf.message",
+    "meshtastic.protobuf",
+    "pyarrow",
+    "pyarrow.compute",
+    "pyarrow.parquet",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

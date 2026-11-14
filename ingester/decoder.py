@@ -33,8 +33,8 @@ from functools import lru_cache
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from google.protobuf.message import DecodeError, Message  # type: ignore[import-untyped]
-from meshtastic.protobuf import (  # type: ignore[import-untyped]
+from google.protobuf.message import DecodeError, Message
+from meshtastic.protobuf import (
     config_pb2,
     mesh_pb2,
     mqtt_pb2,
