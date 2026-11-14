@@ -129,6 +129,7 @@ When a deviation is resolved or a known issue closed, its line is removed, not s
 6. In the same summary message, not in the repo, write a plain-language note of at most two paragraphs on what the unit built and why it is shaped that way, defining any term on first use, and give Casey one hands-on exercise he can do against the running stack in under 15 minutes to see it work.
 7. When a brief or message to an agent carries Casey's decisions, paste them verbatim with his numbers, keep the lead's own instructions separate below them, and list which numbers were passed to which agent on one line after the five-line summary.
 8. Before asking Casey to approve wording that describes code behaviour, have the reviewer check it against the code and tests. Casey sees only wording that has passed that check.
+9. Every brief that ends in an irreversible step (a snapshot write, a deletion, a merge) lists its preconditions as a checklist, and the agent posts each one as met on the PR before it runs that step.
 
 ## Commits, pull requests and merging
 
