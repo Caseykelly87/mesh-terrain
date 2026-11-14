@@ -1,10 +1,13 @@
 """The decoder on the synthetic fixtures (ADR 0005 items 2 to 5, ing_01, ing_03, prv_01)."""
 
 import base64
+import importlib.util
 import json
 import re
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -287,6 +290,83 @@ def test_an_internet_copy_is_counted_with_its_gateway() -> None:
 )
 def test_dropped_deliveries(name: str, topic_class: str, reason: str) -> None:
     assert outcome(name) == DroppedDelivery(topic_class, reason)
+
+
+def load_builder() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("fixture_build", FIXTURES.with_name("build.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+BUILD = load_builder()
+# Each case: (topic, payload for a given sender). Built in the test from the
+# fixture helpers, so deliveries.jsonl keeps one sender-0 record.
+SENDER_ZERO_CASES: dict[str, tuple[str, Callable[[int], bytes]]] = {
+    "plaintext": (
+        BUILD.e_topic(),
+        lambda sender: BUILD.plaintext(
+            BUILD.TEXT, BUILD.INVENTED_TEXT.encode(), 0x1020, sender=sender
+        ),
+    ),
+    "map_topic": (
+        f"{BUILD.ROOT}/2/map/",
+        lambda sender: BUILD.plaintext(
+            portnums_pb2.MAP_REPORT_APP, BUILD.map_report(), 0x1021, sender=sender
+        ),
+    ),
+    "packet_id_zero": (
+        BUILD.e_topic(),
+        lambda sender: BUILD.encrypted(BUILD.TEXT, BUILD.INVENTED_TEXT.encode(), 0, sender=sender),
+    ),
+    "internet_copy": (
+        BUILD.e_topic(gateway=GATEWAY_TWO),
+        lambda sender: BUILD.envelope(
+            BUILD.packet(0x1022, sender=sender, via_mqtt=True), gateway=GATEWAY_TWO
+        ),
+    ),
+}
+
+
+def sender_zero_case(name: str, sender: int) -> StoredDelivery | CopyDelivery | DroppedDelivery:
+    topic, build = SENDER_ZERO_CASES[name]
+    return decode_delivery(
+        topic, build(sender), datetime.fromisoformat(f"{BUILD.HOUR}:01:00+00:00"), KEY
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "topic_class"),
+    [
+        ("plaintext", "e"),
+        ("map_topic", "map"),
+        ("packet_id_zero", "e"),
+        ("internet_copy", "e"),
+    ],
+)
+def test_a_zero_sender_is_unparsed_before_any_other_rule(name: str, topic_class: str) -> None:
+    # The sender check comes before the copy rule and every decrypt rule.
+    assert sender_zero_case(name, 0) == DroppedDelivery(topic_class, "unparsed")
+
+
+@pytest.mark.parametrize(
+    ("name", "kind", "status"),
+    [
+        ("plaintext", StoredDelivery, "ok"),
+        ("map_topic", StoredDelivery, "ok"),
+        ("packet_id_zero", StoredDelivery, "decrypt_failed"),
+        ("internet_copy", CopyDelivery, None),
+    ],
+)
+def test_the_sender_zero_cases_reach_their_rule_with_a_sender(
+    name: str, kind: type, status: str | None
+) -> None:
+    # The same delivery from a real sender, so each case above is dropped by its sender alone.
+    result = sender_zero_case(name, SENDER)
+    assert isinstance(result, kind)
+    if isinstance(result, StoredDelivery):
+        assert result.row["decode_status"] == status
 
 
 def test_both_broker_fixtures_decode_to_one_key() -> None:
