@@ -29,7 +29,7 @@ Identifiers are stable. Tests are named `assert_<identifier>` (dbt singular) or 
 | `pos_01` | `position_quality` is `usable` when `precision_bits >= 15`, `coarse` for 12 to 14, else `unusable`; `box_half_width_m` is derived from `precision_bits` and latitude and stored on the row. | accepted_values + singular test on the mapping and the derivation |
 | `pos_04` | A position with `precision_bits >= 20` is flagged `precise_source = true` only when `seen_meshstl` is true on its delivery; its `position_source` (`position` or `mapreport`) is on the row. Public-broker default-key positions never carry the flag. Precise positions never leave `core` at their own precision: every export and map coarsens them to 16 bits or aggregates them (`prv_02`). | singular test on the flag against `seen_meshstl`; export asset test on precision |
 | `pos_02` | Only positions inside the MSA polygon enter `core`. | singular test `ST_Within` against the seeded boundary |
-| `pos_03` | Latitude in [-90, 90], longitude in [-180, 180], not both zero. | range tests + singular test; Dagster asset check on `raw.mqtt_message` that no row has both `latitude_i` and `longitude_i` equal to 0 (Casey, 2026-11-14) |
+| `pos_03` | Latitude in [-90, 90], longitude in [-180, 180]. No position at 0, 0 is used: raw keeps what the source sent, and staging maps a Position at 0, 0 to no position and counts it. | range tests + singular test; staging test that no position at 0, 0 leaves staging and the mapped rows are counted (warehouse-eng); Dagster asset check on `raw.mqtt_message` at warning severity reporting how many rows have both `latitude_i` and `longitude_i` equal to 0 (Casey, 2026-11-14) |
 
 ## Direct links
 

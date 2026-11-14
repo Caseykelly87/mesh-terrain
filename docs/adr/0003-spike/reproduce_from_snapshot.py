@@ -11,10 +11,12 @@ runs. The real-id archive is never opened.
 
 Casey's gate rule of 2026-11-13: four figures per broker and run, (a)
 results.md, (b) analyze.py on the archive without the 2026-10-28T20 fragment,
-(c) the same with the three design rules (internet copies that kept a payload
+(c) the same with the four design rules (internet copies that kept a payload
 counted, not used; identical repeats merged; a delivery both brokers carried
-timed at its first sighting on either broker, the third added by Casey on
-2026-11-13), from reference_design_rules.py, and (d) this snapshot. (b) and (c)
+timed at its first sighting on either broker, added by Casey on 2026-11-13; a
+delivery on an `e` or `map` topic whose envelope does not parse or whose sender
+is 0 counted as `unparsed`, not used, added on 2026-11-14), from
+reference_design_rules.py, and (d) this snapshot. (b) and (c)
 are aggregates committed under `reference/`. The gate passes when (c) equals
 (d) in every figure, and the exit code says so: 0 for a pass, 1 for any
 difference. It also reports, from
@@ -307,7 +309,7 @@ RESULTS_MD_COUNTS = {
 }
 REFERENCES = {
     "b": "reference-without-fragment.json",
-    "c": "reference-design-rules-copies-repeats-shared.json",
+    "c": "reference-design-rules-copies-repeats-shared-unparsed.json",
 }
 
 
@@ -416,14 +418,14 @@ def snr_rows(snapshot: Snapshot, broker: str) -> list[str]:
 
 def gate_report(snapshot: Snapshot, references: dict[str, Any]) -> tuple[str, int]:
     header = (
-        "| run | figure | (a) results.md | (b) raw | (c) raw, three design rules | (d) snapshot "
+        "| run | figure | (a) results.md | (b) raw | (c) raw, four design rules | (d) snapshot "
     )
     header += "| (c) and (d) |"
     figure_lines, figure_differs = figure_rows(snapshot, references)
     count_lines, count_differs = count_rows(snapshot, references)
     lines = [header, "| --- " * 7 + "|", *figure_lines, ""]
     lines += [
-        "| broker | count | (a) results.md | (b) raw | (c) raw, three design rules | (d) snapshot "
+        "| broker | count | (a) results.md | (b) raw | (c) raw, four design rules | (d) snapshot "
     ]
     lines[-1] += "| (c) and (d) |"
     lines += ["| --- " * 7 + "|", *count_lines, "", "| broker | reported | snapshot |"]
