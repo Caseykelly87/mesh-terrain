@@ -324,6 +324,12 @@ def zero_positions(conn: psycopg.Connection, snapshot_id: str) -> dict[str, int]
     return dict(found)
 
 
+def warn_zero_positions(snapshot_id: str, counts: dict[str, int]) -> None:
+    """Log rows at 0, 0 (pos_03) at warning; they do not fail a load of a finished snapshot."""
+    if counts:
+        log.warning("pos_03_positions_at_zero", snapshot_id=snapshot_id, rows=counts)
+
+
 def _float32(value: Any) -> Any:
     """A float4 as the float32 the Parquet file held; PostgreSQL sends the shortest text."""
     if isinstance(value, list):
@@ -396,6 +402,7 @@ def main() -> None:
             inserted = load_snapshot(conn, folder)
         problems = reconcile(conn, folder) + hash_problems(conn, folder)
         rates = decode_rates(conn, args.snapshot_id)
+        warn_zero_positions(args.snapshot_id, zero_positions(conn, args.snapshot_id))
     raise SystemExit(report(args.snapshot_id, inserted, problems, rates))
 
 
