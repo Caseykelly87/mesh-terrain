@@ -370,7 +370,30 @@ def report_rows(snapshot: Snapshot, references: dict[str, Any]) -> list[str]:
         lines += snr_rows(snapshot, broker)
     shared = references["c"].get("shared_rows", {})
     lines += [f"| both | rows both brokers carried, {k} | {v} |" for k, v in shared.items()]
+    lines += both_ends_pairs(snapshot)
     return lines
+
+
+def stationary_pairs(snapshot: Snapshot, name: str) -> set[tuple[int, int]]:
+    """(relayer, gateway) pairs of a run's stationarity-window link-hours at 500 m, MSA."""
+    tally = figures.run_tallies(snapshot.tally, name)
+    msa = az.Area("the MSA (CBSA 41180)", az.load_area(figures.MSA_CSV, {"41180"}))
+    positions = az.area_positions(tally, msa)
+    result = az.apply_rules(tally, positions, stationary=True)["combined"]
+    return {(key[0], key[1]) for key in result.link_hours(az.MIN_DISTANCE_M)}
+
+
+def both_ends_pairs(snapshot: Snapshot) -> list[str]:
+    """The union of both-ends-positioned pairs (docs/measurements-2026-11-08.md: 8 in the spike).
+
+    Stand-ins are shared by both brokers' tallies, so a pair both carried counts once.
+    """
+    public = stationary_pairs(snapshot, "public_full")
+    meshstl = stationary_pairs(snapshot, "meshstl_24h")
+    return [
+        f"| both | both-ends pairs, stationarity at 500 m: public / MeshSTL / shared / union "
+        f"| {len(public)} / {len(meshstl)} / {len(public & meshstl)} / {len(public | meshstl)} |"
+    ]
 
 
 def snr_rows(snapshot: Snapshot, broker: str) -> list[str]:
