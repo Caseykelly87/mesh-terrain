@@ -13,12 +13,22 @@ ARG H3_PG_COMMIT=a26630b8353d441e6bc8065c0a8dcaa3d89ef87b
 # the PostgreSQL apt project have moved to their archive hosts; the live
 # mirrors return 404 for its packages. Only the builder stage installs
 # packages, so the final image is untouched.
-RUN sed -i 's|http://apt.postgresql.org/pub/repos/apt/|http://apt-archive.postgresql.org/pub/repos/apt/|' \
+#
+# The PostgreSQL archive redirects http to https, so on a host whose
+# antivirus re-signs HTTPS apt needs a CA bundle that includes the antivirus
+# root. It comes only from the optional ca_bundle secret, named through apt's
+# own Acquire::https::CAInfo option inside this RUN, so it never enters a
+# layer or the image config; without the secret, as in CI, the RUN is
+# unchanged. Mode 0444 because apt downloads as the unprivileged _apt user,
+# which cannot read the default root-only 0400 mount.
+RUN --mount=type=secret,id=ca_bundle,required=false,mode=0444 \
+    if [ -s /run/secrets/ca_bundle ]; then set -- -o Acquire::https::CAInfo=/run/secrets/ca_bundle; fi \
+    && sed -i 's|http://apt.postgresql.org/pub/repos/apt/|http://apt-archive.postgresql.org/pub/repos/apt/|' \
         /etc/apt/sources.list.d/*.list \
     && sed -i 's|http://deb.debian.org/debian-security|http://archive.debian.org/debian-security|; s|http://deb.debian.org/debian |http://archive.debian.org/debian |' \
         /etc/apt/sources.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && apt-get "$@" update \
+    && apt-get "$@" install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         cmake \
@@ -31,7 +41,13 @@ RUN sed -i 's|http://apt.postgresql.org/pub/repos/apt/|http://apt-archive.postgr
 # postgresql-server-dev-17 ships pgindent, and h3-pg runs it over its sources
 # before every build when it finds one; pgindent fails without a typedefs
 # file, so the lookup is pre-empted with a not-found value.
-RUN git clone --depth 1 --branch "${H3_PG_TAG}" https://github.com/postgis/h3-pg.git /tmp/h3-pg \
+# git gets the optional ca_bundle secret through GIT_SSL_CAINFO, set inside
+# this RUN only. cmake's H3 download does not: CMake 3.25 does not verify TLS
+# there, so it passes behind an HTTPS-scanning antivirus, and the sha256 pin
+# is what checks the tarball.
+RUN --mount=type=secret,id=ca_bundle,required=false \
+    if [ -s /run/secrets/ca_bundle ]; then export GIT_SSL_CAINFO=/run/secrets/ca_bundle; fi \
+    && git clone --depth 1 --branch "${H3_PG_TAG}" https://github.com/postgis/h3-pg.git /tmp/h3-pg \
     && test "$(git -C /tmp/h3-pg rev-parse HEAD)" = "${H3_PG_COMMIT}" \
     && cmake -S /tmp/h3-pg -B /tmp/h3-pg/build -DCMAKE_BUILD_TYPE=Release \
         -DPostgreSQL_INDENT=PostgreSQL_INDENT-NOTFOUND \
