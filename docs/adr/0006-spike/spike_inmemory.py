@@ -96,6 +96,11 @@ def main() -> None:
     cases.append(("flat, one 30 m clutter point at 500", flat, one_building, 500))
     hills = 150.0 + 40.0 * np.sin(np.linspace(0.0, 3.0 * np.pi, n)) ** 2
     cases.append(("hilly, R 10", hills, r10, 400))
+    cases.append(("flat, R 10", flat, r10, 1))
+    cases.append(("flat, R 10", flat, r10, 999))
+    cases.append(("hilly, R 10", hills, r10, 1))
+    cases.append(("hilly, R 0", hills, np.zeros(n), 1))
+    cases.append(("hilly, R 10", hills, r10, 999))
     for label, h, r, i in cases:
         base = lb(h, r, DN=dn, N0=n0)
         r_zero = r.copy()
