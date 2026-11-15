@@ -45,7 +45,8 @@ build-constraint-dependencies = ["flit-core==3.12.0"]
 
 # Keeps py1812's archive URL in the project metadata. A [tool.uv.sources]
 # entry would leave a bare "py1812" there, which any installer other than uv
-# would look up on PyPI, where the name is unclaimed.
+# would look up on PyPI, where the name is unclaimed. The setting allows a
+# direct reference for every dependency; py1812 is the only one.
 [tool.hatch.metadata]
 allow-direct-references = true
 
