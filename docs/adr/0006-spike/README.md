@@ -177,53 +177,68 @@ What it shows:
 
 ## Run 5: where clutter has to stand to reach the cap (`spike_cap_position.py`)
 
-Added after the review of df1038b. Flat 10 km path at 150 m, 2 m antennas, 10 m step, the same import and constants as run 4; Lbs on this path is 160.17 dB.
+Added after the review of df1038b and extended after the review of 4be3552. Flat paths at 150 m, 2 m antennas, 10 m step, the same import and constants as run 4. Each line prints Lb, Lbs from the debug log and Lbs minus Lb; 0.1 dB or less counts as at the cap.
 
 ```
 $S/p1812-env/.venv/Scripts/python.exe -I -W error::RuntimeWarning spike_cap_position.py
 ```
 
 ```
-Bands of clutter, start and end in metres from the transmitter:
-  3 m over 1000 to 9000 m: Lb 154.51 dB
-  3 m over 2500 to 7500 m: Lb 152.57 dB
-  3 m over 100 to 9900 m: Lb 160.12 dB
-  3 m over 0 to 200 m: Lb 158.11 dB
-  3 m over 0 to 10000 m: Lb 160.17 dB
-Clutter everywhere except the first and last gap_m metres:
-  3 m, gap 0 m: Lb 160.17 dB
-  3 m, gap 50 m: Lb 160.17 dB
-  3 m, gap 100 m: Lb 160.12 dB
-  3 m, gap 200 m: Lb 159.65 dB
-  3 m, gap 300 m: Lb 158.64 dB
-  3 m, gap 500 m: Lb 156.82 dB
-  3 m, gap 1000 m: Lb 154.51 dB
-  10 m, gap 0 m: Lb 160.17 dB
-  10 m, gap 50 m: Lb 160.17 dB
-  10 m, gap 100 m: Lb 160.17 dB
-  10 m, gap 200 m: Lb 160.17 dB
-  10 m, gap 300 m: Lb 160.17 dB
-  10 m, gap 500 m: Lb 160.16 dB
-  10 m, gap 1000 m: Lb 160.06 dB
-Clutter only within reach_m metres of the transmitter:
-  3 m, first 20 m: Lb 157.86 dB
-  3 m, first 50 m: Lb 157.91 dB
-  3 m, first 100 m: Lb 157.98 dB
-  3 m, first 200 m: Lb 158.11 dB
-  3 m, first 500 m: Lb 158.46 dB
-  10 m, first 20 m: Lb 160.17 dB
-  10 m, first 50 m: Lb 160.17 dB
-  10 m, first 100 m: Lb 160.17 dB
-  10 m, first 200 m: Lb 160.17 dB
-  10 m, first 500 m: Lb 160.17 dB
+10 km path, 3 m clutter in bands (start to end, metres from the transmitter):
+  1000 to 9000 m: Lb 154.51 dB, Lbs 160.17 dB, Lbs - Lb 5.66 dB
+  2500 to 7500 m: Lb 152.57 dB, Lbs 160.17 dB, Lbs - Lb 7.60 dB
+  100 to 9900 m: Lb 160.12 dB, Lbs 160.17 dB, Lbs - Lb 0.05 dB
+  0 to 200 m: Lb 158.11 dB, Lbs 160.17 dB, Lbs - Lb 2.06 dB
+  0 to 10000 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+10 km path, clutter everywhere except gap_m at each end:
+  3 m, gap 0 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  3 m, gap 50 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  3 m, gap 100 m: Lb 160.12 dB, Lbs 160.17 dB, Lbs - Lb 0.05 dB
+  3 m, gap 200 m: Lb 159.65 dB, Lbs 160.17 dB, Lbs - Lb 0.52 dB
+  3 m, gap 300 m: Lb 158.64 dB, Lbs 160.17 dB, Lbs - Lb 1.53 dB
+  3 m, gap 500 m: Lb 156.82 dB, Lbs 160.17 dB, Lbs - Lb 3.35 dB
+  3 m, gap 1000 m: Lb 154.51 dB, Lbs 160.17 dB, Lbs - Lb 5.66 dB
+  3 m, gap 2000 m: Lb 152.95 dB, Lbs 160.17 dB, Lbs - Lb 7.22 dB
+  3 m, gap 4000 m: Lb 151.83 dB, Lbs 160.17 dB, Lbs - Lb 8.34 dB
+  10 m, gap 0 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb -0.00 dB
+  10 m, gap 50 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  10 m, gap 100 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  10 m, gap 200 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  10 m, gap 300 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  10 m, gap 500 m: Lb 160.16 dB, Lbs 160.17 dB, Lbs - Lb 0.01 dB
+  10 m, gap 1000 m: Lb 160.06 dB, Lbs 160.17 dB, Lbs - Lb 0.11 dB
+  10 m, gap 2000 m: Lb 159.14 dB, Lbs 160.17 dB, Lbs - Lb 1.03 dB
+  10 m, gap 4000 m: Lb 156.42 dB, Lbs 160.17 dB, Lbs - Lb 3.75 dB
+10 km path, clutter only within reach_m of the transmitter:
+  3 m, first 20 m: Lb 157.86 dB, Lbs 160.17 dB, Lbs - Lb 2.31 dB
+  3 m, first 50 m: Lb 157.91 dB, Lbs 160.17 dB, Lbs - Lb 2.27 dB
+  3 m, first 100 m: Lb 157.98 dB, Lbs 160.17 dB, Lbs - Lb 2.19 dB
+  3 m, first 200 m: Lb 158.11 dB, Lbs 160.17 dB, Lbs - Lb 2.06 dB
+  3 m, first 500 m: Lb 158.46 dB, Lbs 160.17 dB, Lbs - Lb 1.71 dB
+  10 m, first 20 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  10 m, first 50 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  10 m, first 100 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  10 m, first 200 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+  10 m, first 500 m: Lb 160.17 dB, Lbs 160.17 dB, Lbs - Lb 0.00 dB
+10 km path, 10 m clutter away from the ends:
+  10 m over 2.5 to 7.5 km: Lb 158.42 dB, Lbs 160.17 dB, Lbs - Lb 1.75 dB
+  10 m, 15 m band at mid-path: Lb 155.42 dB, Lbs 160.17 dB, Lbs - Lb 4.75 dB
+  10 m, 15 m band 1 km from the transmitter: Lb 157.33 dB, Lbs 160.17 dB, Lbs - Lb 2.84 dB
+3 km and 5 km paths, 10 m clutter except gap_m at each end:
+  3 km, gap 0 m: Lb 149.71 dB, Lbs 149.71 dB, Lbs - Lb 0.00 dB
+  3 km, gap 300 m: Lb 148.02 dB, Lbs 149.71 dB, Lbs - Lb 1.69 dB
+  3 km, gap 500 m: Lb 144.66 dB, Lbs 149.71 dB, Lbs - Lb 5.06 dB
+  3 km, gap 1000 m: Lb 139.13 dB, Lbs 149.71 dB, Lbs - Lb 10.59 dB
+  5 km, gap 0 m: Lb 154.15 dB, Lbs 154.15 dB, Lbs - Lb 0.00 dB
+  5 km, gap 1000 m: Lb 149.69 dB, Lbs 154.15 dB, Lbs - Lb 4.46 dB
 ```
 
-What it shows:
+What it shows, for these synthetic flat paths only:
 
-- How close Lb comes to the cap depends on how far the clutter rises above the antennas and where it stands.
-- Clutter 1 m above the antennas (3 m) reaches the cap only when it runs to within about 100 m of both ends: 160.12 dB with 100 m clear at each end, 159.65 dB with 200 m, 156.82 dB with 500 m and 154.51 dB with 1 km. Over 2.5 to 7.5 km it gives 152.57 dB; confined to the first 200 m it gives 158.11 dB.
-- Clutter 8 m above the antennas (10 m) reaches the cap from anywhere tested: 160.06 dB with 1 km clear at both ends, and 160.17 dB with only the first 20 m cluttered.
-- So removing clutter within some distance of each end does not avoid the cap for tall clutter.
+- On the 10 km path, 10 m of clutter is at the cap over the first 20 m to 500 m alone, and along the whole path with up to 500 m clear at each end. With 1 km clear it is 0.11 dB below (160.06 dB), with 2 km and 4 km 159.14 and 156.42 dB; over 2.5 to 7.5 km 158.42 dB; a 15 m band of it gives 155.42 dB at mid-path and 157.33 dB 1 km from an end.
+- 3 m of clutter is at the cap only along the whole path with 100 m or less clear at each end; over the first 20 m to 500 m alone it stays 1.7 to 2.3 dB below.
+- Shorter paths come off the cap sooner: on the 3 km path 10 m of clutter with 300 m, 500 m and 1 km clear gives 148.02, 144.66 and 139.13 dB against Lbs 149.71 dB, and on the 5 km path 1 km clear gives 149.69 dB against 154.15 dB.
+- So any distance from the ends that keeps clutter off the cap grows with path length. How often real links reach the cap is for the x72y429 run.
 
 ## Install form checks
 
