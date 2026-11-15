@@ -56,12 +56,12 @@ Identifiers are stable. Tests are named `assert_<identifier>` (dbt singular) or 
 
 | Id | Rule | Enforced by |
 | --- | --- | --- |
-| `ter_01` | Every link-hour in `core.int_link_window` has a `features.link_terrain` row with `terrain_status` in {`ok`, `out_of_extent`}. | relationship + accepted_values |
-| `ter_02` | `dem_resolution_m` is 10 for the metro build and 1 where the link lies inside a 1 m snapshot (the test tile or a corridor). `endpoint_draws` records how many sampled endpoint pairs produced the row and is at least 1, and `seed` records the draw seed (`snp_01`). | accepted_values (10, 1) + range test + not_null on `seed` |
+| `ter_01` | Every link-hour in `core.int_link_window` has a `features.link_terrain` row with `terrain_status` in {`ok`, `out_of_extent`, `refused`}, where `refused` means every endpoint draw of the link-hour was refused (ADR 0006 item 11). | relationship + accepted_values |
+| `ter_02` | `dem_resolution_m` is 10 for the metro build and 1 where the link lies inside a 1 m snapshot (the test tile or a corridor). `endpoint_draws` records how many endpoint pairs were drawn for the row and is at least 1; `refused_draws` records how many of them were refused, from 0 to `endpoint_draws`, and the medians come from the rest; and `seed` records the draw seed (`snp_01`). | accepted_values (10, 1) + range tests on `endpoint_draws` and `refused_draws` + not_null on `seed` |
 | `ter_03` | `fresnel_clearance_pct_median <= 1.0`. | range test |
 | `ter_04` | `knife_edge_db_median >= 0` and `knife_edge_db_iqr >= 0`. | range tests |
-| `ter_05` | Where `dem_resolution_m` is 1, `clutter_height_m_median` and `clutter_height_m_p90` along the path are present and non-negative, computed as max(DSM minus DEM, canopy height where nonzero); where it is 10 they are null, never zero. `building_share_tx`, `building_share_rx`, `canopy_share_tx` and `canopy_share_rx` (within 100 m of each endpoint) are in [0, 1]. | singular test on the null rule; range tests |
-| `ter_06` | `hata_db_median` is present for every link and computed with the urban or suburban variant chosen from the building footprint share within 100 m of each endpoint, at the threshold ADR 0006 sets; `hata_variant` is stored. | not_null + accepted_values on `hata_variant` (`urban`, `suburban`) |
+| `ter_05` | Where `dem_resolution_m` is 1 and `terrain_status` is not `refused`, `clutter_height_m_median` and `clutter_height_m_p90` along the path are present and non-negative, computed as max(DSM minus DEM, canopy height where nonzero); where it is 10 they are null, never zero. `building_share_tx`, `building_share_rx`, `canopy_share_tx` and `canopy_share_rx` (within 100 m of each endpoint) are in [0, 1]. `tx_building_draws` and `rx_building_draws` are from 0 to `endpoint_draws`, and null when the run named no OpenStreetMap snapshot (ADR 0006 item 5). | singular test on the null rule; range tests |
+| `ter_06` | `hata_db_median` is present for every link whose `terrain_status` is not `refused` and computed with the urban or suburban variant chosen from the building footprint share within 100 m of each endpoint, at the threshold ADR 0006 sets; `hata_variant` is stored. | singular test joining `link_prediction` to `link_terrain` on the link-hour key + accepted_values on `hata_variant` (`urban`, `suburban`) |
 
 ## Validation
 
