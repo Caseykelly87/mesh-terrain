@@ -16,7 +16,7 @@ import pytest
 from structlog.testing import capture_logs
 
 from pipeline.common.settings import get_settings
-from terrain.errors import RefusedDrawError
+from terrain.errors import RefusedDrawError, ZeroLengthPathError
 from terrain.itm import (
     ItmLibrary,
     ItmSettings,
@@ -78,13 +78,15 @@ def test_profile_refuses_an_uneven_step() -> None:
 
 
 def test_profile_refuses_a_zero_length_path() -> None:
-    with pytest.raises(ValueError, match="zero-length"):
+    with pytest.raises(ZeroLengthPathError, match="zero-length"):
         itm_profile(np.zeros(5), np.zeros(5))
 
 
-def test_profile_refuses_fewer_than_five_samples() -> None:
-    with pytest.raises(ValueError, match="five"):
+def test_profile_with_fewer_than_five_samples_refuses_the_draw() -> None:
+    """Casey's short_profile reason (ADR 0006 item 11), decided on PR #30."""
+    with pytest.raises(RefusedDrawError, match="five") as refusal:
         itm_profile(np.linspace(0.0, 100.0, 4), np.zeros(4))
+    assert refusal.value.reason == "short_profile"
 
 
 def test_profile_refuses_a_shifted_start_and_mismatched_lengths() -> None:
