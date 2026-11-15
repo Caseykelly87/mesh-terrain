@@ -26,7 +26,9 @@ from typing import Literal
 import numpy as np
 import numpy.typing as npt
 
-from terrain.result import PathLossResult, RefusedDrawError
+from terrain.errors import RefusedDrawError
+from terrain.profile import PathProfile
+from terrain.result import PathLossResult
 
 FloatArray = npt.NDArray[np.float64]
 Polarisation = Literal["horizontal", "vertical"]
@@ -173,7 +175,7 @@ def itm_profile(distance_m: FloatArray, ground_m: FloatArray) -> FloatArray:
     Raises:
         ValueError: for a zero-length path, fewer than five samples, arrays of
             different lengths, a first distance other than 0 or an uneven step.
-        RefusedDrawError: if a ground height is missing.
+        RefusedDrawError: `dem_gap` if a ground height is missing.
     """
     if distance_m.shape != ground_m.shape:
         raise ValueError("distance and ground arrays must have one length")
@@ -189,8 +191,9 @@ def itm_profile(distance_m: FloatArray, ground_m: FloatArray) -> FloatArray:
     missing = np.flatnonzero(~np.isfinite(ground_m))
     if missing.size:
         raise RefusedDrawError(
+            "dem_gap",
             f"ground height missing at profile index {int(missing[0])}; "
-            "the draw is refused (ADR 0006 item 11)"
+            "the draw is refused (ADR 0006 item 11)",
         )
     header = np.array([distance_m.size - 1, step_m], dtype=np.float64)
     return np.concatenate([header, np.asarray(ground_m, dtype=np.float64)])
@@ -209,8 +212,7 @@ def check_itm_status(code: int) -> None:
 
 def itm_loss(
     library: ItmLibrary,
-    distance_m: FloatArray,
-    ground_m: FloatArray,
+    profile: PathProfile,
     *,
     tx_height_m: float,
     rx_height_m: float,
@@ -222,9 +224,9 @@ def itm_loss(
 
     Args:
         library: From `load_itm_library`.
-        distance_m: Distance of each sample from the transmitter, metres,
-            from 0 at a uniform step (1 m on the 1 m layers, 10 m on the metro DEM).
-        ground_m: Ground height at each sample, metres above NAVD88, uncurved.
+        profile: Uncurved ground in metres along the path, EPSG:26915, at a
+            uniform step (1 m on the 1 m layers, 10 m on the metro DEM); its
+            clutter is not used.
         tx_height_m: Transmitter antenna height above ground, metres.
         rx_height_m: Receiver antenna height above ground, metres.
         frequency_mhz: Frequency, MHz.
@@ -236,12 +238,12 @@ def itm_loss(
 
     Raises:
         ValueError: for a profile `itm_profile` rejects or an unknown polarisation.
-        RefusedDrawError: if a ground height is missing.
+        RefusedDrawError: `dem_gap` if a ground height is missing.
         RuntimeError: if ITM returns an error code or a loss that is not finite.
     """
     if polarisation not in POLARISATION_CODES:
         raise ValueError(f"polarisation must be horizontal or vertical, got {polarisation!r}")
-    pfl = np.ascontiguousarray(itm_profile(distance_m, ground_m))
+    pfl = np.ascontiguousarray(itm_profile(profile.distance_m, profile.ground_m))
     loss_db, warnings, intermediate = ctypes.c_double(), ctypes.c_long(), IntermediateValues()
     status = library.handle.ITM_P2P_CR_Ex(
         tx_height_m, rx_height_m, pfl.ctypes.data_as(_DOUBLE_POINTER), settings.climate,
