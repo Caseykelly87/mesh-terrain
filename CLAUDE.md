@@ -94,6 +94,7 @@ Run report: <agent> / <brief title> / <date>
 Outcome: complete | partial | stopped
 Done: what was built, one line per item, with the test or check that proves it
 Deviations from brief: what was done differently and why; "none" if none
+Decided without Casey: each choice under Lead duty 11, with its ADR or PR, including any also listed under Deviations; "none" if none
 Skipped or blocked: each step not done, the error text, what was tried
 Verification: output of make check (pass or fail, counts), any manual check performed
 Files touched: paths created, changed, deleted
@@ -124,14 +125,14 @@ When a deviation is resolved or a known issue closed, its line is removed, not s
 1. Read the run report in full.
 2. Confirm `docs/STATUS.md` reflects it; if the agent missed something, send it back rather than fixing it yourself.
 3. Run the reviewer.
-4. Summarise for Casey in five lines or fewer: outcome, deviations, what the reviewer flagged, decisions waiting, next unit.
+4. Summarise for Casey in five lines or fewer: outcome, deviations, what the reviewer flagged, decisions waiting, next unit. After the five lines, list the "Decided without Casey" items of item 11, one line each.
 5. The next brief you write starts by quoting the "Configuration the next agent needs" lines from the previous report that apply.
 6. In the same summary message, not in the repo, write a plain-language note of at most two paragraphs on what the unit built and why it is shaped that way, defining any term on first use, and give Casey one hands-on exercise he can do against the running stack in under 15 minutes to see it work.
 7. When a brief or message to an agent carries Casey's decisions, paste them verbatim with his numbers, keep the lead's own instructions separate below them, and list which numbers were passed to which agent on one line after the five-line summary.
 8. Before asking Casey to approve wording that describes code behaviour, have the reviewer check it against the code and tests. Casey sees only wording that has passed that check.
 9. Every brief that ends in an irreversible step (a snapshot write, a deletion, a merge) lists its preconditions as a checklist, and the agent posts each one as met on the PR before it runs that step.
 10. After a PR merges, remove its worktree and local branch without asking Casey when all of these hold: GitHub shows the PR merged, nothing is uncommitted or unpushed, no agent is using it, the running stack was not started from it, and its `.env` holds no `NODE_ID_HMAC_KEY` line or the key also remains in the main checkout's `.env`. Before removing it, post the conditions as met on the merged PR, as in item 9. Report the removal in the message that tells Casey the PR merged, and post it on that PR. Every other deletion outside a commit (files, branches, worktrees, volumes, data) still needs a listed set (each path or branch written out) and Casey's yes, whoever runs it.
-11. From the engine unit on (Casey, 2026-11-15): a technical choice that is reversible, writes nothing permanent and changes no contract rule or table column is decided by the owning agent, recorded in the ADR or PR, and listed in the lead's report to Casey under "Decided without Casey". Bring Casey only: contract or schema changes, anything written permanently, deletions, spending, scope changes, and anything the lead or the reviewer judges to change a result.
+11. From the engine unit on (Casey, 2026-11-15): a technical choice that is reversible, writes nothing permanent and changes no contract rule (in `docs/data-quality-contract.md` or `docs/INTERFACE.md`) or table or output column is decided by the owning agent, recorded in the ADR or PR, and listed under "Decided without Casey" in the agent's run report and in the lead's message to Casey. Bring Casey only: contract or schema changes, anything written permanently, deletions, spending, scope changes, and anything the lead or the reviewer judges to change a result. "Written permanently" means a snapshot or anything published; a snapshot listed in a brief Casey approved needs only the item 9 checklist. This item does not change who approves a merge. Every item under "Decisions that stop for a human" is one of these exceptions and still goes to Casey; each agent's own "Stop and ask" items are judged by this item.
 
 ## Commits, pull requests and merging
 
@@ -152,7 +153,7 @@ Who may do what:
 
 ## Decisions that stop for a human
 
-Casey decides these. Prepare the options, state the trade-offs in two or three sentences each, recommend one, and wait.
+Casey decides these; each is one of the exceptions in Lead duty 11. Prepare the options, state the trade-offs in two or three sentences each, recommend one, and wait.
 
 - Any change to the data model grain or to a rule in `docs/data-quality-contract.md`.
 - Choice of propagation model implementation (ITM bindings vs SPLAT fallback, decided in ADR 0002; adding P.1812 via Py1812, ADR 0006).
