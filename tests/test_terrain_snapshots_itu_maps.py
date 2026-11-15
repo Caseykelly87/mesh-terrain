@@ -61,7 +61,13 @@ def test_keeps_the_zip_and_the_two_maps_and_loads_with_the_wrapper(tmp_path: Pat
     folder = build_itu_maps(tmp_path, source=source, opener=web, today=TODAY)
     assert verify_manifest(folder) == []
     names = sorted(path.name for path in folder.iterdir())
-    assert names == ["DN50.TXT", "N050.TXT", "R-REC-P.1812-8-TEST.zip", "README.md", "manifest.json"]
+    assert names == [
+        "DN50.TXT",
+        "N050.TXT",
+        "R-REC-P.1812-8-TEST.zip",
+        "README.md",
+        "manifest.json",
+    ]
     manifest = read_manifest(folder)
     assert manifest["licence"] == ITU_LICENCE
     assert manifest["source_url"] == URL
