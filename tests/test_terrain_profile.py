@@ -1,12 +1,13 @@
 """Profile sampler on synthetic DEMs: windowed reads, bilinear values, extent and nodata."""
 
+import math
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 import rasterio.io
-from terrain_dem import centre_xy_m, sample_at, write_dem
+from terrain_dem import ORIGIN_X_M, ORIGIN_Y_M, centre_xy_m, sample_at, write_dem
 
 from terrain.errors import OutOfExtentError, ZeroLengthPathError
 from terrain.profile import PathProfile, profile_distances_m
@@ -113,16 +114,23 @@ def test_far_edge_of_the_outer_half_pixel_is_inside_the_extent(tmp_path: Path) -
     assert profile.ground_m[-1] == 100.0
 
 
-@pytest.mark.parametrize(("dx_m", "dy_m"), [(-1e-6, 0.0), (0.0, 1e-6)])
-def test_a_point_just_beyond_the_raster_edge_is_out_of_extent(
-    tmp_path: Path, dx_m: float, dy_m: float
+@pytest.mark.parametrize(
+    ("edge", "x_m", "y_m"),
+    [
+        ("left", ORIGIN_X_M - 1e-6, ORIGIN_Y_M - 5.0),
+        ("top", ORIGIN_X_M + 50.0, ORIGIN_Y_M + 1e-6),
+        ("right", ORIGIN_X_M + 100.0 + 1e-6, ORIGIN_Y_M - 5.0),
+        ("bottom", ORIGIN_X_M + 50.0, ORIGIN_Y_M - 10.0 - 1e-6),
+    ],
+)
+def test_a_point_just_beyond_any_raster_edge_is_out_of_extent(
+    tmp_path: Path, edge: str, x_m: float, y_m: float
 ) -> None:
+    # The raster is 100 columns by 10 rows of 1 m pixels from the module origin.
     dem = flat_dem(tmp_path, rows=10, cols=100)
-    first = centre_xy_m(0, 0)
-    beyond = (first[0] - 0.5 + dx_m, first[1] + 0.5 + dy_m)
 
     with pytest.raises(OutOfExtentError):
-        sample_at(dem, beyond, centre_xy_m(5, 50), step_m=1.0)
+        sample_at(dem, (x_m, y_m), centre_xy_m(5, 40), step_m=1.0)
 
 
 def test_nodata_becomes_nan(tmp_path: Path) -> None:
@@ -172,10 +180,16 @@ def test_zero_length_path_raises_its_own_value_error(tmp_path: Path) -> None:
         sample_at(dem, point, point, step_m=1.0)
 
 
-def test_a_bad_step_is_not_a_zero_length_path() -> None:
+@pytest.mark.parametrize(("length_m", "step_m"), [(100.0, -1.0), (-5.0, 1.0), (math.nan, 1.0)])
+def test_a_bad_step_or_length_is_not_a_zero_length_path(length_m: float, step_m: float) -> None:
     with pytest.raises(ValueError) as raised:
-        profile_distances_m(100.0, -1.0)
+        profile_distances_m(length_m, step_m)
     assert not isinstance(raised.value, ZeroLengthPathError)
+
+
+def test_exactly_zero_length_is_a_zero_length_path() -> None:
+    with pytest.raises(ZeroLengthPathError):
+        profile_distances_m(0.0, 1.0)
 
 
 def test_step_must_be_positive(tmp_path: Path) -> None:
