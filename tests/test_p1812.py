@@ -75,6 +75,25 @@ def call_flat(clutter_m: FloatArray | None = None, **overrides: Any) -> PathLoss
     return p1812_loss(**arguments)
 
 
+def flat_inputs(clutter_m: FloatArray) -> BtLossInputs:
+    """bt_loss inputs for the 10 km flat path at 150 m, given in degrees, DN 40 and N0 325."""
+    return BtLossInputs(
+        distance_km=np.linspace(0.0, 10.0, 1001),
+        ground_m=np.full(1001, 150.0),
+        clutter_m=clutter_m,
+        tx_height_m=2.0,
+        rx_height_m=2.0,
+        frequency_ghz=0.915,
+        polarisation_code=2,
+        tx_lat_deg=38.63,
+        tx_lon_deg=-90.25,
+        rx_lat_deg=38.63,
+        rx_lon_deg=-90.135,
+        dn=40.0,
+        n0=325.0,
+    )
+
+
 def spy_on(monkeypatch: pytest.MonkeyPatch, name: str) -> list[Any]:
     """Record every positional first argument passed to p1812.<name>, then call it."""
     seen: list[Any] = []
@@ -359,7 +378,7 @@ def test_nan_in_clutter_is_refused_before_bt_loss(
 
 
 def test_nan_in_ground_is_refused_before_bt_loss(monkeypatch: pytest.MonkeyPatch) -> None:
-    distance_m, ground_m, rx_xy_m = flat_path()
+    _, ground_m, _ = flat_path()
     ground_m[400] = np.nan
     calls: list[object] = []
     monkeypatch.setattr(P1812, "bt_loss", lambda *a, **k: calls.append(a))
@@ -373,23 +392,8 @@ def test_call_bt_loss_refuses_nan_on_its_own(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(P1812, "bt_loss", lambda *a, **k: calls.append(a))
     clutter = np.zeros(1001)
     clutter[1] = np.nan
-    inputs = BtLossInputs(
-        distance_km=np.linspace(0.0, 10.0, 1001),
-        ground_m=np.full(1001, 150.0),
-        clutter_m=clutter,
-        tx_height_m=2.0,
-        rx_height_m=2.0,
-        frequency_ghz=0.915,
-        polarisation_code=2,
-        tx_lat_deg=38.63,
-        tx_lon_deg=-90.25,
-        rx_lat_deg=38.63,
-        rx_lon_deg=-90.135,
-        dn=40.0,
-        n0=325.0,
-    )
     with pytest.raises(RefusedDrawError):
-        call_bt_loss(inputs)
+        call_bt_loss(flat_inputs(clutter))
     assert calls == []
 
 
@@ -439,22 +443,6 @@ def test_arrays_must_have_one_length() -> None:
 
 
 def test_call_bt_loss_returns_the_log_text() -> None:
-    distance_m, ground_m, _ = flat_path()
-    inputs = BtLossInputs(
-        distance_km=distance_m / 1000.0,
-        ground_m=ground_m,
-        clutter_m=np.zeros_like(ground_m),
-        tx_height_m=2.0,
-        rx_height_m=2.0,
-        frequency_ghz=0.915,
-        polarisation_code=2,
-        tx_lat_deg=38.63,
-        tx_lon_deg=-90.25,
-        rx_lat_deg=38.63,
-        rx_lon_deg=-90.135,
-        dn=40.0,
-        n0=325.0,
-    )
-    loss_db, log_text = call_bt_loss(inputs)
+    loss_db, log_text = call_bt_loss(flat_inputs(np.zeros(1001)))
     assert isinstance(log_text, str) and "Lbs (dB),Eq (44)" in log_text
     assert np.isfinite(loss_db)
