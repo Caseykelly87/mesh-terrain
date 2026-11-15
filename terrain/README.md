@@ -16,6 +16,8 @@ Pure functions for terrain profiles, line of sight, Fresnel clearance, diffracti
 | `result.py` | `PathLossResult`, what every model returns for one draw: the loss in dB plus diagnostics only some models fill, Lbs for P.1812 and the warning flags for ITM (ADR 0006 item 10 (a)) |
 | `itm.py` | `itm_loss`: the Irregular Terrain Model (Longley-Rice), point-to-point, through NTIA's C++ library and `ctypes` (ADR 0002); the library exists only in the Dagster image, at `ITM_LIBRARY_PATH` |
 | `p1812.py` | `p1812_loss` and `load_maps`: ITU-R P.1812-8 through Py1812 (ADR 0006), imported against an empty in-memory placeholder for the ITU maps, with DN and N0 from a verified map snapshot passed on every call; import it lazily, on the first P.1812 call, so loading the Dagster definitions never runs Py1812's import |
+| `antenna.py` | `AntennaProfile`, one named profile record of `docs/INTERFACE.md`: height, gain, transmit power, polarisation, description |
+| `path_loss.py` | `path_loss_db`, the one function over the five models (ADR 0006 decision 3), and `DrawModels`, the function `sample_link` calls per draw to run them; it imports `p1812.py` on the first P.1812 call only |
 
 A refused draw carries one of four reasons, the causes of ADR 0006 item 11 as amended by Casey on PR #30. Each engine run report counts refused draws under the names on the right; no column holds the breakdown.
 
@@ -30,6 +32,12 @@ The knife-edge baseline reads well below ITM and P.1812 on paths with low antenn
 
 A worked example: a 2 km path over flat ground at 150 m with a 25 m ridge 700 m from the transmitter and 2 m antennas at both ends. The ray between the antenna tops runs at 152 m; the ridge top, raised 0.05 m by the earth bulge, stands 23.05 m above it, so `los_clear` is false and `obstruction_m` is 23.05. At 915 MHz (wavelength 0.328 m) the P.526 parameter is nu = 23.05 x sqrt((2 / 0.328) x (1/700 + 1/1300)) = 2.67, the single edge loses J(2.67) = 21.43 dB (`knife_edge_loss_db`), and `knife_edge_db` applies P.526-16 equation (57) for the Bullington loss: 21.43 + (1 - exp(-21.43 / 6)) x (10 + 0.02 x 2) = 31.19 dB on top of free space.
 
+## One function for every model
+
+`path_loss_db(model, profile, frequency_mhz, tx, rx, ...)` returns a `PathLossResult` for `fspl`, `knife_edge`, `hata`, `itm` and `p1812`: the basic transmission loss, which leaves out transmit power and both antenna gains. The knife-edge model is free space plus the Bullington loss, so its number compares with the others. On the flat inland 10 km path at 915 MHz with `mesh_node` (2 m) at both ends it gives 111.68 dB for `fspl`, 123.81 dB for `knife_edge`, 151.76 dB for `itm` and 149.48 dB for `p1812` with the St. Louis DN and N0, whose troposcatter loss Lbs is 160.17 dB, so that result is not at the cap. `hata` needs its variant from the caller, `itm` the loaded library, and `p1812` the map grids and a profile with clutter. Every model refuses a profile with fewer than five samples as `short_profile` and a missing ground height as `dem_gap`, and raises `ZeroLengthPathError` when the endpoints coincide.
+
+`DrawModels` runs a run's models on one draw for `sample_link`. It reports each loss as `<model>_db` and P.1812's cap as the flag `p1812_at_cap`, so a link's summary gives `median("itm_db")` for the `itm_db_median` column and `share("p1812_at_cap")` for `p1812_at_cap_share`. On the metro DEM a draw has no P.1812 profile, and `p1812` is left out, so its columns are null there.
+
 ## Clutter and the 10 m cells
 
 Clutter is what stands on the ground: buildings and trees. Its height at each 1 m pixel comes from three layers: the lidar surface (DSM, roof and tree tops, flown in winter with the leaves off), the bare-earth DEM, and a canopy height map made from satellite images, much of them taken in summer. The rule, in order: DSM minus DEM; a negative result (lidar noise on bare ground) becomes 0; a pixel where the DSM has no value but the DEM has one (mostly water, which returns no lidar pulse) becomes 0; a canopy pixel with no value counts as 0; then the taller of that and the canopy. The canopy step matters because a bare winter tree lets most lidar pulses through to the ground, so the lidar sees a 15 m tree as 2 m.
@@ -42,7 +50,7 @@ A worked example (ADR 0006 item 6): a cell half covered by a roof 8 m above the 
 
 `sample_link` places both endpoints at random inside their position boxes 16 times per link-hour (a draw each time), seeded from the run seed and the link id so a rerun gives the same draws, builds the profiles, runs the models through the function the caller passes in, and keeps the median and interquartile range of every number and the share of draws for every yes or no result. A refused draw is dropped for every model and counted under its reason; with every draw refused, every median is null. With one draw the endpoints are the box centres.
 
-Run: the functions are imported by the engine and the feature asset; `uv run pytest tests/test_terrain_*.py` exercises them on synthetic DEMs written per test.
+Run: the functions are imported by the engine and the feature asset; `uv run pytest tests/test_terrain_*.py tests/test_path_loss.py tests/test_itm.py tests/test_p1812.py tests/test_p1812_cap.py` exercises them on synthetic DEMs written per test. The ITM tests that call libitm.so skip outside the Dagster image.
 
 Deliberately not here: raster downloads, database access, Dagster objects, the building-pixel raster (rasterised from the OpenStreetMap snapshot elsewhere and passed in as an array) and the Okumura-Hata variant choice per link. Four functions touch a file: `sample_profile` and `cell_profile` read windows of rasters the caller has opened, and open nothing themselves; `load_itm_library` loads the ITM shared library from the path its caller passes (ADR 0002); and `load_maps` reads the two ITU map files from a snapshot folder once per run, after checking their sha256 against the snapshot manifest (ADR 0006 decision 2). Casey accepted both reads on PR #31.
 
