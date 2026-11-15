@@ -9,11 +9,11 @@ Modules:
 - `decoder.py`: one delivery in, one allowlisted row, internet copy or counted drop out, with the `ing_03` decode status. Default-key decryption only.
 - `allowlist.py` and `sql/raw_tables.sql`: the columns that may land and the `raw` tables that hold them; a test keeps the two equal.
 - `counts.py` and `sightings.py`: copy, dropped and per-hour per-broker counts, and the broker flags and merged deliveries of `ing_01` and `ing_03`.
-- `snapshot.py`, `parquet.py`, `finalise.py`, `readme.py`: the `<id>.partial/` folder, zstd Parquet with the allowlist schema, data content hashes, the merge at exit, coverage, README and the sha256 manifest.
+- `snapshot.py`, `parquet.py`, `finalise.py`, `readme.py`: hour file names, zstd Parquet with the allowlist schema, data content hashes, the merge at exit, coverage, README and the capture manifest's run fields and checks. The `<id>.partial/` folder, the sha256 manifest, verification and `raw.snapshot` registration are shared with every snapshot in `pipeline/common/snapshot.py`.
 - `reduce.py`: the batch reduction of the 2026-10-22 archive into snapshot `meshtastic-capture-2026-10-22`. Its command is wired to that archive's folders, snapshot id and MeshSTL window. It ran once, on 2026-11-14, and cannot run again because its input was deleted the same day (ADR 0003, Consequences). `reduce_capture` takes any folders of capture JSON lines, and the tests run it on the synthetic fixtures. No future capture goes through it, since ADR 0005 limits the reduction to that one archive and capture runs pseudonymise in memory; `capture.py` imports only its `LICENCE` constant.
 - `capture.py`: the core of the on-demand capture command in `docs/adr/0003-spike/capture.py`.
 - `load.py` and `assets.py`: the insert-only loader and the hand-started Dagster asset `raw/mqtt_snapshot` with its `ing_07`, `ing_03` and `ing_04` checks.
-- `settings.py`: `NODE_ID_HMAC_KEY`, `SNAPSHOTS_DIR` and the MQTT credentials, read once.
+- `settings.py`: `NODE_ID_HMAC_KEY`, `SNAPSHOTS_DIR` and the MQTT credentials, read once. `SNAPSHOTS_DIR` is also in `pipeline/common/settings.py` with the same default; the ingester keeps its own field so the capture and reduction start without the warehouse variables.
 
 `NODE_ID_HMAC_KEY` is 32 random bytes written as 64 hex characters. Casey generates it with `python -c "import secrets; print(secrets.token_hex(32))"` and a copy is kept off this machine by Casey. It is read once, never logged, and the reduction and the capture command refuse to start without it.
 
