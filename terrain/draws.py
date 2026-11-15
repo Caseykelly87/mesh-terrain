@@ -24,14 +24,16 @@ import hashlib
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, get_args
+from pathlib import Path
+from typing import get_args
 
 import numpy as np
 import structlog
+from affine import Affine
 from rasterio.io import DatasetReader
 
 from terrain.cells import CELL_STEP_M, FineLayers, cell_profile
-from terrain.clutter import BoolArray, require_complete_clutter
+from terrain.clutter import BoolArray
 from terrain.errors import OutOfExtentError, RefusalReason, RefusedDrawError
 from terrain.profile import XY, PathProfile, refuse_ground_gap, sample_profile
 
@@ -161,7 +163,9 @@ class FineProfileBuilder:
             Both profiles and the filled DSM pixel count.
 
         Raises:
-            RefusedDrawError: "dem_gap", "empty_cell" or "clutter_nan".
+            RefusedDrawError: "dem_gap" or "empty_cell". A cell whose clutter
+                is missing is an empty cell, so this path never raises
+                "clutter_nan".
             OutOfExtentError: if the path leaves the 1 m DEM.
             ZeroLengthPathError: if the endpoints coincide.
         """
@@ -175,7 +179,6 @@ class FineProfileBuilder:
             rx_ground_m=float(ground.ground_m[-1]),
             step_m=self.cell_step_m,
         )
-        require_complete_clutter(cells.profile)
         return DrawProfiles(
             ground=ground, p1812=cells.profile, dsm_filled_pixels=cells.dsm_filled_pixels
         )
@@ -194,7 +197,7 @@ class BuildingPixels:
     """
 
     mask: BoolArray
-    transform: Any
+    transform: Affine
 
     def __post_init__(self) -> None:
         """Check the grid.
@@ -206,6 +209,19 @@ class BuildingPixels:
             raise ValueError("the building mask must be 2-D")
         if self.transform.b != 0.0 or self.transform.d != 0.0 or self.transform.e >= 0.0:
             raise ValueError("the building mask must be on a north-up grid")
+
+    def require_grid_of(self, dem: DatasetReader) -> None:
+        """Check the mask is on a DEM's grid, pixel for pixel.
+
+        Args:
+            dem: The open DEM the draws' profiles read.
+
+        Raises:
+            ValueError: if the shape or transform differs from the DEM's; the
+                metro DEM never matches, so building draws stay null there.
+        """
+        if self.mask.shape != dem.shape or self.transform != dem.transform:
+            raise ValueError(f"the building mask is not on the grid of {Path(dem.name).name}")
 
     def contains(self, xy_m: XY) -> bool:
         """Whether a point lies on a building pixel.
@@ -265,16 +281,33 @@ class DrawSummary:
         return sum(self.refusals.values())
 
     def median(self, name: str) -> float | None:
-        """Median of a value quantity; None when no unrefused draw reported it."""
-        return self.medians.get(name)
+        """Median of a value quantity.
+
+        Args:
+            name: A name the quantities function reported in `values`.
+
+        Returns:
+            The median, or None when every draw was refused.
+
+        Raises:
+            KeyError: if draws were kept and none reported this name.
+        """
+        return self._lookup(self.medians, name)
 
     def iqr(self, name: str) -> float | None:
-        """Interquartile range of a value quantity; None as for `median`."""
-        return self.iqrs.get(name)
+        """Interquartile range of a value quantity; None and KeyError as for `median`."""
+        return self._lookup(self.iqrs, name)
 
     def share(self, name: str) -> float | None:
-        """Share of draws where a flag is true; None as for `median`."""
-        return self.shares.get(name)
+        """Share of kept draws where a flag is true; None and KeyError as for `median`."""
+        return self._lookup(self.shares, name)
+
+    def _lookup(self, summary: dict[str, float], name: str) -> float | None:
+        if self.refused_draws == self.endpoint_draws:
+            return None
+        if name not in summary:
+            raise KeyError(f"no kept draw of {self.link_id} reported {name!r}")
+        return summary[name]
 
 
 def draw_seed(run_seed: int, link_id: str) -> int:
@@ -355,8 +388,10 @@ def sample_link(
     Raises:
         OutOfExtentError: if a draw leaves the DEM or the building mask.
         ZeroLengthPathError: if a draw's endpoints coincide.
-        ValueError: if a quantity is NaN or draws report different quantities.
+        ValueError: if a quantity is NaN, draws report different quantities,
+            or the building mask is not on the builder's DEM grid.
     """
+    _check_building_grid(builder, buildings)
     seed = draw_seed(run_seed, link_id)
     pairs = draw_endpoints(tx, rx, n_draws, seed)
     tx_on, rx_on = _building_draws(pairs, buildings)
@@ -394,6 +429,16 @@ def _offset(box: EndpointBox, unit_x: float, unit_y: float) -> XY:
         box.centre_xy_m[0] + box.half_width_m * float(unit_x),
         box.centre_xy_m[1] + box.half_width_m * float(unit_y),
     )
+
+
+def _check_building_grid(builder: ProfileBuilder, buildings: BuildingPixels | None) -> None:
+    """Hold the mask to the grid of the DEM a raster builder reads."""
+    if buildings is None:
+        return
+    if isinstance(builder, FineProfileBuilder):
+        buildings.require_grid_of(builder.layers.dem)
+    elif isinstance(builder, MetroProfileBuilder):
+        buildings.require_grid_of(builder.dem)
 
 
 def _building_draws(

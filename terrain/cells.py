@@ -8,10 +8,14 @@ profile every 10 m (ADR 0006 decision 6 as amended by item 1 (b)), built as item
 
 - Clutter is computed per 1 m pixel by `terrain.clutter` first (item 6 (a)).
 - Ground and clutter are then averaged separately over fixed blocks of 10 by 10
-  pixels on the 1 m grid of the run's DEM (item 8 (a)). A block holding any pixel
-  without a value has no value, and a draw whose profile reads it is refused
-  as `empty_cell` (item 7 (a)). Cells are computed once per read window and
-  never written out; they do not depend on where a window starts.
+  pixels on the 1 m grid of the run's DEM (item 8 (a)), with block edges on
+  eastings and northings that are multiples of 10 m (the lead's choice on
+  PR #33), so a link averages the same blocks whichever raster it is read from:
+  a TNM tile, the engine's cropped `dem.tif` or a corridor. The 1 m grid must
+  therefore sit on whole metres. A block holding any pixel without a value has
+  no value, and a draw whose profile reads it is refused as `empty_cell` (item
+  7 (a)). Cells are computed once per read window and never written out; they
+  do not depend on where a window starts.
 - The profile samples the cell means every 10 m with bilinear interpolation
   (`scipy.ndimage.map_coordinates`, order 1), as every other profile does.
 - The two ends take their ground from the 1 m DEM at the endpoint (item 9 (a)),
@@ -55,6 +59,9 @@ from terrain.profile import (
 CELL_PX = 10
 """Pixels on a side of one cell; with 1 m pixels a cell is 10 m square."""
 
+CELL_SIZE_M = 10.0
+"""Side of one cell in metres; cell edges lie on multiples of it in EPSG:26915."""
+
 CELL_STEP_M = 10.0
 """Largest spacing of P.1812's profile on the 1 m layers, metres."""
 
@@ -82,8 +89,8 @@ class FineLayers:
 
         Raises:
             ValueError: without a DSM or a canopy layer, when the DEM is not
-                north-up in EPSG:26915 with 1 m pixels, or when a layer's grid
-                differs from the DEM's.
+                north-up in EPSG:26915 with 1 m pixels whose edges sit on whole
+                metres, or when a layer's grid differs from the DEM's.
         """
         if self.dsm is None and self.canopy is None:
             raise ValueError("the 1 m layers need a DSM or a canopy layer for clutter")
@@ -91,6 +98,10 @@ class FineLayers:
         check_grid(self.dem, name)
         if abs(self.dem.transform.a) != 1.0 or abs(self.dem.transform.e) != 1.0:
             raise ValueError(f"{name} must have 1 m pixels for 10 m cells")
+        if not (
+            float(self.dem.transform.c).is_integer() and float(self.dem.transform.f).is_integer()
+        ):
+            raise ValueError(f"{name} must sit on whole metres for cells on UTM multiples of 10 m")
         for layer in (self.dsm, self.canopy):
             if layer is not None and not _same_grid(layer, self.dem):
                 raise ValueError(f"{Path(layer.name).name} is not on the grid of {name}")
@@ -147,7 +158,7 @@ def cell_profile(
     rows, cols = pixel_indices(layers.dem, x_m, y_m)
     check_extent(rows, cols, layers.dem.height, layers.dem.width, Path(layers.dem.name).name)
     interior = _logged_cell_read(
-        layers, _cell_index(rows[1:-1]), _cell_index(cols[1:-1]), max_window_cells
+        layers, _cell_row(y_m[1:-1]), _cell_col(x_m[1:-1]), max_window_cells
     )
     ground_m = np.concatenate(([tx_ground_m], interior.ground_m, [rx_ground_m]))
     clutter_m = np.concatenate(([0.0], interior.clutter_m, [0.0]))
@@ -176,14 +187,35 @@ def _same_grid(layer: DatasetReader, dem: DatasetReader) -> bool:
     )
 
 
-def _cell_index(pixel_index: FloatArray) -> FloatArray:
-    """Fractional cell index, an integer being a cell centre, from a pixel index.
+def _cell_col(x_m: FloatArray) -> FloatArray:
+    """Fractional cell column from easting, an integer being a cell centre.
 
-    Cell i spans pixels CELL_PX * i to CELL_PX * i + CELL_PX - 1, so its centre
-    is pixel index CELL_PX * i + (CELL_PX - 1) / 2.
+    Cell column j spans eastings 10 j to 10 j + 10 m, centred on 10 j + 5.
     """
-    cell: FloatArray = (pixel_index - (CELL_PX - 1) / 2.0) / CELL_PX
-    return cell
+    col: FloatArray = (x_m - CELL_SIZE_M / 2.0) / CELL_SIZE_M
+    return col
+
+
+def _cell_row(y_m: FloatArray) -> FloatArray:
+    """Fractional cell row from northing, rows counting south like raster rows.
+
+    Cell row i spans northings -10 i - 10 to -10 i m, centred on -10 i - 5.
+    """
+    row: FloatArray = (-y_m - CELL_SIZE_M / 2.0) / CELL_SIZE_M
+    return row
+
+
+def _pixel_origin(dem: DatasetReader, cell_row: int, cell_col: int) -> tuple[int, int]:
+    """Row and column of the north-west pixel of a cell on the DEM's 1 m grid.
+
+    The cell's north edge is northing -10 i and its west edge easting 10 j; the
+    grid sits on whole metres (`FineLayers`), so both are whole pixels.
+    """
+    transform = dem.transform
+    return (
+        round(transform.f) + CELL_PX * cell_row,
+        CELL_PX * cell_col - round(transform.c),
+    )
 
 
 def _refuse_missing(ground_m: FloatArray, clutter_m: FloatArray) -> None:
@@ -231,7 +263,11 @@ def _sample_cell_window(
         math.floor(cell_rows.max()) + 2 + _MARGIN_CELLS - row_start,
         math.floor(cell_cols.max()) + 2 + _MARGIN_CELLS - col_start,
     )
-    pixels = (row_start * CELL_PX, col_start * CELL_PX, shape[0] * CELL_PX, shape[1] * CELL_PX)
+    pixels = (
+        *_pixel_origin(layers.dem, row_start, col_start),
+        shape[0] * CELL_PX,
+        shape[1] * CELL_PX,
+    )
     dem_m = _read_padded(layers.dem, *pixels)
     dsm_m = None if layers.dsm is None else _read_padded(layers.dsm, *pixels)
     canopy_m = None if layers.canopy is None else _read_padded(layers.canopy, *pixels)
