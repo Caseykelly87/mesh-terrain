@@ -19,9 +19,9 @@ import math
 
 import numpy as np
 
-from terrain.clearance import require_complete_ground
-from terrain.curvature import K_FACTOR, earth_bulge_m
-from terrain.profile import FloatArray, PathProfile
+from terrain.clearance import CurvedPath, curved_path
+from terrain.curvature import K_FACTOR
+from terrain.profile import PathProfile
 from terrain.units import wavelength_m
 
 NU_FLOOR = -0.78
@@ -98,53 +98,33 @@ def knife_edge_db(
         ValueError: if the profile has no interior sample.
         RefusedDrawError: if a ground height is NaN (reason "dem_gap").
     """
-    require_complete_ground(profile)
-    length_m = profile.length_m
-    distance = profile.distance_m[1:-1]
-    ground = profile.ground_m[1:-1] + earth_bulge_m(distance, length_m, k_factor)
-    tx_top_m = float(profile.ground_m[0]) + tx_height_m
-    rx_top_m = float(profile.ground_m[-1]) + rx_height_m
-    slope_to_tx = float(((ground - tx_top_m) / distance).max())  # equation (13)
-    slope_of_ray = (rx_top_m - tx_top_m) / length_m  # equation (14)
+    path = curved_path(profile, tx_height_m, rx_height_m, k_factor)
+    slope_to_tx = float(((path.ground_m - path.tx_top_m) / path.distance_m).max())  # (13)
+    slope_of_ray = (path.rx_top_m - path.tx_top_m) / path.length_m  # (14)
     if slope_to_tx <= slope_of_ray + _SLOPE_TOLERANCE:
-        nu = _largest_nu(distance, ground, tx_top_m, rx_top_m, length_m, frequency_mhz)
-    else:
-        nu = _bullington_nu(distance, ground, tx_top_m, rx_top_m, length_m, frequency_mhz)
-    return knife_edge_loss_db(nu)
+        return knife_edge_loss_db(_largest_nu(path, frequency_mhz))
+    return knife_edge_loss_db(_bullington_nu(path, slope_to_tx, frequency_mhz))
 
 
-def _largest_nu(
-    distance: FloatArray,
-    ground: FloatArray,
-    tx_top_m: float,
-    rx_top_m: float,
-    length_m: float,
-    frequency_mhz: float,
-) -> float:
+def _largest_nu(path: CurvedPath, frequency_mhz: float) -> float:
     """Largest nu over the samples on a line-of-sight path, P.1812-6 equation (15)."""
-    ray_m = tx_top_m + (rx_top_m - tx_top_m) * distance / length_m
-    scale = np.sqrt(
-        2.0 * length_m / (wavelength_m(frequency_mhz) * distance * (length_m - distance))
-    )
-    return float(((ground - ray_m) * scale).max())
+    d1_m = path.distance_m
+    d2_m = path.length_m - d1_m
+    height_m = path.ground_m - path.ray_m(d1_m)
+    scale = np.sqrt(2.0 * path.length_m / (wavelength_m(frequency_mhz) * d1_m * d2_m))
+    return float((height_m * scale).max())
 
 
-def _bullington_nu(
-    distance: FloatArray,
-    ground: FloatArray,
-    tx_top_m: float,
-    rx_top_m: float,
-    length_m: float,
-    frequency_mhz: float,
-) -> float:
+def _bullington_nu(path: CurvedPath, slope_to_tx: float, frequency_mhz: float) -> float:
     """nu at the Bullington point of a path with no line of sight.
 
-    P.1812-6 equations (13), (17), (18) and (20): the point is where the steepest
-    line from the transmitter meets the steepest line from the receiver.
+    P.1812-6 equations (17), (18) and (20): the point is where the steepest line
+    from the transmitter, slope (13), meets the steepest line from the receiver.
     """
-    slope_to_tx = float(((ground - tx_top_m) / distance).max())
-    slope_to_rx = float(((ground - rx_top_m) / (length_m - distance)).max())
-    point_m = (rx_top_m - tx_top_m + slope_to_rx * length_m) / (slope_to_tx + slope_to_rx)
-    edge_m = tx_top_m + slope_to_tx * point_m
-    ray_m = tx_top_m + (rx_top_m - tx_top_m) * point_m / length_m
-    return diffraction_parameter(edge_m - ray_m, point_m, length_m - point_m, frequency_mhz)
+    d2_m = path.length_m - path.distance_m
+    slope_to_rx = float(((path.ground_m - path.rx_top_m) / d2_m).max())
+    rise_m = path.rx_top_m - path.tx_top_m
+    point_m = (rise_m + slope_to_rx * path.length_m) / (slope_to_tx + slope_to_rx)
+    edge_m = path.tx_top_m + slope_to_tx * point_m
+    ray_m = float(path.ray_m(np.array([point_m]))[0])
+    return diffraction_parameter(edge_m - ray_m, point_m, path.length_m - point_m, frequency_mhz)
