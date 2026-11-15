@@ -6,6 +6,8 @@ refuses when a raw table's columns differ from the allowlist, registers the
 snapshot in raw.snapshot and copies each table through a temporary table
 with `on conflict do nothing` on the contract keys. Rows are only ever
 inserted, so a second load adds nothing. The caller owns the transaction.
+Finding, verifying and registering the folder are the steps every snapshot
+shares, from pipeline.common.snapshot.
 
 Checks, run by the asset and by the load command: reconcile (ing_03, raw
 against the manifest's deliveries per hour and broker), decode_rates (ing_04)
@@ -33,48 +35,24 @@ from psycopg import sql
 from ingester.allowlist import KEYS, TABLES, allowlist
 from ingester.parquet import read_rows, row_digest
 from ingester.settings import get_ingester_settings
-from ingester.snapshot import (
-    MANIFEST_NAME,
-    PARTIAL_SUFFIX,
-    SnapshotError,
-    read_manifest,
-    sha256_file,
-    verify_manifest,
-)
 from ingester.topics import topic_class
+from pipeline.common.snapshot import (
+    SNAPSHOT_COLUMNS,
+    read_manifest,
+    register,
+    snapshot_folder,
+    verified_manifest,
+)
 
 log = structlog.get_logger(component="ingester.load")
 
 DDL_PATH = Path(__file__).with_name("sql") / "raw_tables.sql"
-SNAPSHOT_COLUMNS = (
-    "snapshot_id",
-    "capture_date",
-    "source_url",
-    "licence",
-    "manifest_path",
-    "manifest_sha256",
-    "registered_at",
-)
 SNAPSHOT_CONTENT_COLUMNS = tuple(name for name in SNAPSHOT_COLUMNS if name != "registered_at")
 LOAD_ORDER = ("mqtt_message", "mqtt_copy_count", "mqtt_dropped_count")
 
 
 class SchemaDriftError(RuntimeError):
     """A raw table's columns differ from the allowlist."""
-
-
-def snapshot_folder(root: Path, snapshot_id: str) -> Path:
-    """The finished folder of a snapshot id.
-
-    Raises:
-        SnapshotError: for a `.partial` id or folder, or a folder with no manifest.
-    """
-    if snapshot_id.endswith(PARTIAL_SUFFIX):
-        raise SnapshotError(f"{snapshot_id} is an unfinished run; it is never loaded")
-    folder = root / snapshot_id
-    if not (folder / MANIFEST_NAME).is_file():
-        raise SnapshotError(f"{folder} has no manifest; only finished snapshots load")
-    return folder
 
 
 def apply_ddl(conn: psycopg.Connection) -> None:
@@ -97,27 +75,6 @@ def check_columns(conn: psycopg.Connection) -> None:
         found = [row[0] for row in conn.execute(query, (table,)).fetchall()]
         if found != columns:
             raise SchemaDriftError(f"raw.{table} columns differ from the allowlist")
-
-
-def register(conn: psycopg.Connection, folder: Path, manifest: dict[str, Any]) -> int:
-    """Insert the raw.snapshot row; returns 1 when it is new, 0 when it was there."""
-    source_url = manifest["source_url"]
-    values = (
-        manifest["snapshot_id"],
-        manifest["capture_date"],
-        ", ".join(source_url) if isinstance(source_url, list) else source_url,
-        manifest["licence"],
-        str(folder / MANIFEST_NAME),
-        sha256_file(folder / MANIFEST_NAME),
-    )
-    cursor = conn.execute(
-        "insert into raw.snapshot "
-        "(snapshot_id, capture_date, source_url, licence, manifest_path, manifest_sha256, "
-        "registered_at) values (%s, %s, %s, %s, %s, %s, now()) "
-        "on conflict (snapshot_id) do nothing",
-        values,
-    )
-    return cursor.rowcount
 
 
 def load_table(conn: psycopg.Connection, folder: Path, table: str) -> int:
@@ -156,10 +113,7 @@ def load_snapshot(conn: psycopg.Connection, folder: Path) -> dict[str, int]:
         SnapshotError: if a file differs from the manifest.
         SchemaDriftError: if a raw table's columns differ from the allowlist.
     """
-    problems = verify_manifest(folder)
-    if problems:
-        raise SnapshotError(f"{len(problems)} files differ from the manifest: {problems[:3]}")
-    manifest = read_manifest(folder)
+    manifest = verified_manifest(folder)
     apply_ddl(conn)
     check_columns(conn)
     inserted = {"snapshot": register(conn, folder, manifest)}

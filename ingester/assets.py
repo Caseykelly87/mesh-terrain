@@ -27,6 +27,7 @@ from dagster import (
 from ingester import load
 from ingester.settings import get_ingester_settings
 from pipeline.common.settings import get_settings
+from pipeline.common.snapshot import snapshot_folder
 
 DECODE_RATE_WARN = 0.90
 CHECKS = [
@@ -60,7 +61,7 @@ def _connect() -> psycopg.Connection:
 @asset(key=["raw", "mqtt_snapshot"], check_specs=CHECKS, group_name="raw")
 def raw_mqtt_snapshot(config: SnapshotConfig) -> MaterializeResult:  # type: ignore[type-arg]
     """Load one snapshot's delivery and count tables into raw, insert-only."""
-    folder = load.snapshot_folder(get_ingester_settings().snapshots_dir, config.snapshot_id)
+    folder = snapshot_folder(get_ingester_settings().snapshots_dir, config.snapshot_id)
     with _connect() as conn:
         with conn.transaction():
             inserted = load.load_snapshot(conn, folder)

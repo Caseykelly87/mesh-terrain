@@ -49,8 +49,9 @@ from ingester.flush import FlushPolicy, folder_bytes, stop_reason
 from ingester.parquet import write_rows
 from ingester.reduce import LICENCE
 from ingester.sightings import Broker, SightingIndex
-from ingester.snapshot import flush_file, start_snapshot
+from ingester.snapshot import flush_file
 from ingester.topics import COVERAGE_ROOTS, topic_root
+from pipeline.common.snapshot import start_snapshot
 
 log = structlog.get_logger(component="ingester.capture")
 

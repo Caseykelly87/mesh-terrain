@@ -13,6 +13,9 @@ from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+# Snapshot folders live on the host outside every Docker volume (ADR 0005 item
+# 1); Compose sets SNAPSHOTS_DIR=/snapshots, a read-only mount of the same folder.
+DEFAULT_SNAPSHOTS_DIR = Path("C:/Users/Casey/mesh-terrain-data/snapshots")
 
 
 class Settings(BaseSettings):
@@ -51,6 +54,9 @@ class Settings(BaseSettings):
     log_format: Literal["console", "json"] = "console"
 
     dbt_project_dir: Path = REPO_ROOT / "dbt"
+
+    # Where finished and .partial snapshot folders are (snp_01, pipeline.common.snapshot).
+    snapshots_dir: Path = DEFAULT_SNAPSHOTS_DIR
 
     # Where the Dagster image puts the NTIA ITM shared library (ADR 0002).
     # terrain/itm.py loads it through ctypes; override for a host-side build.
