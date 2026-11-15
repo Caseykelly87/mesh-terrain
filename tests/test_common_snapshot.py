@@ -6,6 +6,7 @@ database test runs inside a transaction that is rolled back and is skipped
 where no warehouse answers, as in CI's tests job.
 """
 
+import ast
 import json
 import re
 from collections.abc import Iterator
@@ -236,7 +237,8 @@ def test_partial_and_finished_folders_are_listed_apart(tmp_path: Path) -> None:
 
 
 def test_snapshot_folder_finds_a_finished_snapshot(tmp_path: Path) -> None:
-    assert snapshot_folder(tmp_path, SNAPSHOT_ID) == finished(tmp_path)
+    final = finished(tmp_path)
+    assert snapshot_folder(tmp_path, SNAPSHOT_ID) == final
 
 
 def test_snapshot_folder_refuses_a_partial_folder(tmp_path: Path) -> None:
@@ -320,8 +322,15 @@ def test_a_manifest_naming_another_snapshot_is_not_registered(tmp_path: Path) ->
 
 
 def test_the_shared_module_never_updates_or_deletes() -> None:
-    # ing_07 and snp_01: registration only ever inserts.
-    assert not re.search(r"\b(update|delete|truncate|drop)\b", SOURCE, re.IGNORECASE)
+    # ing_07 and snp_01: registration only ever inserts. Only string literals
+    # are searched, where SQL lives, since dict.update is not a statement.
+    literals = [
+        node.value
+        for node in ast.walk(ast.parse(SOURCE))
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+    for literal in literals:
+        assert not re.search(r"\b(update|delete|truncate|drop)\b", literal, re.IGNORECASE)
 
 
 @pytest.fixture
