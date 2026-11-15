@@ -1,0 +1,22 @@
+{
+  "capture_date": "2026-11-15",
+  "files": [
+    {
+      "bytes": 237,
+      "path": "README.md",
+      "sha256": "6c4394452a73c76675f0db30c5af0896295d8bfbb676f122e7280fb6e88a9007"
+    },
+    {
+      "bytes": 170379,
+      "path": "dem.tif",
+      "sha256": "305d1758f7ece8c2618536aee60a19909a3b3522becb06fe92acb735d8f64607"
+    }
+  ],
+  "licence": "MIT, as the repository; no third-party data",
+  "seeds": {},
+  "snapshot_bytes": 170616,
+  "snapshot_id": "dem-1m-synthetic-subtile",
+  "source_url": "none: made-up values written by tests/make_engine_fixtures.py",
+  "synthetic": true,
+  "written_at": "2026-11-15T21:28:26+00:00"
+}

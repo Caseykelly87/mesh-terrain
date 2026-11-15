@@ -1,0 +1,11 @@
+# The typical handheld or rooftop Meshtastic node (docs/INTERFACE.md, Profiles).
+# 22 dBm is the ceiling of the SX1262 radio on most boards; the US region
+# allows 30 dBm, so a caller with a higher-power node adds its own profile.
+# Validation runs use this profile at both ends (ADR 0006 decision 5.1).
+height_m: 2.0
+gain_dbi: 0.0
+transmit_power_dbm: 22.0
+polarisation: vertical
+description: >-
+  Handheld or rooftop Meshtastic node: antenna 2 m above ground, 0 dBi net of
+  cable, 22 dBm transmit power, vertical polarisation.

@@ -1,0 +1,22 @@
+{
+  "capture_date": "2026-11-15",
+  "files": [
+    {
+      "bytes": 234,
+      "path": "README.md",
+      "sha256": "da800a5f8b46e4f66247b656ce8f06e935e3ac75f4e1d2de8eec4770a5a97612"
+    },
+    {
+      "bytes": 178952,
+      "path": "dsm.tif",
+      "sha256": "6f1ffb284179737e8b0f992c7ea3ee88cb851d1b5ac64d7fe4fb101557973849"
+    }
+  ],
+  "licence": "MIT, as the repository; no third-party data",
+  "seeds": {},
+  "snapshot_bytes": 179186,
+  "snapshot_id": "dsm-synthetic-subtile",
+  "source_url": "none: made-up values written by tests/make_engine_fixtures.py",
+  "synthetic": true,
+  "written_at": "2026-11-15T21:28:26+00:00"
+}
