@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from pipeline.common.settings import get_settings
+from terrain.errors import RefusedDrawError
 from terrain.itm import (
     ItmLibrary,
     ItmSettings,
@@ -20,7 +21,7 @@ from terrain.itm import (
     itm_profile,
     load_itm_library,
 )
-from terrain.result import RefusedDrawError
+from terrain.profile import PathProfile
 
 FLAT_DISTANCE_M = np.linspace(0.0, 10_000.0, 1001)
 FLAT_GROUND_M = np.zeros(1001)
@@ -36,6 +37,11 @@ NTIA_PFL_ELEVATIONS_M = [1692.0, 1692.0] + [
     )
     for _ in range(count)
 ] + [1709.0]  # fmt: skip
+
+
+FLAT_PROFILE = PathProfile(
+    distance_m=FLAT_DISTANCE_M, ground_m=FLAT_GROUND_M, tx_xy_m=(0.0, 0.0), rx_xy_m=(10_000.0, 0.0)
+)
 
 
 @pytest.fixture(scope="module")
@@ -87,8 +93,9 @@ def test_profile_refuses_a_shifted_start_and_mismatched_lengths() -> None:
 def test_missing_ground_refuses_the_draw() -> None:
     ground_m = FLAT_GROUND_M.copy()
     ground_m[1] = np.nan
-    with pytest.raises(RefusedDrawError, match="ground"):
+    with pytest.raises(RefusedDrawError, match="ground") as refusal:
         itm_profile(FLAT_DISTANCE_M, ground_m)
+    assert refusal.value.reason == "dem_gap"
 
 
 def test_missing_library_names_the_install_step(tmp_path: Path) -> None:
@@ -124,12 +131,7 @@ def test_error_codes_raise_with_their_name(code: int, name: str) -> None:
 def test_flat_path_reproduces_the_adr_0002_figure(itm_library: ItmLibrary) -> None:
     """10 km flat at sea level, 10 m step, 915 MHz, 2 m antennas: 151.76 dB."""
     result = itm_loss(
-        itm_library,
-        FLAT_DISTANCE_M,
-        FLAT_GROUND_M,
-        tx_height_m=2.0,
-        rx_height_m=2.0,
-        frequency_mhz=915.0,
+        itm_library, FLAT_PROFILE, tx_height_m=2.0, rx_height_m=2.0, frequency_mhz=915.0
     )
     assert result.loss_db == pytest.approx(151.76, abs=0.005)
     assert result.troposcatter_loss_db is None
@@ -139,10 +141,15 @@ def test_flat_path_reproduces_the_adr_0002_figure(itm_library: ItmLibrary) -> No
 def test_ntia_point_to_point_example(itm_library: ItmLibrary) -> None:
     """NTIA cmd_examples i_p2pcr.txt and o_p2pcr.txt: 114.5 dB, no warnings."""
     distance_m = np.arange(143) * NTIA_PFL_STEP_M
+    profile = PathProfile(
+        distance_m=distance_m,
+        ground_m=np.array(NTIA_PFL_ELEVATIONS_M),
+        tx_xy_m=(0.0, 0.0),
+        rx_xy_m=(float(distance_m[-1]), 0.0),
+    )
     result = itm_loss(
         itm_library,
-        distance_m,
-        np.array(NTIA_PFL_ELEVATIONS_M),
+        profile,
         tx_height_m=15.0,
         rx_height_m=3.0,
         frequency_mhz=3500.0,
@@ -154,11 +161,4 @@ def test_ntia_point_to_point_example(itm_library: ItmLibrary) -> None:
 
 def test_out_of_range_input_raises(itm_library: ItmLibrary) -> None:
     with pytest.raises(RuntimeError, match="FREQUENCY"):
-        itm_loss(
-            itm_library,
-            FLAT_DISTANCE_M,
-            FLAT_GROUND_M,
-            tx_height_m=2.0,
-            rx_height_m=2.0,
-            frequency_mhz=1.0,
-        )
+        itm_loss(itm_library, FLAT_PROFILE, tx_height_m=2.0, rx_height_m=2.0, frequency_mhz=1.0)

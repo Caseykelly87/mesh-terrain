@@ -19,6 +19,7 @@ import pytest
 from pyproj import Transformer
 
 from terrain import p1812
+from terrain.errors import RefusedDrawError
 from terrain.p1812 import (
     P1812,
     BtLossInputs,
@@ -29,7 +30,8 @@ from terrain.p1812 import (
     p1812_loss,
     troposcatter_loss_from_log,
 )
-from terrain.result import PathLossResult, RefusedDrawError
+from terrain.profile import PathProfile
+from terrain.result import PathLossResult
 
 FloatArray = npt.NDArray[np.float64]
 
@@ -58,21 +60,28 @@ def constant_maps(dn: float, n0: float) -> P1812Maps:
     )
 
 
-def call_flat(clutter_m: FloatArray | None = None, **overrides: Any) -> PathLossResult:
+PROFILE_FIELDS = frozenset({"distance_m", "ground_m", "clutter_m", "tx_xy_m", "rx_xy_m"})
+
+
+def call_flat(**overrides: Any) -> PathLossResult:
+    """p1812_loss on the 10 km flat path with R 0; overrides go to the profile or the call."""
     distance_m, ground_m, rx_xy_m = flat_path()
-    arguments: dict[str, Any] = {
+    fields: dict[str, Any] = {
         "distance_m": distance_m,
         "ground_m": ground_m,
-        "clutter_m": np.zeros_like(distance_m) if clutter_m is None else clutter_m,
+        "clutter_m": np.zeros_like(distance_m),
         "tx_xy_m": TX_XY_M,
         "rx_xy_m": rx_xy_m,
+    }
+    options: dict[str, Any] = {
         "tx_height_m": 2.0,
         "rx_height_m": 2.0,
         "frequency_mhz": 915.0,
         "maps": load_maps(FIXTURE),
     }
-    arguments.update(overrides)
-    return p1812_loss(**arguments)
+    for name, value in overrides.items():
+        (fields if name in PROFILE_FIELDS else options)[name] = value
+    return p1812_loss(PathProfile(**fields), **options)
 
 
 def flat_inputs(clutter_m: FloatArray) -> BtLossInputs:
@@ -372,8 +381,9 @@ def test_nan_in_clutter_is_refused_before_bt_loss(
     clutter[index] = np.nan
     calls: list[object] = []
     monkeypatch.setattr(P1812, "bt_loss", lambda *a, **k: calls.append(a))
-    with pytest.raises(RefusedDrawError, match="clutter"):
+    with pytest.raises(RefusedDrawError, match="clutter") as refusal:
         call_flat(clutter_m=clutter)
+    assert refusal.value.reason == "clutter_nan"
     assert calls == []
 
 
@@ -382,8 +392,9 @@ def test_nan_in_ground_is_refused_before_bt_loss(monkeypatch: pytest.MonkeyPatch
     ground_m[400] = np.nan
     calls: list[object] = []
     monkeypatch.setattr(P1812, "bt_loss", lambda *a, **k: calls.append(a))
-    with pytest.raises(RefusedDrawError, match="ground"):
+    with pytest.raises(RefusedDrawError, match="ground") as refusal:
         call_flat(ground_m=ground_m)
+    assert refusal.value.reason == "dem_gap"
     assert calls == []
 
 
@@ -404,15 +415,9 @@ def test_refused_draw_is_not_a_value_error() -> None:
 # Profiles the wrapper rejects at the boundary
 
 
-def test_zero_length_path_is_a_value_error() -> None:
-    distance_m = np.zeros(5)
+def test_coinciding_endpoints_are_a_zero_length_path() -> None:
     with pytest.raises(ValueError, match="zero-length"):
-        call_flat(
-            distance_m=distance_m,
-            ground_m=np.full(5, 150.0),
-            clutter_m=np.zeros(5),
-            rx_xy_m=TX_XY_M,
-        )
+        call_flat(rx_xy_m=TX_XY_M)
 
 
 def test_fewer_than_five_samples_is_a_value_error() -> None:
@@ -427,19 +432,10 @@ def test_profile_must_end_at_the_receiver() -> None:
         call_flat(distance_m=distance_m, ground_m=ground_m, clutter_m=np.zeros_like(ground_m))
 
 
-def test_profile_must_start_at_zero_and_increase() -> None:
-    distance_m, _, _ = flat_path()
-    backwards = distance_m.copy()
-    backwards[10], backwards[11] = backwards[11], backwards[10]
-    with pytest.raises(ValueError, match="increasing"):
-        call_flat(distance_m=backwards)
-    with pytest.raises(ValueError, match="start at 0"):
-        call_flat(distance_m=distance_m + 1.0)
-
-
-def test_arrays_must_have_one_length() -> None:
-    with pytest.raises(ValueError, match="length"):
-        call_flat(clutter_m=np.zeros(1000))
+def test_profile_without_clutter_is_a_value_error() -> None:
+    """P.1812 is null where only the metro DEM exists (decision 4); path_loss_db skips the call."""
+    with pytest.raises(ValueError, match="clutter"):
+        call_flat(clutter_m=None)
 
 
 def test_call_bt_loss_returns_the_log_text() -> None:
