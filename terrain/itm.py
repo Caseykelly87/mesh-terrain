@@ -28,7 +28,7 @@ import numpy as np
 import numpy.typing as npt
 import structlog
 
-from terrain.errors import RefusedDrawError
+from terrain.errors import RefusedDrawError, ZeroLengthPathError
 from terrain.profile import PathProfile
 from terrain.result import PathLossResult
 
@@ -182,16 +182,20 @@ def itm_profile(distance_m: FloatArray, ground_m: FloatArray) -> FloatArray:
         ground_m: Ground height at each sample, metres above NAVD88, uncurved.
 
     Raises:
-        ValueError: for a zero-length path, fewer than five samples, arrays of
-            different lengths, a first distance other than 0 or an uneven step.
-        RefusedDrawError: `dem_gap` if a ground height is missing.
+        ZeroLengthPathError: if the profile has no extent.
+        ValueError: for arrays of different lengths, a first distance other
+            than 0 or an uneven step.
+        RefusedDrawError: `short_profile` for fewer than five samples, `dem_gap`
+            if a ground height is missing.
     """
     if distance_m.shape != ground_m.shape:
         raise ValueError("distance and ground arrays must have one length")
     if distance_m.size < MIN_SAMPLES:
-        raise ValueError(f"an ITM profile needs at least five samples, got {distance_m.size}")
+        raise RefusedDrawError(
+            "short_profile", f"an ITM profile needs at least five samples, got {distance_m.size}"
+        )
     if distance_m[-1] == 0.0:
-        raise ValueError("zero-length path: the profile has no extent")
+        raise ZeroLengthPathError("zero-length path: the profile has no extent")
     if distance_m[0] != 0.0:
         raise ValueError(f"profile distances must start at 0, got {distance_m[0]} m")
     step_m = float(distance_m[-1]) / (distance_m.size - 1)
@@ -246,8 +250,9 @@ def itm_loss(
         The loss in dB, antenna gains excluded, with ITM's warning flags.
 
     Raises:
+        ZeroLengthPathError: if the profile has no extent.
         ValueError: for a profile `itm_profile` rejects or an unknown polarisation.
-        RefusedDrawError: `dem_gap` if a ground height is missing.
+        RefusedDrawError: `short_profile` or `dem_gap`, as `itm_profile` raises them.
         RuntimeError: if ITM returns an error code or a loss that is not finite.
     """
     if polarisation not in POLARISATION_CODES:
