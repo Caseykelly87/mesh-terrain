@@ -73,10 +73,25 @@ target-version = "py312"
 extend-exclude = ["notebooks", "dbt/dbt_packages", "dbt/target", "docs/adr", "*.md"]
 
 [tool.ruff.lint]
-# S506 alone from the bandit set: the engine config is loaded with
-# yaml.safe_load only (Casey, PR #27, 2026-11-15), and S506 fails a yaml.load
-# without a safe Loader.
-select = ["E", "F", "I", "UP", "B", "N", "S506"]
+# The engine config is loaded with yaml.safe_load only (Casey, PR #27,
+# 2026-11-15). S506, alone from the bandit set, fails yaml.load unless its
+# Loader is SafeLoader or CSafeLoader. TID251 fails the names listed below,
+# wherever they are used or imported from the top-level yaml module; the same
+# objects reached through a submodule (yaml.loader, yaml.cyaml) are not checked.
+select = ["E", "F", "I", "UP", "B", "N", "S506", "TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"yaml.unsafe_load".msg = "Load YAML with yaml.safe_load."
+"yaml.unsafe_load_all".msg = "Load YAML with yaml.safe_load."
+"yaml.full_load".msg = "Load YAML with yaml.safe_load."
+"yaml.full_load_all".msg = "Load YAML with yaml.safe_load."
+"yaml.load_all".msg = "Load YAML with yaml.safe_load."
+"yaml.Loader".msg = "Load YAML with yaml.safe_load."
+"yaml.UnsafeLoader".msg = "Load YAML with yaml.safe_load."
+"yaml.FullLoader".msg = "Load YAML with yaml.safe_load."
+"yaml.CLoader".msg = "Load YAML with yaml.safe_load."
+"yaml.CUnsafeLoader".msg = "Load YAML with yaml.safe_load."
+"yaml.CFullLoader".msg = "Load YAML with yaml.safe_load."
 
 [tool.ruff.lint.isort]
 known-first-party = ["pipeline", "terrain", "ingester"]
