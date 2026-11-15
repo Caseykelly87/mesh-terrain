@@ -186,16 +186,18 @@ services:
     restart: "no"
     working_dir: /work
     # Docker's default bridge, not the project network: PDAL reaches the
-    # internet for lidar but cannot resolve or reach the warehouse or MinIO.
+    # internet for lidar but cannot resolve the stack's service names.
     network_mode: bridge
     environment:
       # The image turns PROJ's network on, so a NAD83 to WGS 84 step uses a
-      # NOAA HPGN grid when cdn.proj.org answers and the null transform when it
-      # does not: the same pipeline then gives different points on different
-      # machines (56 893 against 56 918 in a 100 m box of x72y429). USGS built
-      # its EPSG:3857 EPT with the null transform, so off, PROJ inverts it and
-      # returns the delivered NAD83(2011) coordinates to within the EPT's 1 cm,
-      # where the grid moves them 0.41 m.
+      # NOAA HPGN grid when cdn.proj.org answers, and a run whose grid fetch
+      # failed wrote 0 points and exited 0: the same pipeline then gives
+      # different results on different machines (56 893 points with the grid,
+      # 56 918 with the network off, in a 100 m box of x72y429). USGS built
+      # the EPSG:3857 EPT of USGS_LPC_MO_StLouis_2017_LAS_2018 with the null
+      # transform, so off, PROJ inverts it and returns the delivered NAD83(2011)
+      # coordinates within 6 mm (largest difference 5.8 mm, in X), where the
+      # grid moves them 0.41 m.
       PROJ_NETWORK: "OFF"
 
 volumes:
