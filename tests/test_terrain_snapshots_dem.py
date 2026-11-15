@@ -20,7 +20,7 @@ from pipeline.terrain_snapshots.remote import PinMismatchError, PinnedObject
 
 TIF_URL = "https://example.test/1m/TIFF/USGS_one_meter_x0y1_TEST.tif"
 XML_URL = "https://example.test/1m/metadata/USGS_one_meter_x0y1_TEST_meta.xml"
-META_XML = b"<metadata><idinfo><citation><citeinfo><pubdate>20200330</pubdate></citeinfo></citation></idinfo></metadata>"
+META_XML = b"<metadata><idinfo><citation><citeinfo><pubdate>20200330</pubdate></citeinfo>"
 TODAY = date(2026, 11, 15)
 
 
@@ -28,7 +28,12 @@ def _source(web: FakeWeb, tmp_path: Path, *, nodata_cells: int = 0, epsg: int = 
     heights = np.full((12, 12), 180.0, dtype=np.float32)
     heights.flat[:nodata_cells] = -999999.0
     body = write_geotiff(
-        tmp_path / "src.tif", heights, epsg=epsg, west=719994.0, north=4280006.0, res=1.0,
+        tmp_path / "src.tif",
+        heights,
+        epsg=epsg,
+        west=719994.0,
+        north=4280006.0,
+        res=1.0,
         nodata=-999999.0,
     )
     return DemSource(
@@ -61,7 +66,11 @@ def test_writes_the_tile_and_its_metadata_with_a_verified_manifest(tmp_path: Pat
     assert [record["url"] for record in manifest["source_objects"]] == [TIF_URL, XML_URL]
     assert all(len(record["sha256"]) == 64 for record in manifest["source_objects"])
     paths = {entry["path"] for entry in manifest["files"]}
-    assert paths == {"README.md", "USGS_one_meter_x0y1_TEST.tif", "USGS_one_meter_x0y1_TEST_meta.xml"}
+    assert paths == {
+        "README.md",
+        "USGS_one_meter_x0y1_TEST.tif",
+        "USGS_one_meter_x0y1_TEST_meta.xml",
+    }
 
 
 def test_refuses_a_tile_whose_crs_is_not_the_pinned_one(tmp_path: Path) -> None:
