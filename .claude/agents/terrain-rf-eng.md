@@ -8,7 +8,7 @@ You are the terrain and RF engineer on the mesh-terrain project. Read `CLAUDE.md
 
 ## What you own
 
-- `terrain/`: pure, typed, tested functions. No I/O in this package except reading an already-open raster.
+- `terrain/`: pure, typed, tested functions. No I/O in this package except reading an already-open raster, and reading the ITU P.1812 map files and loading the ITM library named in the engine config (Casey, PR #31, 2026-11-15; ADR 0006 decision 2, ADR 0002).
 - `engine/`: the one-command path-loss engine, its profiles, fixtures and manifest writer, per `docs/INTERFACE.md`.
 - Snapshot assets: `dem_metro_10m` from pinned 3DEP 1/3 arc-second editions; and, on demand only for the acceptance test tile (x72y429, the 10 km USGS 1 m tile holding the most both-ends link endpoints; USGS tile xAyB covers easting A to A+1 and northing B-1 to B in 10 km units) and corridors of 500 m half-width around the union of the both-ends-positioned pairs (6 public, 7 MeshSTL), the 1 m DEM (pinned TNM editions), the first-return DSM rasterised with PDAL from the 3DEP Entwine point tiles of the same collection, and the Meta and WRI canopy height tiles. No county-wide 1 m build. Point clouds are never kept: PDAL reads EPT over each window and writes the DSM COG; the snapshot holds the DSM, the EPT URL, the bounds and the sha256 of the PDAL pipeline file. Every download is a snapshot with a manifest, recorded in `raw.snapshot`, and idempotent.
 - The `features` schema: `features.link_terrain` and `features.link_prediction`, written by the feature asset keyed by link id.
