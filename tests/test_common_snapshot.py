@@ -343,7 +343,7 @@ def test_a_manifest_naming_another_snapshot_is_not_registered(tmp_path: Path) ->
     assert conn.statements == []
 
 
-@pytest.mark.parametrize("field", ["capture_date", "source_url", "licence"])
+@pytest.mark.parametrize("field", ["capture_date", "source_url", "licence", "seeds"])
 def test_a_manifest_without_a_snp_01_field_is_not_registered(tmp_path: Path, field: str) -> None:
     final = finished(tmp_path)
     incomplete = {key: value for key, value in read_manifest(final).items() if key != field}
