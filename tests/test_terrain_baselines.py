@@ -31,20 +31,65 @@ def test_fspl_rejects_non_positive_inputs(distance_m: float, frequency_mhz: floa
         fspl_db(distance_m, frequency_mhz)
 
 
-def test_hata_urban_matches_the_published_example() -> None:
-    # RF Wireless World, Hata model path loss calculator: 900 MHz, base station
-    # 100 m, mobile 2 m, 4 km gives a(hm) = 1.29 dB and 137.05 dB.
-    assert hata_db(4_000.0, 900.0, 100.0, 2.0, "urban") == pytest.approx(137.05, abs=0.1)
+# Okumura-Hata worked by hand from the published formula.
+#
+# Source: M. Hata, "Empirical formula for propagation loss in land mobile radio
+# services", IEEE Trans. Veh. Technol., vol. VT-29, no. 3, pp. 317-325, Aug.
+# 1980, doi:10.1109/T-VT.1980.23859. The paper itself was not read (the unit
+# downloads nothing), so no equation number is cited. The form below is as the
+# Wikipedia article "Hata model" (read 2026-11-15) gives it, citing that paper:
+#
+#   urban     LU  = 69.55 + 26.16 log f - 13.82 log hB - CH + (44.9 - 6.55 log hB) log d
+#   small or medium city
+#             CH  = 0.8 + (1.1 log f - 0.7) hM - 1.56 log f
+#   suburban  LSU = LU - 2 (log(f / 28))^2 - 5.4
+#
+# with f in MHz, hB and hM in metres, d in km and log the base 10 logarithm.
+#
+# Case 1, inside every validity range: f = 900, hB = 100, hM = 2, d = 4.
+#   log f = 2.95424, log hB = 2.00000, log d = 0.60206
+#   26.16 log f                   = 77.283
+#   13.82 log hB                  = 27.640
+#   CH = 0.8 + (3.24967 - 0.7) x 2 - 4.60862 = 1.291
+#   (44.9 - 13.100) log d = 31.800 x 0.60206 = 19.146
+#   LU  = 69.55 + 77.283 - 27.640 - 1.291 + 19.146 = 137.048 dB
+#   log(f / 28) = 1.50708; 2 x 1.50708^2 + 5.4 = 9.943
+#   LSU = 137.048 - 9.943 = 127.105 dB
+#
+# Case 2, at our 915 MHz with a base inside the 30 m floor: f = 915, hB = 30,
+# hM = 2, d = 5.
+#   log f = 2.96142, log hB = 1.47712, log d = 0.69897
+#   26.16 log f                   = 77.471
+#   13.82 log hB                  = 20.414
+#   CH = 0.8 + (3.25756 - 0.7) x 2 - 4.61982 = 1.295
+#   (44.9 - 9.675) log d = 35.225 x 0.69897 = 24.621
+#   LU  = 69.55 + 77.471 - 20.414 - 1.295 + 24.621 = 149.933 dB
+#   log(f / 28) = 1.51426; 2 x 1.51426^2 + 5.4 = 9.986
+#   LSU = 149.933 - 9.986 = 139.947 dB
+HATA_CASES = [
+    # distance_m, frequency_mhz, base_m, mobile_m, urban_db, suburban_db
+    (4_000.0, 900.0, 100.0, 2.0, 69.55 + 77.283 - 27.640 - 1.291 + 19.146, 137.048 - 9.943),
+    (5_000.0, 915.0, 30.0, 2.0, 69.55 + 77.471 - 20.414 - 1.295 + 24.621, 149.933 - 9.986),
+]
 
 
-def test_hata_suburban_applies_hatas_correction() -> None:
-    urban = hata_db(4_000.0, 900.0, 100.0, 2.0, "urban")
-    correction = 2.0 * math.log10(900.0 / 28.0) ** 2 + 5.4
+@pytest.mark.parametrize(
+    ("distance_m", "frequency_mhz", "base_m", "mobile_m", "urban_db", "suburban_db"),
+    HATA_CASES,
+)
+def test_hata_matches_the_hand_worked_formula(
+    distance_m: float,
+    frequency_mhz: float,
+    base_m: float,
+    mobile_m: float,
+    urban_db: float,
+    suburban_db: float,
+) -> None:
+    urban = hata_db(distance_m, frequency_mhz, base_m, mobile_m, "urban")
+    suburban = hata_db(distance_m, frequency_mhz, base_m, mobile_m, "suburban")
 
-    suburban = hata_db(4_000.0, 900.0, 100.0, 2.0, "suburban")
-
-    assert suburban == pytest.approx(urban - correction)
-    assert correction == pytest.approx(9.94, abs=0.01)
+    assert urban == pytest.approx(urban_db, abs=0.01)
+    assert suburban == pytest.approx(suburban_db, abs=0.01)
 
 
 def test_hata_takes_the_higher_antenna_as_the_base_station() -> None:
