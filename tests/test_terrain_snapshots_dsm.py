@@ -92,6 +92,8 @@ class FakeMake:
             nodata=-9999.0,
         ) as dst:
             dst.write(np.stack([heights, counts]))
+            dst.set_band_description(1, "max")
+            dst.set_band_description(2, "count")
 
 
 def _osm_snapshot(root: Path, water_26915: list[tuple[float, float, float, float]]) -> Path:
