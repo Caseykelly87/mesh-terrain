@@ -120,6 +120,56 @@ What it shows:
 - The in-memory placeholder gives the same import, the same 149.48 dB with DN and N0, and the same `IndexError` without them as run 2's file. The installed package holds no npz after the import. `P1812.files` keeps the replacement after the import, which is harmless because line 19 is its only use.
 - A NaN in R never makes Lb NaN, and no warning is raised. The NaN enters `g = h + R` (`P1812.py` line 330). At most points the comparisons after it skip that point, as though it had no clutter: on the flat path with R = 10 m a NaN at index 300 or 999 leaves 160.17 dB. Where the skipped point is the one obstacle that sets the loss, the obstacle vanishes: the single 30 m clutter point gives 159.74 dB, and the same point marked NaN gives 149.48 dB, the bare-ground figure. At index 1, the first interior point next to the transmitter, a NaN does worse. `dl_bull` (lines 1819 to 1846) takes its largest slope with Python's built-in `max`, which returns NaN when the first element is NaN; every test after that is false, and the knife-edge loss of the whole path is 0. The flat path then gives 137.36 dB, below the bare-ground 149.48 dB, and the hilly path (a 40 m sinusoidal relief: 190.23 dB with R = 10 m, 176.55 dB bare) also gives 137.36 dB, 52.87 dB too low. So a NaN is skipped, except at the first interior point, where it removes the path's diffraction loss, and the wrapper has to fill or refuse every NaN in R before it calls `bt_loss`.
 
+## Run 4: clutter at the terminals and the troposcatter floor (`spike_terminal.py`, `spike_floor.py`)
+
+For Casey's addition C, after his decision of 2026-11-14. Same in-memory import, flat ground at 150 m, St. Louis DN 39.126 and N0 324.511, 915 MHz, p 50, 2 m antennas unless stated. Both ran with `-W error::RuntimeWarning`.
+
+The text of P.1812-8 was read from the ITU's public PDF, `https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.1812-8-202509-I!!PDF-E.pdf` (1 137 557 bytes, 36 pages, sha256 `0c106ef6d2dfe1b287fd88756350a26719d922be8b88520da3203c65b80d4a7e`), fetched into its own folder in the scratch directory and not committed.
+
+```
+$S/p1812-env/.venv/Scripts/python.exe -I -W error::RuntimeWarning spike_terminal.py
+$S/p1812-env/.venv/Scripts/python.exe -I -W error::RuntimeWarning spike_floor.py
+```
+
+`spike_terminal.py`:
+
+```
+step 10.0 m: bare 149.48 dB
+step 10.0 m: 8 m at the Tx point only (index 0) 149.48 dB
+step 10.0 m: 8 m over the first 15 m 160.17 dB
+step 10.0 m: 10 m everywhere 160.17 dB
+step 10.0 m: 10 m blocks, 15 m of every 40 m 160.17 dB
+step  1.0 m: bare 149.48 dB
+step  1.0 m: 8 m at the Tx point only (index 0) 149.48 dB
+step  1.0 m: 8 m over the first 15 m 160.17 dB
+step  1.0 m: 10 m everywhere 160.17 dB
+step  1.0 m: 10 m blocks, 15 m of every 40 m 160.17 dB
+```
+
+`spike_floor.py`:
+
+```
+10 km, R 0, 2 m / 2 m: Lb 149.48 dB
+10 km, R 1, 2 m / 2 m: Lb 150.20 dB
+10 km, R 2, 2 m / 2 m: Lb 151.79 dB
+10 km, R 3, 2 m / 2 m: Lb 160.17 dB
+10 km, 8 m over first 15 m only, 10 m step: Lb 160.17 dB
+10 km, 8 m over first 15 m only, 1 m step: Lb 160.17 dB
+10 km, 4 m over first 15 m only, 1 m step: Lb 160.17 dB
+3 km, R 0, 2 m / 2 m: Lb 125.41 dB
+3 km, R 10, 2 m / 2 m: Lb 149.71 dB
+10 km, R 10, 2 m / 10 m gateway: Lb 160.02 dB
+10 km, R 0, 2 m / 10 m gateway: Lb 134.65 dB
+```
+
+What it shows:
+
+- Clutter at the terminal point itself changes nothing (149.48 dB with 8 m at index 0). This matches P.1812-8 section 3.2 and `g[0] = h[0]` in Py1812.
+- Once clutter anywhere on the path stands taller than a 2 m antenna, the result stops depending on the clutter. Examples: 3 m along the whole 10 km path; 4 m or 8 m over the first 15 m only, at either step; 10 m blocks with gaps. All give 160.17 dB.
+- Py1812's debug log names the cause. With R = 10 m the diffraction loss Ld50 is 94.77 dB and with R = 3 m 76.72 dB, so the diffraction path (Lbam) is 206.36 dB or 188.33 dB. Equation (63) combines that with the troposcatter loss Lbs, 160.17 dB, and the smaller term wins. Lbs depends on distance and the atmosphere, not on the clutter: 160.17 dB at 10 km.
+- A 10 m gateway antenna does not escape it with 10 m clutter (160.02 dB).
+- Below the antenna height the clutter still counts: R = 1 m gives 150.20 dB, R = 2 m 151.79 dB.
+
 ## Install form checks
 
 - Git source without git: with `git` removed from `PATH` and an empty uv cache, the `git+https` install fails with `Git executable not found. Ensure that Git is installed and available.` The local `mesh-terrain-dagster-webserver` image has no `git` (`command -v git` empty), so option 1.1 needs git added to the image.
