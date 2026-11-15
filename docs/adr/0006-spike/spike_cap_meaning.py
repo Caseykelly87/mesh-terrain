@@ -15,7 +15,7 @@ comparisons that test will make, at the pinned commit, on synthetic paths:
    term is 0 at pL = 50 and sigmaL = 0).
 
 Each check passes within TOLERANCE_DB. The log writes values with %.10g, so
-logged values carry rounding of about 1e-8 dB at 100 to 200 dB.
+logged values carry rounding of up to 5e-8 dB at 100 to 200 dB.
 
 St. Louis DN 39.126 and N0 324.511, 915 MHz, p 50, vertical, zone 4, 10 m step,
 ground at 150 m unless a case gives hills.
