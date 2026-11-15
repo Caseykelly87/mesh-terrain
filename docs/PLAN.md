@@ -62,7 +62,7 @@ TTN Mapper is not a source. Its dumps are gone (the last, from 2020, is unarchiv
 | Esri | ArcGIS Pro 3.x, arcpy, ArcGIS Online hosted feature layer |
 | Quality | pytest, ruff, mypy, pre-commit, dbt tests, Dagster asset checks, GitHub Actions |
 | Infra | Docker Compose, every service `restart: "no"`; Terraform 1.x on AWS in Phase 6 |
-| Config, logging | pydantic-settings, structlog, psycopg 3 |
+| Config, logging | pydantic-settings, PyYAML (engine config, `yaml.safe_load` only), structlog, psycopg 3 |
 
 Deliberately not used: Airflow, PostGIS raster, Spark or Sedona, Great Expectations, Kubernetes, NLCD.
 
