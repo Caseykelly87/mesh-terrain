@@ -13,7 +13,9 @@ dependencies = [
     "dagster-webserver==1.13.26",
     "dbt-core==1.12.6",
     "dbt-postgres==1.11.0",
+    "geopandas==1.2.0",
     "meshtastic==2.7.11",
+    "numpy==2.5.4",
     "paho-mqtt==2.2.0",
     "psycopg[binary]==3.3.6",
     "pyarrow==26.0.1",
@@ -21,6 +23,12 @@ dependencies = [
     # uv.lock records its sha256 (ADR 0006).
     "py1812 @ https://github.com/eeveetza/Py1812/archive/6c9061dd022e93c84169059a016643926ce89964.tar.gz",
     "pydantic-settings==2.16.1",
+    "pyproj==3.8.0",
+    "pyrosm==0.29.0",
+    "rasterio==1.5.2",
+    "rio-cogeo==7.0.4",
+    "scipy==1.18.1",
+    "shapely==2.2.0",
     "structlog==26.1.0",
 ]
 
@@ -50,8 +58,10 @@ build-constraint-dependencies = ["flit-core==3.12.0"]
 [tool.hatch.metadata]
 allow-direct-references = true
 
+# engine is listed before terrain-rf-eng creates it: hatchling leaves a missing
+# package out of the wheel, so the build passes now and includes it later.
 [tool.hatch.build.targets.wheel]
-packages = ["pipeline", "terrain", "ingester"]
+packages = ["pipeline", "terrain", "ingester", "engine"]
 
 [tool.ruff]
 line-length = 100
@@ -74,18 +84,36 @@ strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
 
-# pyarrow, protobuf and meshtastic carry no py.typed marker. Each imported
-# module is listed by name, so a new untyped import still fails until someone
-# decides how to type it. follow_untyped_imports fails here: mypy cannot see
-# pyarrow's public names, which come from compiled modules, and protobuf's
+# pyarrow, protobuf, meshtastic and Py1812 carry no py.typed marker. Each
+# imported module is listed by name, so a new untyped import still fails until
+# someone decides how to type it. follow_untyped_imports fails here: mypy cannot
+# see pyarrow's public names, which come from compiled modules, and protobuf's
 # runtime is unannotated, which strict mode rejects at every call.
+#
+# The untyped raster and vector packages are listed whole, with their
+# submodules, because the decision is the same for every module in them and
+# the engine will import many. Stub packages exist for scipy, shapely and
+# geopandas, but they are outside the plan's stack table. numpy, pyproj and
+# rio-cogeo ship py.typed and are checked.
 [[tool.mypy.overrides]]
 module = [
     "google.protobuf.message",
     "meshtastic.protobuf",
+    "Py1812",
+    "Py1812.P1812",
     "pyarrow",
     "pyarrow.compute",
     "pyarrow.parquet",
+    "geopandas",
+    "geopandas.*",
+    "pyrosm",
+    "pyrosm.*",
+    "rasterio",
+    "rasterio.*",
+    "scipy",
+    "scipy.*",
+    "shapely",
+    "shapely.*",
 ]
 ignore_missing_imports = true
 
