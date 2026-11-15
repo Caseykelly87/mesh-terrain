@@ -173,6 +173,26 @@ services:
       retries: 18
       start_period: 40s
 
+  pdal:
+    # One-shot runner for `make pdal`, which passes the work and pipeline
+    # folders as run-time mounts because only the caller knows them; the
+    # profile keeps `make up` from starting it. PDAL has no Windows wheel, and
+    # its own image keeps it out of the Dagster and engine images.
+    # The 2.9.2 tag's `pdal` command is conda-forge's PDAL 2.8.4: the image
+    # builds 2.9.2 from source and then installs python-pdal, which brings
+    # libpdal 2.8.4 and replaces the binary. Only the digest is trusted here.
+    profiles: [pdal]
+    image: pdal/pdal:2.9.2@sha256:18d73101500cd673052ee4ead8a4b716a9dad09c8711e88e7a37abed2496c469
+    restart: "no"
+    working_dir: /work
+    environment:
+      # The image turns PROJ's network on, so a NAD83 to WGS 84 step uses a
+      # NOAA HPGN grid when cdn.proj.org answers and the null transform when it
+      # does not: the same pipeline then gives different points on different
+      # machines (56 893 against 56 918 in a 100 m box of x72y429). Off, the
+      # transform is the null one everywhere and never touches the network.
+      PROJ_NETWORK: "OFF"
+
 volumes:
   warehouse-data:
   minio-data:

@@ -1,10 +1,10 @@
 # Passes the CA bundle named by CA_BUNDLE_PATH in .env to the warehouse and
 # Dagster image builds as the BuildKit secret ca_bundle (the two Dockerfiles
-# say which steps mount it and why). The Makefile adds this file to every
-# compose command only when CA_BUNDLE_PATH is set. Compose has no optional
-# build secret: an empty path resolves to the project folder and the build
-# fails reading it, so a build without the bundle, as in CI, must not see
-# this file at all.
+# say which steps mount it and why), and to the pdal service at run time. The
+# Makefile adds this file to every compose command only when CA_BUNDLE_PATH is
+# set. Compose has no optional build secret: an empty path resolves to the
+# project folder and the build fails reading it, so a build without the
+# bundle, as in CI, must not see this file at all.
 services:
   warehouse:
     build:
@@ -18,6 +18,21 @@ services:
   dagster-daemon:
     build:
       secrets: [ca_bundle]
+  pdal:
+    # PDAL streams lidar over HTTPS while it runs, so the bundle is needed at
+    # run time, not at build time. A read-only bind mount keeps it out of
+    # every image layer and image ENV (Casey, PR #27 comment 6896967847).
+    volumes:
+      - ${CA_BUNDLE_PATH}:/run/secrets/ca_bundle:ro
+    environment:
+      # PDAL's HTTP client (arbiter, used by readers.ept) takes a CA file only
+      # from CURL_CAINFO, CURL_CA_INFO or ARBITER_CA_INFO; it reads
+      # CURL_CA_BUNDLE as a CA directory, and with that alone the EPT read
+      # fails on Norton's certificate.
+      CURL_CA_INFO: /run/secrets/ca_bundle
+      # GDAL's /vsicurl/ ignores CURL_CA_INFO. GDAL_CURL_CA_BUNDLE is its own
+      # name for the setting, which arbiter does not read.
+      GDAL_CURL_CA_BUNDLE: /run/secrets/ca_bundle
 
 secrets:
   ca_bundle:
