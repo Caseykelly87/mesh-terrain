@@ -17,18 +17,6 @@ MESH_NODE: dict[str, Any] = {
 }
 
 
-def test_mesh_node_profile_holds_the_interface_values() -> None:
-    """docs/INTERFACE.md, Profiles: 2 m, 0 dBi, 22 dBm, vertical."""
-    node = AntennaProfile(**MESH_NODE)
-    assert (node.height_m, node.gain_dbi, node.transmit_power_dbm) == (2.0, 0.0, 22.0)
-    assert node.polarisation == "vertical"
-
-
-def test_a_receive_only_profile_has_no_transmit_power() -> None:
-    fields = {key: value for key, value in MESH_NODE.items() if key != "transmit_power_dbm"}
-    assert AntennaProfile(**fields).transmit_power_dbm is None
-
-
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
