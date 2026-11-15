@@ -21,7 +21,7 @@ from pyproj import Transformer
 from structlog.testing import capture_logs
 
 from terrain import p1812
-from terrain.errors import RefusedDrawError
+from terrain.errors import RefusedDrawError, ZeroLengthPathError
 from terrain.p1812 import (
     P1812,
     BtLossInputs,
@@ -436,14 +436,16 @@ def test_refused_draw_is_not_a_value_error() -> None:
 
 
 def test_coinciding_endpoints_are_a_zero_length_path() -> None:
-    with pytest.raises(ValueError, match="zero-length"):
+    with pytest.raises(ZeroLengthPathError, match="zero-length"):
         call_flat(rx_xy_m=TX_XY_M)
 
 
-def test_fewer_than_five_samples_is_a_value_error() -> None:
+def test_fewer_than_five_samples_refuses_the_draw() -> None:
+    """Casey's short_profile reason (ADR 0006 item 11), decided on PR #30."""
     distance_m = np.linspace(0.0, 10_000.0, 4)
-    with pytest.raises(ValueError, match="five"):
+    with pytest.raises(RefusedDrawError, match="five") as refusal:
         call_flat(distance_m=distance_m, ground_m=np.full(4, 150.0), clutter_m=np.zeros(4))
+    assert refusal.value.reason == "short_profile"
 
 
 def test_profile_must_end_at_the_receiver() -> None:
