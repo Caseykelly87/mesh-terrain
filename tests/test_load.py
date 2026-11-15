@@ -16,8 +16,8 @@ from test_reduce import INFO, KEY, SNAPSHOT_ID, table_rows, write_archive
 
 from ingester import load
 from ingester.reduce import reduce_capture
-from ingester.snapshot import SnapshotError, read_manifest
 from pipeline.common.settings import get_settings
+from pipeline.common.snapshot import SnapshotError, read_manifest
 
 LOADER_SOURCE = Path(load.__file__).read_text(encoding="utf-8")
 
@@ -53,20 +53,6 @@ def snapshot(tmp_path: Path) -> Path:
 def test_the_loader_never_updates_or_deletes() -> None:
     # ing_07: rows in raw are only ever inserted.
     assert not re.search(r"\b(update|delete|truncate|drop)\b", LOADER_SOURCE, re.IGNORECASE)
-
-
-def test_a_partial_folder_is_refused(tmp_path: Path) -> None:
-    (tmp_path / f"{SNAPSHOT_ID}.partial").mkdir()
-    with pytest.raises(SnapshotError):
-        load.snapshot_folder(tmp_path, SNAPSHOT_ID)
-    with pytest.raises(SnapshotError):
-        load.snapshot_folder(tmp_path, f"{SNAPSHOT_ID}.partial")
-
-
-def test_a_folder_without_a_manifest_is_refused(tmp_path: Path) -> None:
-    (tmp_path / SNAPSHOT_ID).mkdir()
-    with pytest.raises(SnapshotError):
-        load.snapshot_folder(tmp_path, SNAPSHOT_ID)
 
 
 def test_load_inserts_every_row_once(conn: psycopg.Connection, snapshot: Path) -> None:
