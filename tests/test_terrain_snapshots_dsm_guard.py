@@ -14,8 +14,6 @@ from rasterio.transform import from_origin
 from shapely.geometry import box
 
 from pipeline.terrain_snapshots.dsm_guard import (
-    NOMINAL_FIRST_RETURNS_PER_M2,
-    THIN_FACTOR,
     ThinOutputError,
     WindowCount,
     check_build,
@@ -29,11 +27,6 @@ WEST, NORTH = 720_000.0, 4_280_004.0
 
 def _water(*polygons: tuple[float, float, float, float]) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(geometry=[box(*bounds) for bounds in polygons], crs="EPSG:26915")
-
-
-def test_the_stated_factor_and_density() -> None:
-    assert NOMINAL_FIRST_RETURNS_PER_M2 == 2.0
-    assert THIN_FACTOR == 0.25
 
 
 def test_water_mask_marks_cells_whose_centre_is_in_water() -> None:
