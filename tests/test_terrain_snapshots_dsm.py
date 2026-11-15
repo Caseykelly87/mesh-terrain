@@ -116,6 +116,16 @@ def _osm_snapshot(root: Path, water_26915: list[tuple[float, float, float, float
     return finish_snapshot(partial)
 
 
+def _registered(root: Path) -> Callable[[str], str | None]:
+    """Stands in for the raw.snapshot lookup: every finished folder under root is registered."""
+
+    def lookup(snapshot_id: str) -> str | None:
+        manifest = root / snapshot_id / "manifest.json"
+        return sha256_file(manifest) if manifest.is_file() else None
+
+    return lookup
+
+
 def _dirs(tmp_path: Path) -> tuple[Path, Path]:
     root, scratch = tmp_path / "snapshots", tmp_path / "scratch"
     root.mkdir()
@@ -131,7 +141,9 @@ def test_builds_the_dsm_and_records_every_window(tmp_path: Path) -> None:
     root, scratch = _dirs(tmp_path)
     osm = _osm_snapshot(root, [NE_WATER])
     make = FakeMake()
-    folder = build_dsm(root, OSM_ID, scratch, source=SOURCE, runner=make, today=TODAY)
+    folder = build_dsm(
+        root, OSM_ID, scratch, source=SOURCE, runner=make, today=TODAY, registered=_registered(root)
+    )
     assert verify_manifest(folder) == []
     with rasterio.open(folder / "dsm.tif") as dsm:
         assert dsm.crs.to_epsg() == 26915
@@ -182,7 +194,15 @@ def test_refuses_without_the_osm_snapshot_before_anything_runs(tmp_path: Path) -
     root, scratch = _dirs(tmp_path)
     make = FakeMake()
     with pytest.raises(OsmSnapshotMissingError, match="osm"):
-        build_dsm(root, OSM_ID, scratch, source=SOURCE, runner=make, today=TODAY)
+        build_dsm(
+            root,
+            OSM_ID,
+            scratch,
+            source=SOURCE,
+            runner=make,
+            today=TODAY,
+            registered=_registered(root),
+        )
     assert make.calls == []
     assert list(root.iterdir()) == []
 
@@ -192,7 +212,15 @@ def test_refuses_an_osm_snapshot_whose_files_changed(tmp_path: Path) -> None:
     osm = _osm_snapshot(root, [])
     (osm / "water.parquet").write_bytes(b"changed")
     with pytest.raises(OsmSnapshotMissingError, match="differ"):
-        build_dsm(root, OSM_ID, scratch, source=SOURCE, runner=FakeMake(), today=TODAY)
+        build_dsm(
+            root,
+            OSM_ID,
+            scratch,
+            source=SOURCE,
+            runner=FakeMake(),
+            today=TODAY,
+            registered=_registered(root),
+        )
 
 
 def test_a_thin_run_fails_and_leaves_no_finished_snapshot(tmp_path: Path) -> None:
@@ -200,7 +228,15 @@ def test_a_thin_run_fails_and_leaves_no_finished_snapshot(tmp_path: Path) -> Non
     _osm_snapshot(root, [])
     make = FakeMake(count=lambda row, col: 1.0 if row == col else 0.0)
     with pytest.raises(ThinOutputError):
-        build_dsm(root, OSM_ID, scratch, source=SOURCE, runner=make, today=TODAY)
+        build_dsm(
+            root,
+            OSM_ID,
+            scratch,
+            source=SOURCE,
+            runner=make,
+            today=TODAY,
+            registered=_registered(root),
+        )
     assert not (root / SOURCE.snapshot_id).exists()
 
 
@@ -209,7 +245,15 @@ def test_refuses_another_pdal_version_before_starting(tmp_path: Path) -> None:
     _osm_snapshot(root, [])
     make = FakeMake(version_output="pdal 2.9.2 (git-version: abc)\n")
     with pytest.raises(SnapshotError, match="2.9.2"):
-        build_dsm(root, OSM_ID, scratch, source=SOURCE, runner=make, today=TODAY)
+        build_dsm(
+            root,
+            OSM_ID,
+            scratch,
+            source=SOURCE,
+            runner=make,
+            today=TODAY,
+            registered=_registered(root),
+        )
     assert not (root / f"{SOURCE.snapshot_id}.partial").exists()
 
 
@@ -217,14 +261,30 @@ def test_a_failed_pdal_run_stops_the_build(tmp_path: Path) -> None:
     root, scratch = _dirs(tmp_path)
     _osm_snapshot(root, [])
     with pytest.raises(SnapshotError, match="pdal failed"):
-        build_dsm(root, OSM_ID, scratch, source=SOURCE, runner=FakeMake(returncode=1), today=TODAY)
+        build_dsm(
+            root,
+            OSM_ID,
+            scratch,
+            source=SOURCE,
+            runner=FakeMake(returncode=1),
+            today=TODAY,
+            registered=_registered(root),
+        )
 
 
 def test_refuses_a_scratch_folder_inside_the_snapshots_folder(tmp_path: Path) -> None:
     root, _ = _dirs(tmp_path)
     _osm_snapshot(root, [])
     with pytest.raises(SnapshotError, match="scratch"):
-        build_dsm(root, OSM_ID, root / "work", source=SOURCE, runner=FakeMake(), today=TODAY)
+        build_dsm(
+            root,
+            OSM_ID,
+            root / "work",
+            source=SOURCE,
+            runner=FakeMake(),
+            today=TODAY,
+            registered=_registered(root),
+        )
 
 
 def test_the_pipeline_is_recipe_a1_on_a_grid_one_cell_wider_than_the_window() -> None:
@@ -280,6 +340,31 @@ def test_an_existing_dsm_snapshot_is_refused_before_pdal_or_scratch(tmp_path: Pa
     (root / SOURCE.snapshot_id).mkdir()
     make = FakeMake()
     with pytest.raises(SnapshotExistsError):
-        build_dsm(root, OSM_ID, scratch, source=SOURCE, runner=make, today=TODAY)
+        build_dsm(
+            root,
+            OSM_ID,
+            scratch,
+            source=SOURCE,
+            runner=make,
+            today=TODAY,
+            registered=_registered(root),
+        )
     assert make.calls == []
     assert list(scratch.iterdir()) == []
+
+
+def test_refuses_an_osm_snapshot_that_is_not_registered(tmp_path: Path) -> None:
+    root, scratch = _dirs(tmp_path)
+    _osm_snapshot(root, [])
+    make = FakeMake()
+    with pytest.raises(OsmSnapshotMissingError, match="not registered"):
+        build_dsm(
+            root,
+            OSM_ID,
+            scratch,
+            source=SOURCE,
+            runner=make,
+            today=TODAY,
+            registered=lambda snapshot_id: None,
+        )
+    assert make.calls == []
