@@ -304,6 +304,16 @@ def test_a_partial_folder_is_never_registered(tmp_path: Path) -> None:
     assert conn.statements == []
 
 
+def test_a_folder_whose_manifest_is_gone_is_not_registered(tmp_path: Path) -> None:
+    final = finished(tmp_path)
+    manifest = read_manifest(final)
+    (final / MANIFEST_NAME).unlink()
+    conn = RecordingConnection()
+    with pytest.raises(SnapshotError):
+        register(conn, final, manifest)
+    assert conn.statements == []
+
+
 def test_a_manifest_mismatch_stops_registration(tmp_path: Path) -> None:
     final = finished(tmp_path)
     (final / "tile" / "example.tif").write_bytes(b"changed")
