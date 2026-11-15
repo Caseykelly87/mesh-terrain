@@ -42,6 +42,8 @@ $S/p1812-env/.venv/Scripts/python.exe -I spike_p1812.py $S/itu-extracted $S/p181
 $S/p1812-env/.venv/Scripts/python.exe -I spike_placeholder.py $S/itu-extracted $S/placeholder-run
 ```
 
+Run 3 has its own command below.
+
 ## Run 1: maps in a data folder (`spike_p1812.py`)
 
 `spike_p1812.py` (this folder) builds `P1812.npz` into `$S/p1812-data` with the same `np.loadtxt` and `np.savez` calls as upstream's `initiate_digital_maps.py`, then imports `Py1812.P1812` with `importlib.resources.files` patched for the length of the import, and repeats the flat-path call of `docs/measurements-2026-11-08.md`: 10 km, 150 m above sea level, 0.915 GHz, p 50, 2 m antennas, vertical, zone 4, from 38.63 N 90.25 W toward the east.
@@ -74,9 +76,9 @@ What it shows:
 - DN 39.126 gives k50 = 157 / (157 - DN) = 1.332, P.1812's median effective earth radius factor at St. Louis.
 - The first run printed the same lines except the timings, 2.1 ms and 15.7 ms, so a call takes 2 to 3 ms at 1 001 points and 16 to 18 ms at 10 001 on this machine.
 
-## Run 2: placeholder import, DN and N0 passed (`spike_placeholder.py`)
+## Run 2: placeholder file, DN and N0 passed (`spike_placeholder.py`)
 
-This is the import that option 2.2 recommends. The script writes a placeholder `P1812.npz` holding two 1 by 1 grids of NaN, no ITU data. It refuses to go on if `Py1812.P1812` is already imported or the installed package holds an npz, then imports Py1812 with the map load pointed at the placeholder. It reads the two ITU text files with `np.loadtxt`, takes the path centre from Py1812's `great_circle_path` and interpolates DN and N0 with Py1812's `interp2`. Finally it makes the flat-path call with them, and once more without them.
+The first form of the option 2.2 import, replaced by run 3 after the second review. The script writes a placeholder `P1812.npz` holding two 1 by 1 grids of NaN, no ITU data. It refuses to go on if `Py1812.P1812` is already imported or the installed package holds an npz, then imports Py1812 with the map load pointed at the placeholder. It reads the two ITU text files with `np.loadtxt`, takes the path centre from Py1812's `great_circle_path` and interpolates DN and N0 with Py1812's `interp2`. Finally it makes the flat-path call with them, and once more without them.
 
 ```
 placeholder npz: 518 bytes
@@ -86,7 +88,32 @@ DN and N0 passed: Lb 149.48 dB  Ep 49.11 dBuV/m
 DN and N0 omitted: IndexError: index 34 is out of bounds for axis 0 with size 1
 ```
 
-The placeholder satisfies the import. The real maps enter only through the two numbers passed on each call, and a call that forgets them fails instead of returning a number built on the placeholder. The installed package folder still held no npz afterwards.
+The placeholder satisfies the import. The real maps enter only through the two numbers passed on each call, and a call that forgets them fails instead of returning a number built on the placeholder. This run did not check the package folder after the import; run 3 does.
+
+## Run 3: in-memory placeholder and NaN in R (`spike_inmemory.py`)
+
+This is the import option 2.2 now recommends, after the second review: the same as run 2, but the placeholder is built in memory and never written. The patched `files("Py1812")` returns an object whose `joinpath("P1812.npz")` returns an `io.BytesIO` holding `np.savez(DN50=nan, N050=nan)`. The script then checks what Py1812 does with a NaN in R. It ran with `-W error::RuntimeWarning`, so a numpy warning would have stopped it.
+
+```
+$S/p1812-env/.venv/Scripts/python.exe -I -W error::RuntimeWarning spike_inmemory.py $S/itu-extracted
+```
+
+```
+import with in-memory placeholder: ok, DN50 shape (1, 1)
+P1812.files after import is the replacement: True
+npz in package after import: False
+flat, R 0, DN and N0 passed: Lb 149.48 dB
+flat, R 0, DN and N0 omitted: IndexError: index 34 is out of bounds for axis 0 with size 1
+flat, R 10: Lb 160.170552 dB; NaN at point 300: 160.170552 dB; 0 at point 300: 160.170552 dB
+flat, R 0: Lb 149.479180 dB; NaN at point 500: 149.479175 dB; 0 at point 500: 149.479180 dB
+flat, one 30 m clutter point at 500: Lb 159.742181 dB; NaN at point 500: 149.479175 dB; 0 at point 500: 149.479180 dB
+hilly, R 10: Lb 190.228103 dB; NaN at point 400: 190.228103 dB; 0 at point 400: 190.228103 dB
+```
+
+What it shows:
+
+- The in-memory placeholder gives the same import, the same 149.48 dB with DN and N0, and the same `IndexError` without them as run 2's file. The installed package holds no npz after the import. `P1812.files` keeps the replacement after the import, which is harmless because line 19 is its only use.
+- A NaN in R never makes Lb NaN, and no warning is raised. The NaN enters `g = h + R` (`P1812.py` line 330), and the comparisons after it skip that point, so the point acts as if it had no clutter. Where the NaN point does not set the loss, nothing changes (160.17 dB with or without it). Where it does, the obstacle disappears: the single 30 m clutter point gives 159.74 dB, and the same point marked NaN gives 149.48 dB, the bare-ground figure. The hilly case is a 40 m sinusoidal relief with R = 10 m, and stays finite at 190.23 dB. So the wrapper has to fill or refuse every NaN in R before it calls `bt_loss`.
 
 ## Install form checks
 
