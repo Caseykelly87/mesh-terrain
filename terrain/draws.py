@@ -217,8 +217,7 @@ class BuildingPixels:
             dem: The open DEM the draws' profiles read.
 
         Raises:
-            ValueError: if the shape or transform differs from the DEM's; the
-                metro DEM never matches, so building draws stay null there.
+            ValueError: if the shape or transform differs from the DEM's.
         """
         if self.mask.shape != dem.shape or self.transform != dem.transform:
             raise ValueError(f"the building mask is not on the grid of {Path(dem.name).name}")
@@ -389,7 +388,8 @@ def sample_link(
         OutOfExtentError: if a draw leaves the DEM or the building mask.
         ZeroLengthPathError: if a draw's endpoints coincide.
         ValueError: if a quantity is NaN, draws report different quantities,
-            or the building mask is not on the builder's DEM grid.
+            a building mask comes with a metro builder, or it is not on the
+            1 m DEM's grid.
     """
     _check_building_grid(builder, buildings)
     seed = draw_seed(run_seed, link_id)
@@ -432,13 +432,17 @@ def _offset(box: EndpointBox, unit_x: float, unit_y: float) -> XY:
 
 
 def _check_building_grid(builder: ProfileBuilder, buildings: BuildingPixels | None) -> None:
-    """Hold the mask to the grid of the DEM a raster builder reads."""
+    """Refuse a mask on the metro DEM, and hold one on the 1 m layers to their grid.
+
+    Building draws are null where there is no 1 m DEM (contract ter_05), so no
+    mask is accepted with a metro builder, whatever its grid.
+    """
     if buildings is None:
         return
+    if isinstance(builder, MetroProfileBuilder):
+        raise ValueError("building draws need the 1 m layers")
     if isinstance(builder, FineProfileBuilder):
         buildings.require_grid_of(builder.layers.dem)
-    elif isinstance(builder, MetroProfileBuilder):
-        buildings.require_grid_of(builder.dem)
 
 
 def _building_draws(
