@@ -111,3 +111,52 @@ def test_missing_ground_value_is_refused_not_a_value_error() -> None:
         los_clear(profile, 2.0, 2.0)
     assert not isinstance(raised.value, ValueError)
     assert raised.value.reason == "dem_gap"
+
+
+def sloped_profile(bump_m: float) -> PathProfile:
+    """1 km at 1 m: ground 100 m, 120 m under the receiver, one bump at 500 m.
+
+    With a 10 m transmitting and a 30 m receiving antenna the tops are 110 m and
+    150 m, so the ray rises 40 m over the path: 110 + 0.04 d.
+    """
+    distance = np.arange(1001, dtype=np.float64)
+    ground = np.full(1001, 100.0)
+    ground[-1] = 120.0
+    ground[500] = bump_m
+    return PathProfile(
+        distance_m=distance,
+        ground_m=ground,
+        tx_xy_m=(700_000.0, 4_280_000.0),
+        rx_xy_m=(701_000.0, 4_280_000.0),
+    )
+
+
+def test_obstruction_follows_a_sloping_ray() -> None:
+    # Ray at 500 m: 110 + 0.04 x 500 = 130 m. Bump 125 m: 5 m below it. The
+    # next highest point, 1 m from the transmitter, is 110.04 - 100 = 10.04 m below.
+    profile = sloped_profile(125.0)
+
+    assert obstruction_m(profile, 10.0, 30.0, k_factor=math.inf) == pytest.approx(-5.0)
+    assert los_clear(profile, 10.0, 30.0, k_factor=math.inf)
+    assert not los_clear(profile, 10.0, 10.0, k_factor=math.inf)
+
+
+def test_obstruction_swaps_with_the_antennas() -> None:
+    # Swapped antennas: tops 130 m and 130 m, a level ray; the bump is 5 m below.
+    profile = sloped_profile(125.0)
+
+    assert obstruction_m(profile, 30.0, 10.0, k_factor=math.inf) == pytest.approx(-5.0)
+    assert obstruction_m(profile, 10.0, 10.0, k_factor=math.inf) == pytest.approx(5.0)
+
+
+def test_fresnel_clearance_follows_a_sloping_ray() -> None:
+    # At 500 m: R1 = sqrt(0.327642 x 500 x 500 / 1000) = 9.0505 m; clearance 5 m,
+    # fraction 0.5525. Mid-path ground 100 m has 30 m of clearance, 3.31 radii.
+    profile = sloped_profile(125.0)
+    radius_m = math.sqrt(C_M_PER_S / 915e6 * 500.0 * 500.0 / 1000.0)
+
+    clearance = fresnel_clearance_pct(profile, 915.0, 10.0, 30.0, k_factor=math.inf)
+
+    assert radius_m == pytest.approx(9.0505, abs=1e-4)
+    assert clearance == pytest.approx(5.0 / radius_m)
+    assert clearance == pytest.approx(0.5525, abs=1e-4)
