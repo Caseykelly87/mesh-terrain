@@ -338,7 +338,7 @@ def test_call_converts_units_and_coordinates_at_the_edge(
     assert inputs.rx_lon_deg > inputs.tx_lon_deg
 
 
-def test_vertical_maps_to_pythons_code_2(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_vertical_maps_to_py1812_code_2(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = spy_on(monkeypatch, "call_bt_loss")
     call_flat(polarisation="vertical")
     assert seen[0].polarisation_code == 2
