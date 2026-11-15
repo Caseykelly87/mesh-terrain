@@ -36,4 +36,4 @@ The same rules apply. Read `CLAUDE.md` and `docs/STYLE.md`. Open a branch from `
 
 ## Licence and data
 
-Code is MIT. Meshtastic packet data is community-contributed and carries no formal licence; node identities are pseudonymised and public outputs are aggregated to 1 km or H3 resolution 8. USGS 3DEP and NLCD are public domain. OpenStreetMap data is ODbL and is attributed in the web map and the GeoPackage metadata.
+Code is MIT. Meshtastic packet data is community-contributed and carries no formal licence; node identities are pseudonymised and public outputs are aggregated to 1 km or H3 resolution 8. USGS 3DEP and NLCD are public domain. OpenStreetMap data is ODbL and is credited as "© OpenStreetMap contributors" on every public output that uses it.
