@@ -343,16 +343,70 @@ def test_a_manifest_naming_another_snapshot_is_not_registered(tmp_path: Path) ->
     assert conn.statements == []
 
 
+@pytest.mark.parametrize("field", ["capture_date", "source_url", "licence"])
+def test_a_manifest_without_a_snp_01_field_is_not_registered(tmp_path: Path, field: str) -> None:
+    final = finished(tmp_path)
+    incomplete = {key: value for key, value in read_manifest(final).items() if key != field}
+    (final / MANIFEST_NAME).write_text(json.dumps(incomplete), encoding="utf-8")
+    conn = RecordingConnection()
+    with pytest.raises(SnapshotError, match=field):
+        register(conn, final, incomplete)
+    assert conn.statements == []
+
+
+def test_a_manifest_rewritten_after_it_was_read_is_not_registered(tmp_path: Path) -> None:
+    # The stored manifest_sha256 must belong to the manifest the caller verified.
+    final = finished(tmp_path)
+    manifest = read_manifest(final)
+    (final / MANIFEST_NAME).write_text(
+        json.dumps({**manifest, "licence": "Another invented licence."}), encoding="utf-8"
+    )
+    conn = RecordingConnection()
+    with pytest.raises(SnapshotError, match="changed"):
+        register(conn, final, manifest)
+    assert conn.statements == []
+
+
+def test_registration_logs_its_start_and_the_rows_inserted(tmp_path: Path) -> None:
+    final = finished(tmp_path)
+    with capture_logs() as logs:
+        register(RecordingConnection(), final, read_manifest(final))
+    events = [(entry["event"], entry.get("snapshot_id")) for entry in logs]
+    assert ("snapshot_register_begin", SNAPSHOT_ID) in events
+    end = next(entry for entry in logs if entry["event"] == "snapshot_register_end")
+    assert end["snapshot_id"] == SNAPSHOT_ID
+    assert end["inserted"] == 1
+    assert end["duration_s"] >= 0
+
+
+@pytest.mark.parametrize("seeds", [None, [], 7, "seed"])
+def test_the_manifest_refuses_seeds_that_are_not_a_mapping(tmp_path: Path, seeds: object) -> None:
+    partial = start_snapshot(tmp_path, SNAPSHOT_ID)
+    with pytest.raises(SnapshotError, match="seeds"):
+        write_manifest(partial, {**METADATA, "seeds": seeds})
+    assert not (partial / MANIFEST_NAME).exists()
+
+
+def test_the_manifest_records_seeds_as_given(tmp_path: Path) -> None:
+    final = finished(tmp_path, {**METADATA, "seeds": {"endpoint_draws": 42}})
+    assert read_manifest(final)["seeds"] == {"endpoint_draws": 42}
+
+
 def test_the_shared_module_never_updates_or_deletes() -> None:
-    # ing_07 and snp_01: registration only ever inserts. Only string literals
-    # are searched, where SQL lives, since dict.update is not a statement.
+    # ing_07, ing_02 and snp_01: registration only ever inserts, and nothing
+    # here removes a file or folder. SQL is searched in string literals only,
+    # since dict.update is not a statement; removal in attribute names.
+    tree = ast.parse(SOURCE)
     literals = [
         node.value
-        for node in ast.walk(ast.parse(SOURCE))
+        for node in ast.walk(tree)
         if isinstance(node, ast.Constant) and isinstance(node.value, str)
     ]
     for literal in literals:
         assert not re.search(r"\b(update|delete|truncate|drop)\b", literal, re.IGNORECASE)
+    names = {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}
+    names |= {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    assert not names & {"unlink", "rmdir", "rmtree", "remove"}
 
 
 @pytest.fixture
