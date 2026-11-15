@@ -114,8 +114,8 @@ def knife_edge_db(
         Lb in dB, 0 or more.
 
     Raises:
-        ValueError: if the profile has no interior sample.
-        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
+        RefusedDrawError: if the profile has no interior sample (reason
+            "short_profile") or a ground height is NaN (reason "dem_gap").
     """
     path = curved_path(profile, tx_height_m, rx_height_m, k_factor)
     slope_to_tx = float(((path.ground_m - path.tx_top_m) / path.distance_m).max())  # (49)

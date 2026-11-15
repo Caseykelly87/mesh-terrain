@@ -13,12 +13,15 @@ the endpoint sampler's job.
 
 from typing import Literal, get_args
 
-RefusalReason = Literal["dem_gap", "empty_cell", "clutter_nan"]
+RefusalReason = Literal["dem_gap", "empty_cell", "clutter_nan", "short_profile"]
 """Why a draw was refused (ADR 0006 item 11).
 
 dem_gap: a ground profile point reads a DEM pixel without a value.
 empty_cell: a 10 m cell of P.1812's profile holds a pixel without a value (item 7).
 clutter_nan: a NaN is left in the clutter heights after the fills of decision 6.
+short_profile: the profile has too few samples for a model, for the geometry
+    functions fewer than three (no interior sample); Casey added this cause on
+    PR #30, 2026-11-15.
 """
 
 
