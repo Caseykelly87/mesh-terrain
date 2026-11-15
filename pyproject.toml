@@ -76,8 +76,9 @@ extend-exclude = ["notebooks", "dbt/dbt_packages", "dbt/target", "docs/adr", "*.
 # The engine config is loaded with yaml.safe_load only (Casey, PR #27,
 # 2026-11-15). S506, alone from the bandit set, fails yaml.load unless its
 # Loader is SafeLoader or CSafeLoader. TID251 fails the names listed below,
-# wherever they are used or imported from the top-level yaml module; the same
-# objects reached through a submodule (yaml.loader, yaml.cyaml) are not checked.
+# which S506 does not look at, wherever they are used or imported, from the
+# top-level yaml module or from yaml.loader and yaml.cyaml where the Loader
+# classes are defined.
 select = ["E", "F", "I", "UP", "B", "N", "S506", "TID251"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
@@ -92,6 +93,12 @@ select = ["E", "F", "I", "UP", "B", "N", "S506", "TID251"]
 "yaml.CLoader".msg = "Load YAML with yaml.safe_load."
 "yaml.CUnsafeLoader".msg = "Load YAML with yaml.safe_load."
 "yaml.CFullLoader".msg = "Load YAML with yaml.safe_load."
+"yaml.loader.Loader".msg = "Load YAML with yaml.safe_load."
+"yaml.loader.UnsafeLoader".msg = "Load YAML with yaml.safe_load."
+"yaml.loader.FullLoader".msg = "Load YAML with yaml.safe_load."
+"yaml.cyaml.CLoader".msg = "Load YAML with yaml.safe_load."
+"yaml.cyaml.CUnsafeLoader".msg = "Load YAML with yaml.safe_load."
+"yaml.cyaml.CFullLoader".msg = "Load YAML with yaml.safe_load."
 
 [tool.ruff.lint.isort]
 known-first-party = ["pipeline", "terrain", "ingester"]
