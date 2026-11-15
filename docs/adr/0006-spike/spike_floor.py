@@ -58,7 +58,7 @@ def flat_ground(distance_m):
     return np.full_like(distance_m, 150.0)
 
 
-def relief_20_m(distance_m):
+def hills_20_m(distance_m):
     return 150.0 + 20.0 * np.sin(2.0 * np.pi * distance_m / 2500.0)
 
 
@@ -71,8 +71,11 @@ def clutter_near_tx(height_m, width_m):
 
 
 def clutter_band(height_m, start_m, width_m):
-    inside = lambda distance_m: (distance_m >= start_m) & (distance_m < start_m + width_m)  # noqa: E731
-    return lambda distance_m: np.where(inside(distance_m), height_m, 0.0)
+    def clutter(distance_m):
+        inside = (distance_m >= start_m) & (distance_m < start_m + width_m)
+        return np.where(inside, height_m, 0.0)
+
+    return clutter
 
 
 def basic_loss(path_km, step_m, clutter, tx_height_m, rx_height_m, ground=flat_ground):
@@ -109,8 +112,8 @@ CASES = [
     ("3 km, R 10, 2 m / 2 m", 3, 10, uniform_clutter(10.0), 2.0, 2.0, flat_ground),
     ("10 km, R 10, 2 m / 10 m gateway", 10, 10, uniform_clutter(10.0), 2.0, 10.0, flat_ground),
     ("10 km, R 0, 2 m / 10 m gateway", 10, 10, uniform_clutter(0.0), 2.0, 10.0, flat_ground),
-    ("10 km, 20 m relief, R 0, 2 m / 2 m", 10, 10, uniform_clutter(0.0), 2.0, 2.0, relief_20_m),
-    ("10 km, 20 m relief, R 10, 2 m / 2 m", 10, 10, uniform_clutter(10.0), 2.0, 2.0, relief_20_m),
+    ("10 km, hills of plus or minus 20 m, R 0, 2 m / 2 m", 10, 10, uniform_clutter(0.0), 2.0, 2.0, hills_20_m),
+    ("10 km, hills of plus or minus 20 m, R 10, 2 m / 2 m", 10, 10, uniform_clutter(10.0), 2.0, 2.0, hills_20_m),
 ]
 
 for label, path_km, step_m, clutter, tx_height_m, rx_height_m, ground in CASES:
