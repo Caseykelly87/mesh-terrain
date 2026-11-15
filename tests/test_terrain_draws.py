@@ -469,13 +469,11 @@ def test_building_mask_must_share_the_builder_dem_grid(tmp_path: Path) -> None:
 
 def test_metro_builder_takes_no_building_mask(tmp_path: Path) -> None:
     with rasterio.open(rough_metro_dem(tmp_path)) as dem:
-        mask = BuildingPixels(
-            mask=np.zeros((80, 400), dtype=bool),
-            transform=from_origin(ORIGIN_X_M, ORIGIN_Y_M, 1.0, 1.0),
-        )
+        # A mask rasterised on the metro DEM's own 10 m grid, every pixel a building.
+        mask = BuildingPixels(mask=np.ones((80, 400), dtype=bool), transform=dem.transform)
         tx = EndpointBox(centre_xy_m=centre_xy_m(40, 20, 10.0), half_width_m=0.0)
         rx = EndpointBox(centre_xy_m=centre_xy_m(30, 370, 10.0), half_width_m=0.0)
-        with pytest.raises(ValueError, match="grid"):
+        with pytest.raises(ValueError, match="building draws need the 1 m layers"):
             sample_link(
                 "m", tx, rx, MetroProfileBuilder(dem=dem), free_space, run_seed=1, buildings=mask
             )
