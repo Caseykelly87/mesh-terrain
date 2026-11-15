@@ -17,6 +17,9 @@ dependencies = [
     "paho-mqtt==2.2.0",
     "psycopg[binary]==3.3.6",
     "pyarrow==26.0.1",
+    # No PyPI release and no tags upstream, so the commit archive is the pin and
+    # uv.lock records its sha256 (ADR 0006).
+    "py1812 @ https://github.com/eeveetza/Py1812/archive/6c9061dd022e93c84169059a016643926ce89964.tar.gz",
     "pydantic-settings==2.16.1",
     "structlog==26.1.0",
 ]
@@ -33,6 +36,18 @@ dev = [
 [build-system]
 requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+# py1812 builds from source with flit_core >=3.2,<4. The build tool is pinned
+# exactly, as hatchling is above, so a new flit_core release cannot change the
+# wheel (ADR 0006).
+build-constraint-dependencies = ["flit-core==3.12.0"]
+
+# Keeps py1812's archive URL in the project metadata. A [tool.uv.sources]
+# entry would leave a bare "py1812" there, which any installer other than uv
+# would look up on PyPI, where the name is unclaimed.
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["pipeline", "terrain", "ingester"]
