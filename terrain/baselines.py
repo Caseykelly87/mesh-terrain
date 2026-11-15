@@ -3,11 +3,17 @@
 Free-space loss is the floor every other model adds to. Okumura-Hata is an
 empirical fit to Okumura's 1968 Tokyo measurements; it knows the distance, the
 frequency, the two antenna heights and whether the area is urban or suburban,
-and nothing of the terrain between. Its published validity is 150 to 1500 MHz,
-base station 30 to 200 m, mobile 1 to 10 m and 1 to 20 km. Only the frequency
-range is enforced: the validation runs put 2 m antennas at both ends (ADR 0006
-decision 5.1), which is outside the base station range, so Hata is extrapolated
-there and serves as a baseline, not a prediction.
+and nothing of the terrain between.
+
+Hata's source is M. Hata, "Empirical formula for propagation loss in land mobile
+radio services", IEEE Trans. Veh. Technol., vol. VT-29, no. 3, pp. 317-325,
+Aug. 1980, doi:10.1109/T-VT.1980.23859. The paper has not been read for this
+code, so no equation number is cited; the formula and validity ranges are as the
+Wikipedia article "Hata model" (read 2026-11-15) gives them, citing that paper:
+150 to 1500 MHz, base station 30 to 200 m, mobile 1 to 10 m, 1 to 10 km. Only
+the frequency range is enforced: the validation runs put 2 m antennas at both
+ends (ADR 0006 decision 5.1), below the base station range, so Hata is
+extrapolated there and serves as a baseline, not a prediction.
 """
 
 import math
@@ -53,12 +59,10 @@ def hata_db(
 ) -> float:
     """Median path loss from the Okumura-Hata formula.
 
-    Hata, "Empirical formula for propagation loss in land mobile radio
-    services", IEEE Trans. Veh. Technol. VT-29(3), 1980: the urban formula with
-    the small and medium city mobile antenna correction a(hm), and for the
-    suburban variant the urban loss less 2 (log10(f / 28))^2 + 5.4 dB. The higher
-    antenna is the base station hb and the lower the mobile hm, since the formula
-    is not written for two antennas of equal role.
+    Hata (1980, module docstring): urban LU = 69.55 + 26.16 log f - 13.82 log hB
+    - CH + (44.9 - 6.55 log hB) log d, with the small or medium city correction
+    CH = 0.8 + (1.1 log f - 0.7) hM - 1.56 log f (f in MHz, d in km); suburban
+    LU - 2 (log(f / 28))^2 - 5.4. The higher antenna is the base station hB.
 
     Args:
         distance_m: Path length in metres.
