@@ -26,7 +26,7 @@ YAML, every field explicit, no defaults hidden in code:
 | `tx_profile`, `rx_profile` | names of profile records (below) |
 | `tx_sites` | path to a caller-supplied point layer (GeoParquet, EPSG:4326 or 26915, `site_id` and geometry) |
 | `rx_points` | path to a GeoParquet point layer of receivers (`rx_id`, geometry) |
-| `snapshots` | ids of the terrain snapshots to use: DEM always; DSM source (EPT project) and canopy optional. Each id is a folder with its manifest present; the engine needs no database row |
+| `snapshots` | ids of the snapshots to use: DEM always; DSM source (EPT project) and canopy optional; the OpenStreetMap buildings snapshot optional, and required when `models` lists `hata`; the P.1812 map snapshot, or the synthetic map fixture, required when `models` lists `p1812`. Without the OpenStreetMap snapshot, `tx_building_draws` and `rx_building_draws` are null, never zero, and `hata_variant` is null. Each id is a folder with its manifest present; the engine needs no database row |
 | `endpoint_draws` | number of position draws when a site or receiver carries `box_half_width_m`; 1 for points |
 | `seed` | integer seed for every random draw in the run; recorded in the manifest (`snp_01`) |
 | `calibration` | optional: path to an observations layer (`site_id`, `rx_id`, `observed_loss_db`); when present a calibration artifact is written, predictions are not changed. The acceptance run sets it to the synthetic fixture `fixtures/observations.parquet` |
@@ -48,7 +48,7 @@ Every run writes these into `<output_dir>/<run_id>/`:
 | Artifact | Format | Content |
 | --- | --- | --- |
 | `terrain/dem.tif`, and when the config names them `terrain/dsm.tif`, `terrain/canopy.tif`, `terrain/clutter.tif` | COG, EPSG:26915, float32 metres, nodata set | the terrain build for the run's extent; `clutter` is max(dsm minus dem, canopy where nonzero) and is written only when a DSM or canopy snapshot is named; without one, clutter columns are null, never zero |
-| `predictions.parquet` | GeoParquet, EPSG:26915, LINESTRING site to receiver | one row per (site_id, rx_id): distance_m, bearing_deg, `<model>_db_median` and `<model>_db_iqr` for each model in `models` (fspl, knife_edge, hata, itm, p1812), los_share, fresnel_clearance_pct_median, clutter_height_m_median, hata_variant, `endpoint_draws` |
+| `predictions.parquet` | GeoParquet, EPSG:26915, LINESTRING site to receiver | one row per (site_id, rx_id): distance_m, bearing_deg, `<model>_db_median` and `<model>_db_iqr` for each model in `models` (fspl, knife_edge, hata, itm, p1812), los_share, fresnel_clearance_pct_median, clutter_height_m_median, hata_variant, `endpoint_draws`, `refused_draws` (draws refused for a missing height or clutter value, from 0 to `endpoint_draws`; every median and interquartile range comes from the other draws, and all are null when every draw is refused; ADR 0006 item 11), `tx_building_draws` and `rx_building_draws` (draws whose transmitter or receiver end lands on a building pixel), `p1812_at_cap_share` (share of the unrefused draws where P.1812 is within 0.1 dB of its troposcatter loss; null where `p1812_db_median` is null; ADR 0006 item 2) |
 | `coverage_<site_id>_<model>.tif` | COG, EPSG:26915, float32 dB, nodata set | predicted path loss from one site at each receiver point interpolated to the run's grid; one file per site and model, derived from `predictions.parquet` and never computed separately. Sites are not combined; a caller wanting best-server coverage takes the minimum across files |
 | `calibration.parquet`, `calibration.md` | Parquet and Markdown | only when `calibration` is set: per observation, predicted and observed, residual per model; RMSE, MAE, bias and n per model in the Markdown. It is labelled with the run id and never alters `predictions.parquet` |
 | `manifest.json` | JSON | below |
@@ -60,7 +60,7 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
 ```json
 {
   "manifest_version": "1.0.0",
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "engine_version": "0.1.0",
   "run_id": "test-tile",
   "created_at": "2026-11-20T15:04:05Z",
@@ -70,7 +70,8 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
   "snapshots": [
     {"id": "3dep-1m-mo-saintlouis-2017-x72y429", "manifest_sha256": "..."},
     {"id": "ept-mo-stlouis-2017-x72y429", "manifest_sha256": "..."},
-    {"id": "canopy-v2-0231113111", "manifest_sha256": "..."}
+    {"id": "canopy-v2-0231113111", "manifest_sha256": "..."},
+    {"id": "itu-r-p1812-8-202509", "manifest_sha256": "..."}
   ],
   "inputs": [
     {"path": "fixtures/two_sites.parquet", "sha256": "..."},
