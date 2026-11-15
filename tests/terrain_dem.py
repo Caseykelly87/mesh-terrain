@@ -31,8 +31,12 @@ def write_dem(
     resolution_m: float = 1.0,
     nodata: float | None = -999999.0,
     crs: str = "EPSG:26915",
+    origin_xy_m: tuple[float, float] = (ORIGIN_X_M, ORIGIN_Y_M),
 ) -> Path:
-    """Write a one-band float32 GeoTIFF with the module's origin."""
+    """Write a one-band float32 GeoTIFF, by default at the module's origin.
+
+    `origin_xy_m` is the top-left corner of the top-left pixel, EPSG:26915.
+    """
     rows, cols = heights_m.shape
     profile = {
         "driver": "GTiff",
@@ -41,7 +45,7 @@ def write_dem(
         "count": 1,
         "dtype": "float32",
         "crs": crs,
-        "transform": from_origin(ORIGIN_X_M, ORIGIN_Y_M, resolution_m, resolution_m),
+        "transform": from_origin(*origin_xy_m, resolution_m, resolution_m),
         "nodata": nodata,
         "tiled": True,
         "blockxsize": 256,
