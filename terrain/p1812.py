@@ -32,6 +32,7 @@ import io
 import json
 import math
 import sys
+import time
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -211,6 +212,8 @@ def load_maps(snapshot_dir: Path) -> P1812Maps:
             a map file is missing, a file does not match its sha256, or a grid
             is not 121 by 241 finite values.
     """
+    log.info("p1812_maps_load_begin", path=str(snapshot_dir))
+    started = time.monotonic()
     if not snapshot_dir.is_dir():
         raise _maps_error(snapshot_dir, "no such folder")
     manifest_bytes, expected = _read_manifest(snapshot_dir)
@@ -222,10 +225,11 @@ def load_maps(snapshot_dir: Path) -> P1812Maps:
         n050=n050,
     )
     log.info(
-        "p1812_maps_loaded",
+        "p1812_maps_load_end",
+        path=str(snapshot_dir),
+        duration_s=round(time.monotonic() - started, 3),
         snapshot_id=maps.snapshot_id,
         manifest_sha256=maps.manifest_sha256,
-        path=str(snapshot_dir),
     )
     return maps
 
@@ -398,7 +402,7 @@ def p1812_loss(
     rx_height_m: float,
     frequency_mhz: float,
     maps: P1812Maps,
-    polarisation: Polarisation = "vertical",
+    polarisation: Polarisation,
 ) -> PathLossResult:
     """Median basic transmission loss over one profile by ITU-R P.1812-8, equation (69).
 
@@ -410,7 +414,7 @@ def p1812_loss(
         rx_height_m: Receiver antenna height above ground, metres.
         frequency_mhz: Frequency, MHz.
         maps: DN and N0 grids from `load_maps`.
-        polarisation: From the antenna profile.
+        polarisation: From the antenna profile; required, so no caller inherits one.
 
     Returns:
         Lb in dB, antenna gains excluded, with Lbs (equation 44) as a diagnostic.
