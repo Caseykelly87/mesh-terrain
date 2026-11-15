@@ -5,15 +5,29 @@ empirical fit to Okumura's 1968 Tokyo measurements; it knows the distance, the
 frequency, the two antenna heights and whether the area is urban or suburban,
 and nothing of the terrain between.
 
-Hata's source is M. Hata, "Empirical formula for propagation loss in land mobile
-radio services", IEEE Trans. Veh. Technol., vol. VT-29, no. 3, pp. 317-325,
-Aug. 1980, doi:10.1109/T-VT.1980.23859. The paper has not been read for this
-code, so no equation number is cited; the formula and validity ranges are as the
-Wikipedia article "Hata model" (read 2026-11-15) gives them, citing that paper:
-150 to 1500 MHz, base station 30 to 200 m, mobile 1 to 10 m, 1 to 10 km. Only
-the frequency range is enforced: the validation runs put 2 m antennas at both
-ends (ADR 0006 decision 5.1), below the base station range, so Hata is
-extrapolated there and serves as a baseline, not a prediction.
+Sources of the Okumura-Hata form used here:
+
+- Urban terms: ITU-R P.529-3 (10/99, withdrawn 2001), section 2.2, equation (1),
+  read in the PDF (`R-REC-P.529-3-199910-W!!PDF-E.pdf`, sha256
+  ecd17cf4e899809f2cd999f9376a9a81829a7bbdae3da2c7d18a53ed9c88c6e5). Its
+  frequency, height and distance terms and its mobile correction a(h2) (the
+  small or medium city form) are the ones below. It gives field strength E for
+  1 kW e.r.p., not loss: converted with ITU-R P.525-5 equation (10), taking
+  1 kW e.r.p. as 32.15 dBW e.i.r.p., its constant is 69.53 dB, where the loss
+  form implemented here has 69.55 dB. Our values therefore sit 0.02 dB above the
+  converted P.529-3 values at every input, from the rounding of the published
+  constants and the e.r.p. to e.i.r.p. step.
+- Suburban term, 2 (log(f / 28))^2 + 5.4 dB: M. Hata, "Empirical formula for
+  propagation loss in land mobile radio services", IEEE Trans. Veh. Technol.,
+  vol. VT-29, no. 3, pp. 317-325, Aug. 1980, doi:10.1109/T-VT.1980.23859;
+  original not read by us, quoted as widely reproduced. P.529-3 has no suburban
+  correction at UHF.
+
+P.529-3 gives the base station range as 30 to 200 m, the mobile as 1 to 10 m,
+and the exponent b = 1 up to 20 km. Only the 150 to 1500 MHz frequency range is
+enforced: the validation runs put 2 m antennas at both ends (ADR 0006 decision
+5.1), below the base station range, so Hata is extrapolated there and serves as
+a baseline, not a prediction.
 """
 
 import math
