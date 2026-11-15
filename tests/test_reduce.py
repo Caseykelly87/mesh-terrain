@@ -16,7 +16,7 @@ from ingester.allowlist import TABLES, arrow_schema
 from ingester.parquet import content_hash
 from ingester.reduce import LICENCE, SnapshotInfo, Source, ordered_results, reduce_capture
 from ingester.sightings import Broker
-from ingester.snapshot import (
+from pipeline.common.snapshot import (
     MANIFEST_NAME,
     PartialExistsError,
     SnapshotExistsError,

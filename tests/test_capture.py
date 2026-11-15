@@ -15,7 +15,7 @@ import structlog
 from ingester import capture
 from ingester.capture import CaptureRun, RunParameters
 from ingester.sightings import Broker
-from ingester.snapshot import MANIFEST_NAME, read_manifest, verify_manifest
+from pipeline.common.snapshot import MANIFEST_NAME, read_manifest, verify_manifest
 
 KEY = bytes(range(32))
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "mqtt" / "deliveries.jsonl"
