@@ -7,6 +7,7 @@ import pytest
 
 from terrain.clearance import fresnel_clearance_pct, fresnel_radius_m, los_clear, obstruction_m
 from terrain.curvature import EARTH_RADIUS_M, earth_bulge_m
+from terrain.diffraction import knife_edge_db
 from terrain.errors import RefusedDrawError
 from terrain.profile import PathProfile
 
@@ -92,11 +93,22 @@ def test_fresnel_clearance_is_at_most_one() -> None:
     assert fresnel_clearance_pct(profile, 915.0, 200.0, 200.0) == 1.0
 
 
-def test_two_sample_profile_is_a_value_error() -> None:
+@pytest.mark.parametrize("check", ["los", "obstruction", "fresnel", "knife_edge"])
+def test_two_sample_profile_is_refused_as_short(check: str) -> None:
+    # A path shorter than one step has no interior sample: a fourth refusal cause
+    # under ADR 0006 item 11 (Casey, PR #30), not a ValueError.
     profile = flat_profile(5.0, 5.0)
+    calls = {
+        "los": lambda: los_clear(profile, 2.0, 2.0),
+        "obstruction": lambda: obstruction_m(profile, 2.0, 2.0),
+        "fresnel": lambda: fresnel_clearance_pct(profile, 915.0, 2.0, 2.0),
+        "knife_edge": lambda: knife_edge_db(profile, 915.0, 2.0, 2.0),
+    }
 
-    with pytest.raises(ValueError, match="interior"):
-        los_clear(profile, 2.0, 2.0)
+    with pytest.raises(RefusedDrawError) as raised:
+        calls[check]()
+    assert raised.value.reason == "short_profile"
+    assert not isinstance(raised.value, ValueError)
 
 
 def test_missing_ground_value_is_refused_not_a_value_error() -> None:
