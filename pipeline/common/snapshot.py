@@ -118,10 +118,11 @@ def sha256_file(path: Path) -> str:
 
 
 def snapshot_files(folder: Path) -> list[Path]:
-    """Every file of a snapshot folder except the manifest, sorted by relative path."""
+    """Every file of a snapshot folder except its own manifest, sorted by relative path."""
+    manifest_path = folder / MANIFEST_NAME
     files = (path for path in folder.rglob("*") if path.is_file())
     return sorted(
-        (path for path in files if path.name != MANIFEST_NAME),
+        (path for path in files if path != manifest_path),
         key=lambda path: path.relative_to(folder).as_posix(),
     )
 
