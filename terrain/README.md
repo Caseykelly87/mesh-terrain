@@ -9,7 +9,7 @@ Pure functions for terrain profiles, line of sight, Fresnel clearance, diffracti
 | `clearance.py` | `los_clear`, `obstruction_m`, `fresnel_radius_m`, `fresnel_clearance_pct` |
 | `diffraction.py` | `knife_edge_db`: the Bullington method of ITU-R P.526-16 section 4.5.1, equations (49) to (57); `knife_edge_loss_db` is the single knife edge J(nu), equation (31) |
 | `baselines.py` | `fspl_db`, `hata_db`, and `hata_variant` (urban at a mean building share of 0.20, ADR 0006 decision 7.1) |
-| `errors.py` | `OutOfExtentError` and `RefusedDrawError`; neither is a `ValueError` (ADR 0006 item 11) |
+| `errors.py` | `OutOfExtentError` and `RefusedDrawError`, neither a `ValueError` (ADR 0006 item 11); `ZeroLengthPathError`, a `ValueError` subclass and the one error the feature asset catches, for a path whose endpoints coincide |
 
 A worked example: a 2 km path over flat ground at 150 m with a 25 m ridge 700 m from the transmitter and 2 m antennas at both ends. The ray between the antenna tops runs at 152 m; the ridge top, raised 0.05 m by the earth bulge, stands 23.05 m above it, so `los_clear` is false and `obstruction_m` is 23.05. At 915 MHz (wavelength 0.328 m) the P.526 parameter is nu = 23.05 x sqrt((2 / 0.328) x (1/700 + 1/1300)) = 2.67, the single edge loses J(2.67) = 21.43 dB (`knife_edge_loss_db`), and `knife_edge_db` applies P.526-16 equation (57) for the Bullington loss: 21.43 + (1 - exp(-21.43 / 6)) x (10 + 0.02 x 2) = 31.19 dB on top of free space.
 
