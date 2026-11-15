@@ -109,11 +109,12 @@ plugins = ["pydantic.mypy"]
 # see pyarrow's public names, which come from compiled modules, and protobuf's
 # runtime is unannotated, which strict mode rejects at every call.
 #
-# The untyped engine packages and PyYAML are listed whole, with their
-# submodules, because the decision is the same for every module in them and
-# the engine will import many. Stub packages exist for scipy, shapely,
-# geopandas and PyYAML, but they are outside the plan's stack table. numpy,
-# pyproj and rio-cogeo ship py.typed and are checked.
+# The untyped engine packages and PyYAML are listed whole as name.*, which
+# mypy matches against the package and every submodule, because the decision
+# is the same for every module in them and the engine will import many. Stub
+# packages exist for scipy, shapely, geopandas and PyYAML, but they are outside
+# the plan's stack table. numpy, pyproj and rio-cogeo ship py.typed and are
+# checked.
 [[tool.mypy.overrides]]
 module = [
     "google.protobuf.message",
@@ -123,17 +124,11 @@ module = [
     "pyarrow",
     "pyarrow.compute",
     "pyarrow.parquet",
-    "geopandas",
     "geopandas.*",
-    "pyrosm",
     "pyrosm.*",
-    "rasterio",
     "rasterio.*",
-    "scipy",
     "scipy.*",
-    "shapely",
     "shapely.*",
-    "yaml",
     "yaml.*",
 ]
 ignore_missing_imports = true
