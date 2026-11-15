@@ -240,6 +240,50 @@ What it shows, for these synthetic flat paths only:
 - Shorter paths come off the cap sooner: on the 3 km path 10 m of clutter with 300 m, 500 m and 1 km clear gives 148.02, 144.66 and 139.13 dB against Lbs 149.71 dB, and on the 5 km path 1 km clear gives 149.69 dB against 154.15 dB.
 - So any distance from the ends that keeps clutter off the cap grows with path length. How often real links reach the cap is for the x72y429 run.
 
+## Run 6: the debug log's Lbs against its definitions (`spike_cap_meaning.py`)
+
+Added on 2026-11-15 for Casey's item 2 addition (PR #24 comment 6894674840): a test that fails if the Lbs value read from Py1812's debug log disappears or changes meaning. The script makes the comparisons that test will make (ADR 0006, Consequences). Py1812 comes from the archive of commit 6c9061dd, installed in a scratch uv environment `$S/p1812-archive-env` (`P1812.py` sha256 `de5de35d2cda26677e654f92ab13183f9f9f40b06bb57a2fa46070efeea4ec2e`). Same in-memory import and constants as run 4: DN 39.126, N0 324.511, 915 MHz, p 50, vertical, zone 4, ground at 150 m unless a case gives hills, 10 m step. Each call passes `debug=1` and an `io.StringIO` as `fid_log`. The 3 km case builds its clutter as `spike_cap_position.py` does, from 300 m to 2 700 m inclusive.
+
+Checks, each within 1e-6 dB:
+
+1. Exactly one `Lbs (dB)` line per call, holding a finite number.
+2. Lbs against `tl_tropo(dtot, theta, f, p, N0)` called directly, with `theta` from `smooth_earth_heights` and `ae` from `earth_rad_eff(DN)`, as `bt_loss` builds them (`P1812.py` lines 296, 304 to 322 and 460).
+3. Lbs against equations 44 and 45 of P.1812-8, written out in the script.
+4. The logged Lbc against equation 63 applied to the logged Lbs and Lbam.
+5. Lb against equation 69, the larger of the logged Lb0p and Lbc; the location term is 0 at pL = 50 and sigmaL = 0 (lines 468 to 477).
+
+```
+mkdir $S/run6 && cd $S/run6
+$S/p1812-archive-env/.venv/Scripts/python.exe -I -W error::RuntimeWarning <repo>/docs/adr/0006-spike/spike_cap_meaning.py
+```
+
+```
+10 km flat, R 10, 2 m antennas: Lb 160.17 dB, Lbs 160.17 dB, Lb0p 111.63 dB, Lbc 160.17 dB
+  Lbs lines 1; residuals tl_tropo 1.5e-08, eq 44 1.5e-08, eq 63 1.3e-09, eq 69 1.3e-08
+  Lb0p - Lbc -4.9e+01 dB, larger term Lbc; checks within 1e-06 dB: pass
+10 km flat, R 0, 2 m antennas: Lb 149.48 dB, Lbs 160.17 dB, Lb0p 111.63 dB, Lbc 149.48 dB
+  Lbs lines 1; residuals tl_tropo 1.5e-08, eq 44 1.5e-08, eq 63 5.3e-08, eq 69 4.5e-08
+  Lb0p - Lbc -3.8e+01 dB, larger term Lbc; checks within 1e-06 dB: pass
+10 km hills of plus or minus 20 m, R 10, 2 m antennas: Lb 183.08 dB, Lbs 188.78 dB, Lb0p 111.63 dB, Lbc 183.08 dB
+  Lbs lines 1; residuals tl_tropo 4.0e-08, eq 44 4.0e-08, eq 63 5.1e-08, eq 69 3.3e-08
+  Lb0p - Lbc -7.1e+01 dB, larger term Lbc; checks within 1e-06 dB: pass
+3 km flat, R 10 with 300 m clear at each end, 2 m antennas: Lb 148.02 dB, Lbs 149.71 dB, Lb0p 101.17 dB, Lbc 148.02 dB
+  Lbs lines 1; residuals tl_tropo 3.3e-08, eq 44 3.3e-08, eq 63 2.6e-08, eq 69 1.0e-08
+  Lb0p - Lbc -4.7e+01 dB, larger term Lbc; checks within 1e-06 dB: pass
+1 km flat, R 0, 10 m antennas: Lb 91.63 dB, Lbs 140.17 dB, Lb0p 91.63 dB, Lbc 91.63 dB
+  Lbs lines 1; residuals tl_tropo 3.7e-08, eq 44 3.7e-08, eq 63 4.2e-10, eq 69 1.3e-09
+  Lb0p - Lbc 0.0e+00 dB, larger term Lb0p; checks within 1e-06 dB: pass
+largest residual 5.25e-08 dB; all checks pass: True
+files written to the working folder: []
+```
+
+What it shows:
+
+- Every call writes exactly one `Lbs (dB)` line, and with a log object passed nothing is written to the working folder. At 6c9061dd `bt_loss` opens a log file in the working folder only when no log is passed (lines 243 to 256), and it never closes a log it is passed.
+- The logged Lbs equals the direct `tl_tropo` call and equations 44 and 45 to 4.0e-8 dB or less. The logged Lbc equals equation 63, and Lb equals equation 69, to 5.3e-8 dB or less. The largest residual, 5.25e-8 dB, is the equation 63 check on the bare 10 km path. All are inside 1e-6 dB, and their size is the `%.10g` rounding of the log (line 258).
+- On the 1 km path with 10 m antennas, Lb is Lb0p, the first term of equation 69: the path is short and clear, so P.1812 returns its line-of-sight loss. Lbc equals Lb0p to the log's ten significant digits there, so this case shows equation 69 returning Lb0p but does not separate the two terms. On the other four paths Lbc is the larger term, by 38 to 71 dB.
+- The 3 km case repeats run 5's 148.02 dB.
+
 ## Install form checks
 
 - Git source without git: with `git` removed from `PATH` and an empty uv cache, the `git+https` install fails with `Git executable not found. Ensure that Git is installed and available.` The local `mesh-terrain-dagster-webserver` image has no `git` (`command -v git` empty), so option 1.1 needs git added to the image.
