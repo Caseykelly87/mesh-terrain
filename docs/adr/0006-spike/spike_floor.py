@@ -33,7 +33,10 @@ class _PlaceholderAnchor:
 
 
 class _KeptOpenLog(io.StringIO):
-    """A debug log that survives Py1812 closing it."""
+    """An in-memory debug log whose close() does nothing.
+
+    The guard is not needed: at 6c9061dd bt_loss never closes a log it is passed.
+    """
 
     def close(self) -> None:
         pass
