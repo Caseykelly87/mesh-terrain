@@ -6,6 +6,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 import rasterio
+from affine import Affine
 from terrain_dem import ORIGIN_X_M, ORIGIN_Y_M, cell_centre_xy_m, open_layers, write_dem
 
 from terrain.cells import FineLayers, cell_profile
@@ -330,4 +331,28 @@ def test_layers_must_sit_on_whole_metres(tmp_path: Path) -> None:
     canopy_path = write_dem(tmp_path / "canopy.tif", grid, origin_xy_m=origin)
 
     with pytest.raises(ValueError, match="whole metres"), open_layers(dem_path, canopy=canopy_path):
+        pass
+
+
+def test_layers_must_run_west_to_east(tmp_path: Path) -> None:
+    grid = np.zeros((20, 20), dtype=np.float32)
+    mirrored = Affine(-1.0, 0.0, ORIGIN_X_M + 20.0, 0.0, -1.0, ORIGIN_Y_M)
+    paths = []
+    for name in ("dem", "canopy"):
+        path = tmp_path / f"{name}.tif"
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            height=20,
+            width=20,
+            count=1,
+            dtype="float32",
+            crs="EPSG:26915",
+            transform=mirrored,
+        ) as dst:
+            dst.write(grid, 1)
+        paths.append(path)
+
+    with pytest.raises(ValueError, match="west to east"), open_layers(paths[0], canopy=paths[1]):
         pass
