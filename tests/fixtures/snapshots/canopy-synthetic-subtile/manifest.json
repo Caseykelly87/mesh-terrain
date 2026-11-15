@@ -1,0 +1,27 @@
+{
+  "capture_date": "2026-11-15",
+  "files": [
+    {
+      "bytes": 223,
+      "path": "README.md",
+      "sha256": "5981088be5cd0e5ce0f5e1981fa7173b3daec647fecfed40c68187991d64bf3f"
+    },
+    {
+      "bytes": 2762,
+      "path": "canopy_east.tif",
+      "sha256": "3f1d9459522d8aaf7bc2c52a26854bc8f9527e57109f6bfce9edbd8b0675de67"
+    },
+    {
+      "bytes": 12587,
+      "path": "canopy_west.tif",
+      "sha256": "3de3f361d3acf6866e92c464d93ad2aaaf661d173e06be0ba955cda1d0efbab2"
+    }
+  ],
+  "licence": "MIT, as the repository; no third-party data",
+  "seeds": {},
+  "snapshot_bytes": 15572,
+  "snapshot_id": "canopy-synthetic-subtile",
+  "source_url": "none: made-up values written by tests/make_engine_fixtures.py",
+  "synthetic": true,
+  "written_at": "2026-11-15T21:28:29+00:00"
+}

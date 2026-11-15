@@ -1,0 +1,25 @@
+# The engine's committed fixture run (docs/INTERFACE.md): two synthetic sites
+# to 500 synthetic receivers on a synthetic 1 km sub-tile of x72y429, with a
+# synthetic observations layer. Nothing here is real data. Paths are relative
+# to this file; snapshot ids are folders under SNAPSHOTS_DIR, which for this
+# run is tests/fixtures/snapshots. CI and the tests replace output_dir.
+# P.1812 runs on the synthetic map snapshot, so its numbers are not predictions.
+# itm is left out because libitm.so exists only in the Dagster image; the
+# image runs fixture-run-itm.yaml, which differs only in models and run_id.
+run_id: fixture
+frequency_mhz: 906.875
+models: [fspl, knife_edge, hata, p1812]
+tx_profile: site_gateway
+rx_profile: mesh_node
+tx_sites: two_sites.parquet
+rx_points: receivers_500.parquet
+snapshots:
+  dem: dem-1m-synthetic-subtile
+  dsm: dsm-synthetic-subtile
+  canopy: canopy-synthetic-subtile
+  buildings: osm-buildings-synthetic
+  p1812_maps: p1812-maps-synthetic
+endpoint_draws: 16
+seed: 20261108
+calibration: observations.parquet
+output_dir: /runs

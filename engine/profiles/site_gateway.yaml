@@ -1,0 +1,8 @@
+# A gateway on a mast or a tall building (docs/INTERFACE.md, Profiles).
+height_m: 10.0
+gain_dbi: 3.0
+transmit_power_dbm: 22.0
+polarisation: vertical
+description: >-
+  Gateway on a mast or a tall building: antenna 10 m above ground, 3 dBi,
+  22 dBm transmit power, vertical polarisation.

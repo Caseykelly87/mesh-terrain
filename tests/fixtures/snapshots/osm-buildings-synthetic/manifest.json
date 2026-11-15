@@ -1,0 +1,22 @@
+{
+  "capture_date": "2026-11-15",
+  "files": [
+    {
+      "bytes": 220,
+      "path": "README.md",
+      "sha256": "13345df088a8cb63be82a52a62462e1bf55adbf2b4981295302cb9b13a8b75ce"
+    },
+    {
+      "bytes": 19087,
+      "path": "buildings.parquet",
+      "sha256": "d728fc8eec90b201cdc3c48c5c79077e270fc73633d81bc71fca55fab0f5b539"
+    }
+  ],
+  "licence": "MIT, as the repository; no third-party data",
+  "seeds": {},
+  "snapshot_bytes": 19307,
+  "snapshot_id": "osm-buildings-synthetic",
+  "source_url": "none: made-up values written by tests/make_engine_fixtures.py",
+  "synthetic": true,
+  "written_at": "2026-11-15T21:28:29+00:00"
+}
