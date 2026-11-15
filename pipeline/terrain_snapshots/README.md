@@ -10,6 +10,8 @@ Commands that write the terrain inputs as snapshots (contract rule `snp_01`): da
 | `dsm --osm-snapshot <id> --scratch <dir>` | `ept-mo-stlouis-2017-x72y429` | the 1 m first-return DSM as a COG on the DEM tile's grid, and the PDAL pipeline of each of its 16 windows |
 | `canopy` | `canopy-v2-0231113110` | the CHMv2 canopy tile and its imagery-date GeoJSON, size, ETag and date checked, sha256 recorded beside them |
 
+`register <id>` records a finished snapshot in `raw.snapshot` (`snp_01`): it checks every file against the manifest, creates the raw tables only when `raw.snapshot` is missing, and inserts nothing for an id already registered. Each snapshot is written, then registered.
+
 Run one with `python -m pipeline.terrain_snapshots <command>`; `--root <dir>` writes under another folder instead of `SNAPSHOTS_DIR`. The make targets that wrap them are listed in the PR that added this package. Writing a real snapshot is permanent: it runs only after Casey's yes on a checklist.
 
 ## The DSM, worked through
@@ -18,8 +20,8 @@ The DSM is the lidar surface: roof tops and tree tops. Recipe A1 (Casey, PR #34)
 
 Every window is checked so an empty or thin surface never passes. Take window `r0c0`, 2 503 by 2 503 cells, and suppose OpenStreetMap water covers 300 000 of them. Its land is 6 265 009 minus 300 000, 5 965 009 m2. QL2 lidar promises at least 2 pulses a square metre, one first return each, so the window should hold about 11.9 million first returns over land; the command fails it below a quarter of that, about 2.98 million, and on 0. A window with no land at all gets no PDAL run, stays nodata and is recorded as `water_only`. The manifest records each window's land area, water area, point count and nodata cells, and the totals, which are checked the same way.
 
-The command refuses before doing anything when the OSM snapshot is missing or differs from its manifest (write it first with `osm`), when `make check-pdal` reports a version other than `2.8.4 (git-version: 156082)`, or when the scratch folder overlaps the snapshots folder. Window rasters go to `<scratch>/<snapshot id>/` and are not part of the snapshot.
+The command refuses before doing anything when the OSM snapshot is missing or differs from its manifest (write it first with `osm`), when `raw.snapshot` has no row for it with that manifest's sha256 (register it with `register`), when `make check-pdal` reports a version other than `2.8.4 (git-version: 156082)`, or when the scratch folder overlaps the snapshots folder. Window rasters go to `<scratch>/<snapshot id>/` and are not part of the snapshot.
 
 ## What this package does not do
 
-It registers nothing in `raw.snapshot`; a loader does that with `register_verified`. It does not resample the canopy (the engine build does, by nearest neighbour), build the clutter layer, or read any snapshot for the engine. It never deletes a `.partial` folder or a scratch folder; Casey decides what happens to one left by a failed run. Its tests use a fake web server and a fake `make`; none touches the network or Docker.
+Only `register` and the DSM's check of its OSM snapshot open the warehouse; the other commands take no connection. It does not resample the canopy (the engine build does, by nearest neighbour), build the clutter layer, or read any snapshot for the engine. It never deletes a `.partial` folder or a scratch folder; Casey decides what happens to one left by a failed run. Its tests use a fake web server and a fake `make`; none touches the network or Docker.
