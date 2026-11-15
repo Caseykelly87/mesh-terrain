@@ -4,7 +4,7 @@ This file says where the project actually stands. It is updated by the agent tha
 
 ## Current phase and last unit
 
-Phase 0 complete with PR #14 (the tag is described in `docs/PLAN.md`, Phase 0); Phase 1 is in progress. Last unit: platform-eng, the uv image digest, PR #22, decided by Casey on 2026-11-14 (PR #21 comment 6886413798). `docker/dagster/Dockerfile:58` copies uv from `ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b`, the multi-arch index digest, the same form as the python base at line 8.
+Phase 0 complete with PR #14 (the tag is described in `docs/PLAN.md`, Phase 0); Phase 1 is in progress. Last unit: platform-eng, the Py1812 dependency, PR #25, from Casey's ADR 0006 decision 1.2 with (a) (PR #24 comment 6887613273). `pyproject.toml` takes `py1812` from the archive of commit 6c9061dd, and `uv.lock` records its sha256 `03d7c5bd2bdb831d009266b4a17a2c721f63db4f817f60af47bb82fdc4268469`, which `uv sync --frozen` checks. `[tool.uv] build-constraint-dependencies = ["flit-core==3.12.0"]` pins its build tool; the lock records it under `[manifest] build-constraints`, and the installed wheel says `Generator: flit 3.12.0`. `[tool.hatch.metadata] allow-direct-references = true` is needed because hatchling rejects a URL dependency without it. numpy 2.5.4 enters the lock as Py1812's only dependency. The archive is built by GitHub on request, like the ITM and H3 core archives, so a change on GitHub's side fails the install on the hash until someone updates the lock. Nothing imports Py1812 yet, and `import Py1812` fails by design with `FileNotFoundError` for the missing `P1812.npz` until the engine's wrapper loads it against the in-memory placeholder (ADR 0006 option 2.2); the wheel ships no ITU map.
 
 ## Deviations from the plan still in effect
 
@@ -96,5 +96,5 @@ Phase 0 complete with PR #14 (the tag is described in `docs/PLAN.md`, Phase 0); 
 Order set by Casey on 2026-11-14 (PR #17 comment 6883374524; PR #20 comments 6885928629 and 6886125642; PR #21 comment 6886413798).
 
 1. terrain-rf-eng: ADR 0006 (adding P.1812 via Py1812, a decision for Casey).
-2. terrain-rf-eng: the engine milestone on test tile x72y429, from `docs/PLAN.md`.
+2. terrain-rf-eng, with platform-eng co-assigned: the engine milestone on test tile x72y429, from `docs/PLAN.md` and ADR 0006 as decided. platform-eng adds `Py1812` and `Py1812.P1812` to the mypy override list and writes `make p1812-maps` and `make check-p1812` in the same unit, so the override names land with `terrain/p1812.py`, the first module that imports Py1812, and the targets wrap code that unit writes.
 3. Lead: before analytics-eng starts any work, bring Casey the analysis design question: with 8 usable pairs, a case study of the engine, or a drive test with his own radio for many more paths. Casey: "Do not plan or start a capture."
