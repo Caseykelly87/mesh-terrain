@@ -18,6 +18,7 @@ reliability, mode of variability 12.
 
 import ctypes
 import math
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -25,6 +26,7 @@ from typing import Literal
 
 import numpy as np
 import numpy.typing as npt
+import structlog
 
 from terrain.errors import RefusedDrawError
 from terrain.profile import PathProfile
@@ -32,6 +34,8 @@ from terrain.result import PathLossResult
 
 FloatArray = npt.NDArray[np.float64]
 Polarisation = Literal["horizontal", "vertical"]
+
+log = structlog.get_logger(component="terrain.itm")
 
 CLIMATE_CONTINENTAL_TEMPERATE = 5
 # Mode of variability 12: mobile mode (2) plus 10, which removes location
@@ -152,6 +156,8 @@ def load_itm_library(path: Path) -> ItmLibrary:
         "the Dagster image builds it (docker/dagster/Dockerfile, stage itm-build); "
         "a host-side build sets ITM_LIBRARY_PATH"
     )
+    log.info("itm_library_load_begin", path=str(path))
+    started = time.monotonic()
     if not Path(path).is_file():
         raise RuntimeError(f"no ITM library at {path}: {hint}")
     try:
@@ -161,6 +167,9 @@ def load_itm_library(path: Path) -> ItmLibrary:
         raise RuntimeError(f"ITM library at {path} does not load: {hint}") from err
     function.restype = ctypes.c_int
     function.argtypes = _P2P_CR_EX_ARGTYPES
+    log.info(
+        "itm_library_load_end", path=str(path), duration_s=round(time.monotonic() - started, 3)
+    )
     return ItmLibrary(path=Path(path), handle=handle)
 
 
@@ -217,7 +226,7 @@ def itm_loss(
     tx_height_m: float,
     rx_height_m: float,
     frequency_mhz: float,
-    polarisation: Polarisation = "vertical",
+    polarisation: Polarisation,
     settings: ItmSettings = DEFAULT_SETTINGS,
 ) -> PathLossResult:
     """Basic transmission loss by ITM point-to-point, confidence and reliability form.
@@ -230,7 +239,7 @@ def itm_loss(
         tx_height_m: Transmitter antenna height above ground, metres.
         rx_height_m: Receiver antenna height above ground, metres.
         frequency_mhz: Frequency, MHz.
-        polarisation: From the antenna profile.
+        polarisation: From the antenna profile; required, so no caller inherits one.
         settings: Climate, refractivity, ground and statistics.
 
     Returns:
