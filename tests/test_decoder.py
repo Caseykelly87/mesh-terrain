@@ -21,6 +21,7 @@ from ingester.decoder import (
     DroppedDelivery,
     StoredDelivery,
     decode_delivery,
+    gateway_number,
 )
 from ingester.keys import delivery_key, pseudonym
 
@@ -406,3 +407,21 @@ def test_no_output_holds_a_node_id_or_invented_text_or_names() -> None:
         assert NODE_PATTERN.search(value) is None, value
         for word in INVENTED_WORDS:
             assert word not in value
+
+
+@pytest.mark.parametrize(
+    ("gateway_id", "expected"),
+    [
+        ("!0000abcd", 0xABCD),
+        ("!00000000", None),
+        ("!zzzzzzzz", None),
+        ("!abc", None),
+        ("0000abcd0", None),
+        ("", None),
+    ],
+)
+def test_a_gateway_id_that_is_not_a_node_number_leaves_the_gateway_unknown(
+    gateway_id: str, expected: int | None
+) -> None:
+    # Gateways write their own id into the envelope; a malformed one must not raise.
+    assert gateway_number(gateway_id) == expected
