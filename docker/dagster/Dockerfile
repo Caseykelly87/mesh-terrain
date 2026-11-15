@@ -55,6 +55,14 @@ RUN sed -i 's|#include "..\\include\\\([A-Za-z0-9_]*\.h\)"|#include "\1"|' src/*
 
 FROM ${PYTHON_BASE}
 
+# rasterio's manylinux wheel bundles GDAL but links it against the system
+# libexpat, which the slim base does not carry; without it `import rasterio`
+# fails with "libexpat.so.1: cannot open shared object file". The Windows wheel
+# bundles its own, so only the image needs this.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=ghcr.io/astral-sh/uv:0.13.4@sha256:9f130421e930bfbdc563c00740466603f8723158e90297d07957c2294640262b /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -85,6 +93,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY pipeline/ pipeline/
 COPY terrain/ terrain/
 COPY ingester/ ingester/
+# engine/ does not exist until terrain-rf-eng adds it. A wildcard that matches
+# nothing copies nothing, where a plain path would fail the build, so the line
+# can stand now and picks the package up when it lands.
+COPY engin[e]/ engine/
 COPY dbt/ dbt/
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=ca_bundle,required=false \
