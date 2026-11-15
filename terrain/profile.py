@@ -28,7 +28,7 @@ from rasterio.io import DatasetReader
 from rasterio.windows import Window
 from scipy.ndimage import map_coordinates
 
-from terrain.errors import OutOfExtentError
+from terrain.errors import OutOfExtentError, ZeroLengthPathError
 
 FloatArray = npt.NDArray[np.float64]
 XY = tuple[float, float]
@@ -106,12 +106,13 @@ def profile_distances_m(length_m: float, step_m: float) -> FloatArray:
         Distances in metres.
 
     Raises:
-        ValueError: for a zero-length path or a step that is not positive.
+        ZeroLengthPathError: for a path of zero length.
+        ValueError: for a step that is not positive.
     """
     if not math.isfinite(step_m) or step_m <= 0.0:
         raise ValueError(f"step_m must be positive, got {step_m}")
     if length_m <= 0.0:
-        raise ValueError("zero-length path: the two endpoints coincide")
+        raise ZeroLengthPathError("zero-length path: the two endpoints coincide")
     intervals = max(1, math.ceil(length_m / step_m - _STEP_TOLERANCE))
     return np.linspace(0.0, length_m, intervals + 1)
 
@@ -140,8 +141,8 @@ def sample_profile(
         any sample whose four neighbouring pixels include one is NaN.
 
     Raises:
-        ValueError: zero-length path, step not positive, or raster not north-up
-            in EPSG:26915.
+        ZeroLengthPathError: if the two endpoints coincide.
+        ValueError: step not positive, or raster not north-up in EPSG:26915.
         OutOfExtentError: if any sample lies outside the raster.
     """
     length_m = math.hypot(rx_xy_m[0] - tx_xy_m[0], rx_xy_m[1] - tx_xy_m[1])

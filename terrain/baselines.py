@@ -19,6 +19,7 @@ extrapolated there and serves as a baseline, not a prediction.
 import math
 from typing import Literal
 
+from terrain.errors import ZeroLengthPathError
 from terrain.units import wavelength_m
 
 HataVariant = Literal["urban", "suburban"]
@@ -43,10 +44,10 @@ def fspl_db(distance_m: float, frequency_mhz: float) -> float:
         Loss in dB.
 
     Raises:
-        ValueError: if the distance or the frequency is not positive.
+        ZeroLengthPathError: if the distance is 0.
+        ValueError: if the distance is negative or the frequency not positive.
     """
-    if not distance_m > 0.0:
-        raise ValueError(f"distance_m must be positive, got {distance_m}")
+    require_path_length(distance_m)
     return 20.0 * math.log10(4.0 * math.pi * distance_m / wavelength_m(frequency_mhz))
 
 
@@ -75,8 +76,9 @@ def hata_db(
         Loss in dB.
 
     Raises:
-        ValueError: for a frequency outside 150 to 1500 MHz, a distance or
-            antenna height that is not positive, or an unknown variant.
+        ZeroLengthPathError: if the distance is 0.
+        ValueError: for a frequency outside 150 to 1500 MHz, a negative distance,
+            an antenna height that is not positive, or an unknown variant.
     """
     _check_hata_inputs(distance_m, frequency_mhz, tx_height_m, rx_height_m, variant)
     base_m, mobile_m = max(tx_height_m, rx_height_m), min(tx_height_m, rx_height_m)
@@ -91,8 +93,9 @@ def _check_hata_inputs(
 ) -> None:
     if not HATA_MIN_MHZ <= frequency_mhz <= HATA_MAX_MHZ:
         raise ValueError(f"Hata is valid from 150 to 1500 MHz, got {frequency_mhz}")
-    if not (distance_m > 0.0 and tx_height_m > 0.0 and rx_height_m > 0.0):
-        raise ValueError("distance and antenna heights must be positive")
+    require_path_length(distance_m)
+    if not (tx_height_m > 0.0 and rx_height_m > 0.0):
+        raise ValueError("antenna heights must be positive")
     if variant not in ("urban", "suburban"):
         raise ValueError(f"unknown Hata variant {variant!r}")
 
@@ -106,6 +109,22 @@ def _hata_urban_db(
     mobile_correction_db = (1.1 * log_f - 0.7) * mobile_m - (1.56 * log_f - 0.8)
     distance_term_db = (44.9 - 6.55 * log_base) * math.log10(distance_m / 1000.0)
     return 69.55 + 26.16 * log_f - 13.82 * log_base - mobile_correction_db + distance_term_db
+
+
+def require_path_length(distance_m: float) -> None:
+    """Check a path length before a loss is computed from it.
+
+    Args:
+        distance_m: Path length in metres.
+
+    Raises:
+        ZeroLengthPathError: if the length is 0.
+        ValueError: if the length is negative or not a number.
+    """
+    if distance_m == 0.0:
+        raise ZeroLengthPathError("zero-length path: the two endpoints coincide")
+    if not distance_m > 0.0:
+        raise ValueError(f"distance_m must be positive, got {distance_m}")
 
 
 def hata_variant(tx_building_share: float, rx_building_share: float) -> HataVariant:
