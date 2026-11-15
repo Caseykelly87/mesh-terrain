@@ -27,6 +27,7 @@ from typing import Protocol
 import structlog
 
 from pipeline.common.snapshot import SnapshotError
+from pipeline.terrain_snapshots.common import timed
 
 log = structlog.get_logger(component="pipeline.terrain_snapshots.remote")
 
@@ -80,8 +81,12 @@ class PinnedObject:
 
 def head(url: str, opener: Opener = urlopen_opener) -> PinnedObject:
     """The size, ETag and Last-Modified a server reports for a URL, from a HEAD request."""
-    with opener(urllib.request.Request(url, method="HEAD")) as response:
+    with (
+        timed("http_head", url=url) as details,
+        opener(urllib.request.Request(url, method="HEAD")) as response,
+    ):
         headers = response.headers
+        details["content_length"] = headers.get("Content-Length")
     length = headers.get("Content-Length")
     return PinnedObject(
         url=url,
@@ -113,8 +118,9 @@ def read_small(url: str, opener: Opener = urlopen_opener, limit: int = 1 << 16) 
     Raises:
         DownloadError: if the body is longer than limit bytes.
     """
-    with opener(urllib.request.Request(url)) as response:
+    with timed("http_read", url=url) as details, opener(urllib.request.Request(url)) as response:
         body = response.read(limit + 1)
+        details["bytes"] = len(body)
     if len(body) > limit:
         raise DownloadError(f"{url} is longer than {limit} bytes")
     return body
