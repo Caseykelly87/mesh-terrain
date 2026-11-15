@@ -16,6 +16,7 @@ from pipeline.terrain_snapshots.remote import (
     check_pin,
     fetch_pinned,
     head,
+    read_small,
 )
 
 URL = "https://example.test/data/tile.tif"
@@ -111,3 +112,14 @@ def test_build_snapshot_refuses_an_existing_partial_and_writes_nothing(tmp_path:
     with pytest.raises(Exception, match="earlier run"):
         build_snapshot(tmp_path, "demo", fill, {})
     assert calls == []
+
+
+def test_head_and_read_small_log_a_begin_and_an_end() -> None:
+    web = FakeWeb()
+    web.serve(URL, BODY)
+    with capture_logs() as logs:
+        head(URL, web)
+        read_small(URL, web, limit=len(BODY))
+    events = [entry["event"] for entry in logs]
+    assert events == ["http_head_begin", "http_head_end", "http_read_begin", "http_read_end"]
+    assert all("duration_s" in entry for entry in logs[1::2])

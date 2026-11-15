@@ -18,6 +18,7 @@ from typing import Any
 import geopandas as gpd
 import psycopg
 import pytest
+from structlog.testing import capture_logs
 
 from pipeline.common.settings import get_settings
 from pipeline.common.snapshot import (
@@ -31,6 +32,7 @@ from pipeline.common.snapshot import (
 from pipeline.terrain_snapshots import registry
 from pipeline.terrain_snapshots.dsm import OsmSnapshotMissingError, osm_water
 from pipeline.terrain_snapshots.registry import (
+    lookup_registered,
     raw_snapshot_exists,
     register_snapshot,
     registered_manifest_sha256,
@@ -154,3 +156,11 @@ def test_ddl_runs_only_when_raw_snapshot_is_missing(
     monkeypatch.setattr(registry, "register_verified", lambda conn, folder: 1)
     assert register_snapshot(_FakeConn(exists), tmp_path, OSM_ID) == 1
     assert len(ddl) == ddl_runs
+
+
+def test_the_lookup_logs_a_begin_and_an_end(conn: psycopg.Connection) -> None:
+    # conn only makes the test skip where no warehouse answers; the lookup opens its own.
+    with capture_logs() as logs:
+        assert lookup_registered("osm-never-registered") is None
+    assert [entry["event"] for entry in logs] == ["registry_lookup_begin", "registry_lookup_end"]
+    assert logs[1]["registered"] is False

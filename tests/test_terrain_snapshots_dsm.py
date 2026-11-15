@@ -20,7 +20,9 @@ import pytest
 import rasterio
 from rasterio.transform import from_origin
 from shapely.geometry import box
+from structlog.testing import capture_logs
 
+from pipeline.common.settings import REPO_ROOT
 from pipeline.common.snapshot import (
     SnapshotError,
     SnapshotExistsError,
@@ -31,6 +33,7 @@ from pipeline.common.snapshot import (
     verify_manifest,
     write_manifest,
 )
+from pipeline.terrain_snapshots.dem import X72Y429 as DEM_X72Y429
 from pipeline.terrain_snapshots.dsm import (
     PDAL_IMAGE,
     PDAL_VERSION,
@@ -38,6 +41,8 @@ from pipeline.terrain_snapshots.dsm import (
     DsmSource,
     OsmSnapshotMissingError,
     build_dsm,
+    check_pdal_version,
+    scratch_folder,
 )
 from pipeline.terrain_snapshots.dsm_guard import ThinOutputError
 from pipeline.terrain_snapshots.dsm_recipe import (
@@ -50,7 +55,7 @@ from pipeline.terrain_snapshots.dsm_recipe import (
 
 OSM_ID = "osm-geofabrik-mo-il-2026-11-01"
 TODAY = date(2026, 11, 15)
-GRID = Grid(west=720_000.0, south=4_280_000.0, width=8, height=8)
+GRID = Grid(west_m=720_000.0, south_m=4_280_000.0, width=8, height=8)
 SOURCE = DsmSource(snapshot_id="ept-test-dsm", ept_url=EPT_URL, grid=GRID, windows_per_side=2)
 VERSION_OUTPUT = f"pdal {PDAL_VERSION}\nreaders.ept and writers.gdal present\n"
 
@@ -78,7 +83,11 @@ class FakeMake:
         width, height = writer["width"], writer["height"]
         rows, cols = np.indices((height, width))
         top = writer["origin_y"] + height * writer["resolution"]
-        heights = (200.0 + writer["origin_x"] - 720_000.0 + cols).astype(np.float32)
+        # 200 m at the north-west cell of GRID, +1 m a column east, +10 m a row south,
+        # so a one-cell shift in either direction changes every value.
+        east_m = writer["origin_x"] + cols + 0.5 - 720_000.5
+        south_m = 4_280_007.5 - (top - rows - 0.5)
+        heights = (200.0 + east_m + 10.0 * south_m).astype(np.float32)
         counts = np.vectorize(self.count)(rows, cols).astype(np.float32)
         with rasterio.open(
             workdir / writer["filename"].removeprefix("/work/"),
@@ -151,7 +160,8 @@ def test_builds_the_dsm_and_records_every_window(tmp_path: Path) -> None:
         assert tuple(dsm.bounds) == (720_000.0, 4_280_000.0, 720_008.0, 4_280_008.0)
         values = dsm.read(1)
     assert (values[:4, 4:] == -9999.0).all()
-    assert values[7, 0] == 200.0 and values[7, 3] == 203.0
+    assert values[7, 0] == 270.0 and values[7, 3] == 273.0
+    assert values[2, 1] == 221.0 and values[5, 2] == 252.0
     manifest = read_manifest(folder)
     assert manifest["crs"] == "EPSG:26915"
     assert manifest["horizontal_datum"] == "NAD83(2011)"
@@ -321,12 +331,14 @@ def test_the_pipeline_is_recipe_a1_on_a_grid_one_cell_wider_than_the_window() ->
 def test_x72y429_splits_into_sixteen_windows_on_the_dem_grid() -> None:
     assert X72Y429_DSM.snapshot_id == "ept-mo-stlouis-2017-x72y429"
     grid = X72Y429_DSM.grid
-    assert (grid.west, grid.south, grid.width, grid.height) == (
+    assert (grid.west_m, grid.south_m, grid.width, grid.height) == (
         719_994.0,
         4_279_994.0,
         10_012,
         10_012,
     )
+    assert (grid.west_m, grid.south_m, grid.east_m, grid.north_m) == DEM_X72Y429.bounds
+    assert grid.resolution_m == DEM_X72Y429.resolution_m
     windows = split(grid, X72Y429_DSM.windows_per_side)
     assert len(windows) == 16
     assert {(w.width, w.height) for w in windows} == {(2503, 2503)}
@@ -368,3 +380,48 @@ def test_refuses_an_osm_snapshot_that_is_not_registered(tmp_path: Path) -> None:
             registered=lambda snapshot_id: None,
         )
     assert make.calls == []
+
+
+# The west half of window r1c0 (columns 0 and 1, rows 4 to 7) is water.
+HALF_WATER = (719_999.75, 4_279_999.75, 720_002.25, 4_280_003.75)
+
+
+def test_a_part_water_window_counts_land_only_and_keeps_its_surface(tmp_path: Path) -> None:
+    root, scratch = _dirs(tmp_path)
+    _osm_snapshot(root, [HALF_WATER])
+    # The fake writes 4 points in every cell, water cells included.
+    folder = build_dsm(
+        root,
+        OSM_ID,
+        scratch,
+        source=SOURCE,
+        runner=FakeMake(),
+        today=TODAY,
+        registered=_registered(root),
+    )
+    window = {w["name"]: w for w in read_manifest(folder)["windows"]}["r1c0"]
+    assert window["status"] == "built"
+    assert (window["land_area_m2"], window["water_area_m2"]) == (8.0, 8.0)
+    assert window["points"] == 32
+    with rasterio.open(folder / "dsm.tif") as dsm:
+        assert dsm.read(1)[4, 0] == 240.0
+
+
+def test_the_pdal_image_is_the_one_compose_pins() -> None:
+    compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    assert re.findall(r"image:\s*(pdal/pdal:\S+)", compose) == [PDAL_IMAGE]
+
+
+def test_refuses_a_scratch_folder_inside_the_checkout(tmp_path: Path) -> None:
+    root, checkout = tmp_path / "snapshots", tmp_path / "repo"
+    with pytest.raises(SnapshotError, match="checkout"):
+        scratch_folder(root, checkout / "scratch", "ept-test-dsm", checkout=checkout)
+    assert not (checkout / "scratch").exists()
+
+
+def test_the_version_check_logs_its_begin_and_end() -> None:
+    with capture_logs() as logs:
+        assert check_pdal_version(FakeMake()) == PDAL_VERSION
+    events = [entry["event"] for entry in logs]
+    assert events == ["check_pdal_begin", "check_pdal_end"]
+    assert logs[1]["duration_s"] >= 0
