@@ -215,6 +215,18 @@ def test_verify_names_changed_missing_and_extra_files(tmp_path: Path) -> None:
     ]
 
 
+def test_a_nested_file_named_like_the_manifest_is_listed_and_verified(tmp_path: Path) -> None:
+    # An extracted archive can carry its own manifest.json; only the top one is ours.
+    partial = start_snapshot(tmp_path, SNAPSHOT_ID)
+    fill(partial)
+    (partial / "tile" / MANIFEST_NAME).write_text("{}\n", encoding="utf-8")
+    write_manifest(partial, METADATA)
+    final = finish_snapshot(partial)
+    assert "tile/manifest.json" in [entry["path"] for entry in read_manifest(final)["files"]]
+    (final / "tile" / MANIFEST_NAME).write_text('{"changed": true}\n', encoding="utf-8")
+    assert verify_manifest(final) == ["changed: tile/manifest.json"]
+
+
 def test_verify_refuses_a_folder_without_a_manifest(tmp_path: Path) -> None:
     partial = start_snapshot(tmp_path, SNAPSHOT_ID)
     with pytest.raises(SnapshotError):
