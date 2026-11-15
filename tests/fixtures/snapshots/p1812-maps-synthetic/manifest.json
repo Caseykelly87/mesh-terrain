@@ -1,0 +1,27 @@
+{
+  "capture_date": "2026-11-15",
+  "files": [
+    {
+      "bytes": 145805,
+      "path": "DN50.TXT",
+      "sha256": "0eb10f6ee229e3fcb8a860b6ba4f31467830fcb9bc8dc1dd4e062a60d5766ac8"
+    },
+    {
+      "bytes": 174966,
+      "path": "N050.TXT",
+      "sha256": "125269ef294f345548648031d3714a91283e85265ef057a9ae92dc24d4bdc96f"
+    },
+    {
+      "bytes": 853,
+      "path": "README.md",
+      "sha256": "58d32eedfcc7825d684231bddae76284763f1977f502a1c58be5d3a03c8a35d8"
+    }
+  ],
+  "licence": "MIT, as the repository; no ITU data",
+  "seeds": {},
+  "snapshot_bytes": 321624,
+  "snapshot_id": "p1812-maps-synthetic",
+  "source_url": "none: made-up constants written for tests, not downloaded",
+  "synthetic": true,
+  "written_at": "2026-11-15T00:00:00+00:00"
+}
