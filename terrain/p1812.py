@@ -45,7 +45,7 @@ import structlog
 from pyproj import Transformer
 
 from terrain.errors import RefusalReason, RefusedDrawError, ZeroLengthPathError
-from terrain.profile import PathProfile
+from terrain.profile import ENDPOINT_TOLERANCE_M, MIN_SAMPLES, PathProfile
 from terrain.result import PathLossResult
 
 FloatArray = npt.NDArray[np.float64]
@@ -70,9 +70,6 @@ ZONE_INLAND = 4
 COAST_DISTANCE_KM = 500.0
 # The earth radius Py1812 passes to great_circle_path for the path centre (P1812.py line 225).
 GREAT_CIRCLE_RADIUS_KM = 6371.0
-MIN_SAMPLES = 5
-# The sampler puts the last sample on the receiver; more than this apart is a bug.
-ENDPOINT_TOLERANCE_M = 0.01
 POLARISATION_CODES: Mapping[str, int] = {"horizontal": 1, "vertical": 2}
 LBS_NAME = "Lbs (dB)"
 LBS_REFERENCE = "Eq (44)"

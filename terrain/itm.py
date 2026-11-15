@@ -29,7 +29,7 @@ import numpy.typing as npt
 import structlog
 
 from terrain.errors import RefusedDrawError, ZeroLengthPathError
-from terrain.profile import PathProfile
+from terrain.profile import MIN_SAMPLES, PathProfile
 from terrain.result import PathLossResult
 
 FloatArray = npt.NDArray[np.float64]
@@ -42,7 +42,6 @@ CLIMATE_CONTINENTAL_TEMPERATE = 5
 # variability; the usual choice for a point-to-point link between fixed sites.
 MDVAR_POINT_TO_POINT = 12
 POLARISATION_CODES = {"horizontal": 0, "vertical": 1}  # include/Enums.h
-MIN_SAMPLES = 5
 STEP_TOLERANCE_M = 1e-6
 SUCCESS_CODES = frozenset({0, 1})  # SUCCESS, SUCCESS_WITH_WARNINGS (include/Errors.h)
 ERROR_NAMES = {

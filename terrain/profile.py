@@ -37,6 +37,13 @@ PROFILE_CRS_EPSG = 26915
 _EXTENT_TOLERANCE_PX = 1e-9
 _STEP_TOLERANCE = 1e-9
 
+MIN_SAMPLES = 5
+"""Fewest samples a propagation model is given (ADR 0006 decision 3, refused as short_profile)."""
+
+ENDPOINT_TOLERANCE_M = 0.01
+"""Largest gap between the last profile distance and the receiver; the samplers put
+the last sample on the receiver, so a larger gap is a bug."""
+
 log = structlog.get_logger(__name__).bind(component="terrain.profile")
 
 
