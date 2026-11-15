@@ -54,6 +54,9 @@ def curved_path(
         rx_height_m: Receiving antenna height above ground, metres.
         k_factor: Effective earth radius factor; math.inf gives a flat earth.
 
+    Returns:
+        The interior samples with the bulge added, and both antenna tops.
+
     Raises:
         ValueError: if the profile has no interior sample.
         RefusedDrawError: if a ground height is NaN (reason "dem_gap").
@@ -96,6 +99,9 @@ def clearance_m(
 def require_complete_ground(profile: PathProfile) -> None:
     """Check the profile has an interior sample and no missing ground height.
 
+    Args:
+        profile: Ground profile in EPSG:26915.
+
     Raises:
         ValueError: if the profile has fewer than three samples.
         RefusedDrawError: if a ground height is NaN (reason "dem_gap").
@@ -112,7 +118,18 @@ def los_clear(
 ) -> bool:
     """Whether no sample of the curved ground rises above the ray.
 
-    Args and Raises as `clearance_m`.
+    Args:
+        profile: Uncurved ground profile in EPSG:26915.
+        tx_height_m: Transmitting antenna height above ground, metres.
+        rx_height_m: Receiving antenna height above ground, metres.
+        k_factor: Effective earth radius factor; math.inf gives a flat earth.
+
+    Returns:
+        True when every interior sample is at or below the ray.
+
+    Raises:
+        ValueError: if the profile has no interior sample.
+        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
     """
     return bool(np.all(clearance_m(profile, tx_height_m, rx_height_m, k_factor) >= 0.0))
 
@@ -122,10 +139,18 @@ def obstruction_m(
 ) -> float:
     """Height of the highest sample of curved ground above the ray.
 
-    Args and Raises as `clearance_m`.
+    Args:
+        profile: Uncurved ground profile in EPSG:26915.
+        tx_height_m: Transmitting antenna height above ground, metres.
+        rx_height_m: Receiving antenna height above ground, metres.
+        k_factor: Effective earth radius factor; math.inf gives a flat earth.
 
     Returns:
         Metres; positive when the path is obstructed, negative when clear.
+
+    Raises:
+        ValueError: if the profile has no interior sample.
+        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
     """
     return float(-clearance_m(profile, tx_height_m, rx_height_m, k_factor).min())
 
@@ -133,7 +158,7 @@ def obstruction_m(
 def fresnel_radius_m(
     distance_m: FloatArray, path_length_m: float, frequency_mhz: float
 ) -> FloatArray:
-    """Radius of the first Fresnel zone, ITU-R P.526-15 section 2.1, equation (2).
+    """Radius of the first Fresnel zone, ITU-R P.526-16 section 2.1, equation (2).
 
     R1 = sqrt(lambda d1 d2 / (d1 + d2)).
 

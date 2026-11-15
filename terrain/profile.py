@@ -7,20 +7,22 @@ heights are uncurved ground: the k = 4/3 bulge is added later by line of sight,
 Fresnel and knife edge (`terrain.curvature`), and ITM and P.1812 apply their own
 (ADR 0006 decision 3).
 
-Every read is a rasterio window around a stretch of the path plus a margin, never
-the whole raster, and long paths are read in several windows so that none grows
-past `max_window_px` on a side. Values between pixel centres are bilinear
+The caller opens the raster once and passes it in; this module reads from it and
+opens nothing. Every read is a rasterio window around a stretch of the path plus
+a margin, never the whole raster, and long paths are read in several windows so
+that none grows past `max_window_px` on a side (a deviation from the plan's one
+window per path, recorded in docs/STATUS.md). Values between pixel centres are bilinear
 (`scipy.ndimage.map_coordinates` with order=1). This module does not decide what
 a missing height means for a draw: nodata becomes NaN and the caller refuses it.
 """
 
 import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
-import rasterio
 import structlog
 from rasterio.io import DatasetReader
 from rasterio.windows import Window
@@ -35,7 +37,7 @@ PROFILE_CRS_EPSG = 26915
 _EXTENT_TOLERANCE_PX = 1e-9
 _STEP_TOLERANCE = 1e-9
 
-log = structlog.get_logger(__name__)
+log = structlog.get_logger(__name__).bind(component="terrain.profile")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -115,7 +117,7 @@ def profile_distances_m(length_m: float, step_m: float) -> FloatArray:
 
 
 def sample_profile(
-    raster_path: Path,
+    source: DatasetReader,
     tx_xy_m: XY,
     rx_xy_m: XY,
     step_m: float,
@@ -126,7 +128,7 @@ def sample_profile(
     """Sample uncurved ground heights along the line from tx to rx.
 
     Args:
-        raster_path: Single-band DEM, north-up, in EPSG:26915 metres.
+        source: Open single-band DEM, north-up, in EPSG:26915 metres.
         tx_xy_m: Transmitter easting and northing in EPSG:26915, metres.
         rx_xy_m: Receiver easting and northing in EPSG:26915, metres.
         step_m: Largest sample spacing in metres (see `profile_distances_m`).
@@ -145,14 +147,38 @@ def sample_profile(
     length_m = math.hypot(rx_xy_m[0] - tx_xy_m[0], rx_xy_m[1] - tx_xy_m[1])
     distance_m = profile_distances_m(length_m, step_m)
     x_m, y_m = _points_along(tx_xy_m, rx_xy_m, distance_m / length_m)
-    with rasterio.open(raster_path) as source:
-        _check_grid(source, raster_path)
-        rows, cols = _pixel_indices(source, x_m, y_m)
-        _check_extent(rows, cols, source.height, source.width, raster_path)
-        ground_m, windows = _sample_in_segments(source, rows, cols, max_window_px, margin_px)
-    missing = int(np.isnan(ground_m).sum())
-    log.debug("profile_sampled", raster=raster_path.name, windows=windows, missing=missing)
+    rows, cols = _checked_indices(source, x_m, y_m)
+    ground_m = _logged_read(source, rows, cols, max_window_px, margin_px)
     return PathProfile(distance_m=distance_m, ground_m=ground_m, tx_xy_m=tx_xy_m, rx_xy_m=rx_xy_m)
+
+
+def _logged_read(
+    source: DatasetReader, rows: FloatArray, cols: FloatArray, max_window_px: int, margin_px: int
+) -> FloatArray:
+    """Sample every point, with a log line at the start and end of the reads."""
+    raster = Path(source.name).name
+    log.debug("profile_read_started", raster=raster, samples=int(rows.size))
+    started = time.perf_counter()
+    ground_m, windows = _sample_in_segments(source, rows, cols, max_window_px, margin_px)
+    log.debug(
+        "profile_read_finished",
+        raster=raster,
+        windows=windows,
+        missing=int(np.isnan(ground_m).sum()),
+        duration_s=round(time.perf_counter() - started, 6),
+    )
+    return ground_m
+
+
+def _checked_indices(
+    source: DatasetReader, x_m: FloatArray, y_m: FloatArray
+) -> tuple[FloatArray, FloatArray]:
+    """Pixel indices of the samples, after checking the grid and the extent."""
+    raster = Path(source.name).name
+    _check_grid(source, raster)
+    rows, cols = _pixel_indices(source, x_m, y_m)
+    _check_extent(rows, cols, source.height, source.width, raster)
+    return rows, cols
 
 
 def _points_along(tx_xy_m: XY, rx_xy_m: XY, fraction: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -162,13 +188,13 @@ def _points_along(tx_xy_m: XY, rx_xy_m: XY, fraction: FloatArray) -> tuple[Float
     return x_m, y_m
 
 
-def _check_grid(source: DatasetReader, raster_path: Path) -> None:
+def _check_grid(source: DatasetReader, raster: str) -> None:
     epsg = source.crs.to_epsg() if source.crs is not None else None
     if epsg != PROFILE_CRS_EPSG:
-        raise ValueError(f"{raster_path.name} is in EPSG:{epsg}, expected EPSG:26915")
+        raise ValueError(f"{raster} is in EPSG:{epsg}, expected EPSG:26915")
     transform = source.transform
     if transform.b != 0.0 or transform.d != 0.0 or transform.e >= 0.0:
-        raise ValueError(f"{raster_path.name} is not a north-up raster")
+        raise ValueError(f"{raster} is not a north-up raster")
 
 
 def _pixel_indices(
@@ -185,16 +211,14 @@ def _pixel_indices(
     return rows, cols
 
 
-def _check_extent(
-    rows: FloatArray, cols: FloatArray, height: int, width: int, raster_path: Path
-) -> None:
+def _check_extent(rows: FloatArray, cols: FloatArray, height: int, width: int, raster: str) -> None:
     # The outer half pixel lies inside the raster but beyond the last centre;
     # sampling there takes the edge pixel's value.
     low = -0.5 - _EXTENT_TOLERANCE_PX
     inside_rows = rows.min() >= low and rows.max() <= height - 0.5 + _EXTENT_TOLERANCE_PX
     inside_cols = cols.min() >= low and cols.max() <= width - 0.5 + _EXTENT_TOLERANCE_PX
     if not (inside_rows and inside_cols):
-        raise OutOfExtentError(f"profile leaves the extent of {raster_path.name}")
+        raise OutOfExtentError(f"profile leaves the extent of {raster}")
 
 
 def _sample_in_segments(

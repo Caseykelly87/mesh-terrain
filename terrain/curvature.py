@@ -12,7 +12,7 @@ import numpy as np
 from terrain.profile import FloatArray
 
 EARTH_RADIUS_M = 6_371_000.0
-"""Mean earth radius, the value ITU-R P.1812 and P.452 use (6371 km)."""
+"""Earth radius of ITU-R P.526-16 (ae = k x 6371 km, after equation (44)) and P.1812-8."""
 
 K_FACTOR = 4.0 / 3.0
 """Effective earth radius factor for the standard atmosphere."""
@@ -24,8 +24,8 @@ def earth_bulge_m(
     """Height of the curved earth above the chord between the two endpoints.
 
     h = d1 d2 / (2 k a), with d1 the distance from the transmitter, d2 = d - d1 and
-    a the earth radius. It is the term 500 Ce di (d - di) of ITU-R P.1812-6
-    equations (13) to (20) written in metres instead of kilometres.
+    a the earth radius. It is the term 500 Ce di (d - di) of ITU-R P.526-16
+    equations (49), (51) and (53) written in metres instead of kilometres.
 
     Args:
         distance_m: Distances from the transmitter along the path, metres.

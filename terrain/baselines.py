@@ -31,7 +31,7 @@ HATA_MAX_MHZ = 1500.0
 
 
 def fspl_db(distance_m: float, frequency_mhz: float) -> float:
-    """Free-space basic transmission loss, ITU-R P.525-4 equation (4).
+    """Free-space basic transmission loss, ITU-R P.525-5 section 2.3, equation (5).
 
     Lbf = 20 log10(4 pi d / lambda).
 
