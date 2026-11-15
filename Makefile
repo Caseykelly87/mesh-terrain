@@ -27,7 +27,7 @@ UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
-.PHONY: help env up down nuke check check-itm check-definitions fmt reproduce load capture dbt-deps dbt-build dbt-debug lint test
+.PHONY: help env up down nuke check check-itm check-definitions check-pdal pdal fmt reproduce load capture dbt-deps dbt-build dbt-debug lint test
 
 help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
@@ -45,6 +45,11 @@ help:
 	@echo "                load one finished snapshot from SNAPSHOTS_DIR into the raw schema"
 	@echo "make capture HOST=... SOURCE=... TOPICS='...' END_AT=... SNAPSHOT=<id>"
 	@echo "                one on-demand MQTT capture run (ADR 0005); never scheduled"
+	@echo "make pdal PIPELINE=<file> WORKDIR=<dir> [STREAM=no] [METADATA=<file>]"
+	@echo "                one PDAL pipeline in the pinned PDAL image: the pipeline's folder is"
+	@echo "                read-only at /pipelines, WORKDIR is read-write at /work (write outputs"
+	@echo "                there); --stream unless STREAM=no; make up never starts it"
+	@echo "make check-pdal print the PDAL version and fail without readers.ept or writers.gdal"
 
 env:
 	@test -f .env || cp .env.example .env
@@ -109,6 +114,39 @@ check-itm: env
 # with / into a Windows path before docker.exe sees it.
 check-definitions:
 	$(COMPOSE) exec -T dagster-webserver sh -c 'dagster definitions validate -w "$$DAGSTER_HOME/workspace.yaml"'
+
+# One PDAL pipeline in the pinned PDAL image (the pdal service). Example:
+# make pdal PIPELINE=terrain/pipelines/dsm.json WORKDIR=C:/data/snapshots/<id>.partial
+# The pipeline's folder is mounted read-only at /pipelines and WORKDIR
+# read-write at /work, the working directory, so a pipeline writes under /work
+# and sees nothing else of the host. WORKDIR is writable, so it is never
+# SNAPSHOTS_DIR itself (snp_01). --stream is the default so that a pipeline
+# that cannot stream fails instead of holding a lidar tile in memory;
+# STREAM=no runs it in standard mode. METADATA=<file> writes PDAL's metadata
+# to that path under WORKDIR; when streaming it holds each stage's SRS and the
+# output file names but no point counts.
+# Git Bash rewrites an argument that starts with / into a Windows path before
+# docker.exe sees it, hence the two MSYS variables; pwd -W gives the C:/ form
+# Docker Desktop mounts, and plain pwd covers Linux and macOS. The container
+# runs as the calling user so that on Linux nothing in WORKDIR is owned by root.
+PDAL_STREAM := $(if $(filter no,$(STREAM)),--nostream,--stream)
+
+pdal: env
+	@test -f '$(PIPELINE)' || { echo "make pdal: PIPELINE=<file> must name a pipeline JSON file"; exit 2; }
+	@test -d '$(WORKDIR)' || { echo "make pdal: WORKDIR=<dir> must name an existing folder"; exit 2; }
+	pipeline_dir=$$(cd "$$(dirname '$(PIPELINE)')" && { pwd -W 2> /dev/null || pwd; }); \
+	pipeline_file=$$(basename '$(PIPELINE)'); \
+	work_dir=$$(cd '$(WORKDIR)' && { pwd -W 2> /dev/null || pwd; }); \
+	MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $(COMPOSE) run --rm --no-deps -T \
+	    --user "$$(id -u):$$(id -g)" \
+	    --volume "$$pipeline_dir:/pipelines:ro" --volume "$$work_dir:/work" \
+	    pdal pdal pipeline $(PDAL_STREAM) $(if $(METADATA),--metadata '/work/$(METADATA)') \
+	    "/pipelines/$$pipeline_file"
+
+# The DSM pipeline needs the EPT reader and the GDAL writer; this fails when
+# the pinned image lacks either, and prints the version a manifest records.
+check-pdal: env
+	$(COMPOSE) run --rm --no-deps -T pdal sh -c 'pdal --version && drivers=$$(pdal --drivers) && for driver in readers.ept writers.gdal; do echo "$$drivers" | grep -q "^$$driver " || { echo "missing $$driver"; exit 1; }; done && echo "readers.ept and writers.gdal present"'
 
 # One on-demand capture run (ADR 0005). Example:
 # make capture HOST=mqtt.meshtastic.org SOURCE=public TOPICS='msh/US/MeshSTL/# msh/US/MO/#' \
