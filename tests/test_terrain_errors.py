@@ -27,6 +27,11 @@ def test_refusal_carries_its_reason() -> None:
     assert "cell (3, 4)" in str(refusal)
 
 
+@pytest.mark.parametrize("reason", ["dem_gap", "empty_cell", "clutter_nan", "short_profile"])
+def test_the_four_refusal_causes_are_accepted(reason: str) -> None:
+    assert RefusedDrawError(reason, "detail").reason == reason  # type: ignore[arg-type]
+
+
 def test_refusal_rejects_an_unknown_reason() -> None:
     with pytest.raises(ValueError):
         RefusedDrawError("tired", "no")  # type: ignore[arg-type]
