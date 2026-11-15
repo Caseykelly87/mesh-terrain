@@ -1,24 +1,15 @@
-"""What a propagation model returns for one draw, and how a draw is refused (ADR 0006).
+"""What a propagation model returns for one draw (ADR 0006).
 
 Every model behind `path_loss_db` returns a PathLossResult (ADR 0006 decision
 3 as amended by item 10 (a)): the median basic transmission loss, plus
-diagnostics that only some models fill. A draw that meets a missing height or
-clutter value raises RefusedDrawError, and the endpoint sampler drops it for
-every model and counts it in `refused_draws` (item 11 (b)).
+diagnostics that only some models fill. A draw that cannot be computed raises
+`terrain.errors.RefusedDrawError` instead (item 11 (b)).
 """
 
 from dataclasses import dataclass
 
 # p1812_at_cap_share counts draws where Lb is within this of Lbs (ADR 0006 item 2 (a)).
 CAP_TOLERANCE_DB = 0.1
-
-
-class RefusedDrawError(Exception):
-    """A draw met a missing ground height or clutter value (ADR 0006 item 11).
-
-    Deliberately not a ValueError: the feature asset catches ValueError once,
-    for a zero-length path, and must not swallow a refusal with it.
-    """
 
 
 @dataclass(frozen=True)

@@ -43,7 +43,9 @@ import numpy.typing as npt
 import structlog
 from pyproj import Transformer
 
-from terrain.result import PathLossResult, RefusedDrawError
+from terrain.errors import RefusalReason, RefusedDrawError
+from terrain.profile import PathProfile
+from terrain.result import PathLossResult
 
 FloatArray = npt.NDArray[np.float64]
 Polarisation = Literal["horizontal", "vertical"]
@@ -294,12 +296,13 @@ class BtLossInputs:
     n0: float
 
 
-def _refuse_missing(values: FloatArray, what: str) -> None:
+def _refuse_missing(values: FloatArray, what: str, reason: RefusalReason) -> None:
     missing = np.flatnonzero(~np.isfinite(values))
     if missing.size:
         raise RefusedDrawError(
+            reason,
             f"{what} height missing at profile index {int(missing[0])} "
-            f"({missing.size} points); the draw is refused (ADR 0006 item 11)"
+            f"({missing.size} points); the draw is refused (ADR 0006 item 11)",
         )
 
 
@@ -314,11 +317,12 @@ def call_bt_loss(inputs: BtLossInputs) -> tuple[float, str]:
         Basic transmission loss Lb in dB, equation (69) of P.1812-8, and the log.
 
     Raises:
-        RefusedDrawError: if a ground or clutter height is NaN or infinite.
+        RefusedDrawError: `dem_gap` if a ground height is NaN or infinite,
+            `clutter_nan` if a clutter height is.
         RuntimeError: if bt_loss returns a loss that is not finite.
     """
-    _refuse_missing(inputs.ground_m, "ground")
-    _refuse_missing(inputs.clutter_m, "clutter")
+    _refuse_missing(inputs.ground_m, "ground", "dem_gap")
+    _refuse_missing(inputs.clutter_m, "clutter", "clutter_nan")
     zones = np.full(inputs.distance_km.size, ZONE_INLAND)
     with io.StringIO() as debug_log:
         loss_db, _ = P1812.bt_loss(
@@ -365,37 +369,30 @@ def troposcatter_loss_from_log(log_text: str) -> float:
     return lbs_db
 
 
-def _check_profile(
-    distance_m: FloatArray,
-    arrays: Mapping[str, FloatArray],
-    tx_xy_m: tuple[float, float],
-    rx_xy_m: tuple[float, float],
-) -> None:
-    """Reject a profile that cannot describe the path between the two endpoints."""
-    if any(values.shape != distance_m.shape for values in arrays.values()):
-        raise ValueError("distance, ground and clutter arrays must have one length")
+def _checked_clutter(profile: PathProfile) -> FloatArray:
+    """The profile's clutter, once the profile is shown to describe the whole path.
+
+    PathProfile already checks the array lengths and that distances start at 0
+    and ascend; this adds what P.1812 needs beyond that.
+    """
+    if profile.clutter_m is None:
+        raise ValueError("P.1812 needs clutter heights; it is null where only the metro DEM exists")
+    distance_m = profile.distance_m
     if distance_m.size < MIN_SAMPLES:
         raise ValueError(f"a P.1812 profile needs at least five samples, got {distance_m.size}")
-    endpoint_distance_m = math.dist(tx_xy_m, rx_xy_m)
+    endpoint_distance_m = math.dist(profile.tx_xy_m, profile.rx_xy_m)
     if endpoint_distance_m == 0.0:
         raise ValueError("zero-length path: transmitter and receiver coincide")
-    if distance_m[0] != 0.0:
-        raise ValueError(f"profile distances must start at 0, got {distance_m[0]} m")
-    if not np.all(np.diff(distance_m) > 0.0):
-        raise ValueError("profile distances must be strictly increasing")
     if abs(distance_m[-1] - endpoint_distance_m) > ENDPOINT_TOLERANCE_M:
         raise ValueError(
             f"profile ends at {distance_m[-1]:.3f} m but the receiver is "
             f"{endpoint_distance_m:.3f} m from the transmitter"
         )
+    return profile.clutter_m
 
 
 def p1812_loss(
-    distance_m: FloatArray,
-    ground_m: FloatArray,
-    clutter_m: FloatArray,
-    tx_xy_m: tuple[float, float],
-    rx_xy_m: tuple[float, float],
+    profile: PathProfile,
     *,
     tx_height_m: float,
     rx_height_m: float,
@@ -406,12 +403,9 @@ def p1812_loss(
     """Median basic transmission loss over one profile by ITU-R P.1812-8, equation (69).
 
     Args:
-        distance_m: Distance of each sample from the transmitter, metres, from 0
-            to the receiver, strictly increasing (10 m on the 1 m layers, item 1 (b)).
-        ground_m: Ground height at each sample, metres above NAVD88, uncurved.
-        clutter_m: Clutter height R at each sample, metres above ground.
-        tx_xy_m: Transmitter easting and northing, metres, EPSG:26915.
-        rx_xy_m: Receiver easting and northing, metres, EPSG:26915.
+        profile: Uncurved ground and clutter R in metres along the path, endpoints
+            in EPSG:26915 metres, distances from 0 to the receiver; P.1812's own
+            10 m profile on the 1 m layers (ADR 0006 item 1 (b)).
         tx_height_m: Transmitter antenna height above ground, metres.
         rx_height_m: Receiver antenna height above ground, metres.
         frequency_mhz: Frequency, MHz.
@@ -422,23 +416,23 @@ def p1812_loss(
         Lb in dB, antenna gains excluded, with Lbs (equation 44) as a diagnostic.
 
     Raises:
-        ValueError: for a zero-length path, fewer than five samples, arrays of
-            different lengths, or distances that do not run from 0 to the receiver.
+        ValueError: for a profile without clutter, a zero-length path, fewer
+            than five samples, or distances that do not end at the receiver.
         RefusedDrawError: if a ground or clutter height is missing.
         RuntimeError: if Py1812 returns a non-finite loss or an unusable log.
     """
-    _check_profile(distance_m, {"ground": ground_m, "clutter": clutter_m}, tx_xy_m, rx_xy_m)
+    clutter_m = _checked_clutter(profile)
     if polarisation not in POLARISATION_CODES:
         raise ValueError(f"polarisation must be horizontal or vertical, got {polarisation!r}")
-    tx_lon, tx_lat = _TO_LONLAT.transform(*tx_xy_m)
-    rx_lon, rx_lat = _TO_LONLAT.transform(*rx_xy_m)
-    distance_km = np.array(distance_m, dtype=np.float64) / 1000.0
+    tx_lon, tx_lat = _TO_LONLAT.transform(*profile.tx_xy_m)
+    rx_lon, rx_lat = _TO_LONLAT.transform(*profile.rx_xy_m)
+    distance_km = np.array(profile.distance_m, dtype=np.float64) / 1000.0
     dn, n0 = refractivity_at_path_centre(
         maps, (tx_lon, tx_lat), (rx_lon, rx_lat), float(distance_km[-1])
     )
     inputs = BtLossInputs(
         distance_km=distance_km,
-        ground_m=np.array(ground_m, dtype=np.float64),
+        ground_m=np.array(profile.ground_m, dtype=np.float64),
         clutter_m=np.array(clutter_m, dtype=np.float64),
         tx_height_m=tx_height_m,
         rx_height_m=rx_height_m,
