@@ -114,7 +114,11 @@ def path_loss_db(
         return _itm(profile, frequency_mhz, tx, rx, itm_library, itm_settings)
     if model == "p1812":
         return _p1812(profile, frequency_mhz, tx, rx, p1812_maps)
-    raise ValueError(f"unknown model {model!r}; expected one of {', '.join(MODELS)}")
+    raise _unknown_model(model)
+
+
+def _unknown_model(model: str) -> ValueError:
+    return ValueError(f"unknown model {model!r}; expected one of {', '.join(MODELS)}")
 
 
 def check_path(profile: PathProfile, frequency_mhz: float) -> None:
@@ -259,7 +263,7 @@ class DrawModels:
             raise ValueError("DrawModels needs at least one model")
         for model in self.models:
             if model not in MODELS:
-                raise ValueError(f"unknown model {model!r}; expected one of {', '.join(MODELS)}")
+                raise _unknown_model(model)
         if len(set(self.models)) != len(self.models):
             raise ValueError(f"a model is listed twice: {self.models}")
 
