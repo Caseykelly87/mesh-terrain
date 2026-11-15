@@ -17,7 +17,7 @@ TLS, Python's ssl module reads SSL_CERT_FILE itself.
 import hashlib
 import time
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, fields, replace
 from email.message import Message
@@ -190,3 +190,10 @@ def fetch_pinned(
         "last_modified": observed.last_modified,
         "sha256": got.sha256,
     }
+
+
+def fetch_all(
+    pins: Sequence[PinnedObject], folder: Path, opener: Opener = urlopen_opener
+) -> list[dict[str, object]]:
+    """fetch_pinned for each pin, into folder under the last part of its URL, in order."""
+    return [fetch_pinned(pin, folder / pin.url.rsplit("/", 1)[1], opener) for pin in pins]

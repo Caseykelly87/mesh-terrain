@@ -23,7 +23,7 @@ import rasterio
 
 from pipeline.common.snapshot import SnapshotError
 from pipeline.terrain_snapshots.common import build_snapshot, timed, today_utc, write_readme
-from pipeline.terrain_snapshots.remote import Opener, PinnedObject, fetch_pinned, urlopen_opener
+from pipeline.terrain_snapshots.remote import Opener, PinnedObject, fetch_all, urlopen_opener
 
 LICENCE = "public domain (USGS 3DEP)"
 HORIZONTAL_DATUM = "NAD83(2011)"
@@ -143,10 +143,7 @@ def build_dem(
     with timed("dem_snapshot", snapshot_id=source.snapshot_id) as details:
 
         def fill(partial: Path) -> dict[str, object]:
-            records = [
-                fetch_pinned(pin, partial / pin.url.rsplit("/", 1)[1], opener)
-                for pin in (source.tile, source.metadata_xml)
-            ]
+            records = fetch_all((source.tile, source.metadata_xml), partial, opener)
             details["input_sha256"] = records[0]["sha256"]
             raster = check_dem_raster(partial / str(records[0]["path"]), source)
             xml = (partial / str(records[1]["path"])).read_bytes()

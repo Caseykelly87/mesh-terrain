@@ -28,7 +28,7 @@ from rasterio.warp import transform_bounds
 
 from pipeline.common.snapshot import SnapshotError
 from pipeline.terrain_snapshots.common import build_snapshot, timed, today_utc, write_readme
-from pipeline.terrain_snapshots.remote import Opener, PinnedObject, fetch_pinned, urlopen_opener
+from pipeline.terrain_snapshots.remote import Opener, PinnedObject, fetch_all, urlopen_opener
 
 LICENCE = (
     "CC BY 4.0 (AWS Open Data registry entry); DINOv3 License (Brandt et al. 2026, "
@@ -127,10 +127,7 @@ def build_canopy(
     with timed("canopy_snapshot", snapshot_id=source.snapshot_id) as details:
 
         def fill(partial: Path) -> dict[str, object]:
-            records = [
-                fetch_pinned(pin, partial / pin.url.rsplit("/", 1)[1], opener)
-                for pin in (source.tile, source.dates)
-            ]
+            records = fetch_all((source.tile, source.dates), partial, opener)
             details["input_sha256"] = [record["sha256"] for record in records]
             header = check_canopy_tile(
                 partial / str(records[0]["path"]), source.target_bounds_26915
