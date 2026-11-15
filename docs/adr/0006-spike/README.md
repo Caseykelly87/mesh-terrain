@@ -284,6 +284,37 @@ What it shows:
 - On the 1 km path with 10 m antennas, Lb is Lb0p, the first term of equation 69: the path is short and clear, so P.1812 returns its line-of-sight loss. Lbc equals Lb0p to the log's ten significant digits there, so this case shows equation 69 returning Lb0p but does not separate the two terms. On the other four paths Lbc is the larger term, by 38 to 71 dB.
 - The 3 km case repeats run 5's 148.02 dB.
 
+## Run 7: nodata pixels in the x72y429 1 m DEM (`spike_dem_nodata.py`)
+
+Added on 2026-11-15 for ADR 0006 Open item 11: what the profile models do when a draw's ground profile reads a DEM pixel with no value. The script streams one 1 m DEM tile through GDAL's `/vsicurl/` in windows of 512 full-width rows, counts the pixels equal to the file's nodata value or not finite, and keeps nothing: no file is written, and each window is dropped once counted. It ran from an empty folder in a scratch uv environment outside the repository (rasterio 1.4.3 with GDAL 3.9.3, numpy 2.2.2, CPython 3.12).
+
+Run 7 reads the live TNM file, not a registered snapshot. USGS can replace the file behind the same URL, so the engine unit counts again on the snapshot it registers.
+
+The file, as a HEAD request showed it on 2026-11-15 at 14:19 UTC:
+
+- URL: `https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1m/Projects/MO_SaintLouis_2017/TIFF/USGS_one_meter_x72y429_MO_SaintLouis_2017.tif`
+- ETag `"7d4013fa90919a36b190a9e98ff8d13f-93"`, Last-Modified 2026-02-13 18:21:19 GMT, 483 356 883 bytes.
+
+On Casey's machine Norton re-signs HTTPS, and GDAL's own curl rejects the re-signed certificate; `CURL_CA_BUNDLE` points it at the bundle. `GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR` stops GDAL listing the S3 folder before it opens the file.
+
+```
+mkdir $S/run7 && cd $S/run7
+export UV_SYSTEM_CERTS=true CURL_CA_BUNDLE=C:/Users/Casey/.certs/ca-bundle.pem GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
+uv run --no-project --python 3.12 --with rasterio==1.4.3 --with numpy python -I <repo>/docs/adr/0006-spike/spike_dem_nodata.py \
+  "https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1m/Projects/MO_SaintLouis_2017/TIFF/USGS_one_meter_x72y429_MO_SaintLouis_2017.tif"
+```
+
+```
+crs EPSG:26915 size 10012 10012 res (1.0, 1.0) nodata -999999.0 dtype float32 bounds BoundingBox(left=719994.0, bottom=4279994.0, right=730006.0, top=4290006.0) block (256, 256)
+nodata pixels 0 of 100240144
+elapsed 39 s
+```
+
+What it shows:
+
+- The tile is 10 012 by 10 012 pixels at 1 m in EPSG:26915, a 10 km tile with a 6 m border on each side, with nodata value -999999. None of its 100 240 144 pixels is nodata or not finite. A first run of the same counting code from the scratch folder, earlier on 2026-11-15, gave the same count in 43 s.
+- So with this file the x72y429 run meets no DEM gap, and Open item 11 does not arise there. The metro 10 m DEM, the corridor tiles and the DSM and canopy layers are not measured.
+
 ## Install form checks
 
 - Git source without git: with `git` removed from `PATH` and an empty uv cache, the `git+https` install fails with `Git executable not found. Ensure that Git is installed and available.` The local `mesh-terrain-dagster-webserver` image has no `git` (`command -v git` empty), so option 1.1 needs git added to the image.
