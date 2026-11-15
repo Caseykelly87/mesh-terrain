@@ -5,8 +5,10 @@ Every raster is north-up with square pixels. Pixel (row, col) has its centre at
 a point near St. Louis, so tests place endpoints on pixel centres exactly.
 """
 
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import numpy.typing as npt
@@ -14,6 +16,9 @@ import rasterio
 from rasterio.transform import from_origin
 
 from terrain.profile import XY, PathProfile, sample_profile
+
+if TYPE_CHECKING:
+    from terrain.cells import FineLayers
 
 ORIGIN_X_M = 720_000.0
 ORIGIN_Y_M = 4_290_000.0
@@ -59,3 +64,23 @@ def sample_at(path: Path, tx_xy_m: XY, rx_xy_m: XY, step_m: float, **kwargs: Any
     """Open a DEM and sample one profile from it, as the engine will with an open raster."""
     with rasterio.open(path) as source:
         return sample_profile(source, tx_xy_m, rx_xy_m, step_m, **kwargs)
+
+
+def cell_centre_xy_m(cell_row: int, cell_col: int) -> tuple[float, float]:
+    """EPSG:26915 centre of a 10 m cell of a 1 m raster written by `write_dem`."""
+    return (ORIGIN_X_M + 10.0 * cell_col + 5.0, ORIGIN_Y_M - 10.0 * cell_row - 5.0)
+
+
+@contextmanager
+def open_layers(
+    dem: Path, *, dsm: Path | None = None, canopy: Path | None = None
+) -> Iterator["FineLayers"]:
+    """Open the 1 m layers once, as the engine does per batch."""
+    from terrain.cells import FineLayers
+
+    with ExitStack() as stack:
+        yield FineLayers(
+            dem=stack.enter_context(rasterio.open(dem)),
+            dsm=None if dsm is None else stack.enter_context(rasterio.open(dsm)),
+            canopy=None if canopy is None else stack.enter_context(rasterio.open(canopy)),
+        )
