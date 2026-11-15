@@ -29,8 +29,10 @@ import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 import structlog
 from rasterio.io import DatasetReader
 from rasterio.windows import Window
@@ -268,10 +270,18 @@ def _read_padded(
     return out
 
 
-def _cell_means(pixels: FloatArray) -> FloatArray:
-    """Mean of each block of CELL_PX by CELL_PX pixels; NaN if any pixel is NaN."""
+def _by_cell(pixels: npt.NDArray[Any]) -> npt.NDArray[Any]:
+    """View pixels as (cell row, pixel row, cell column, pixel column).
+
+    Every window is a whole number of cells, so the reshape never drops a pixel.
+    """
     rows, cols = pixels.shape[0] // CELL_PX, pixels.shape[1] // CELL_PX
-    means: FloatArray = pixels.reshape(rows, CELL_PX, cols, CELL_PX).mean(axis=(1, 3))
+    return pixels.reshape(rows, CELL_PX, cols, CELL_PX)
+
+
+def _cell_means(pixels: FloatArray) -> FloatArray:
+    """Mean of each cell; NaN if any of its pixels is NaN."""
+    means: FloatArray = _by_cell(pixels).mean(axis=(1, 3))
     return means
 
 
@@ -281,8 +291,7 @@ def _filled_in_read_cells(filled: BoolArray, local: list[FloatArray]) -> dict[tu
     Bilinear interpolation reads the four cells around each sample: the cell
     below and the one after it on each axis.
     """
-    rows, cols = filled.shape[0] // CELL_PX, filled.shape[1] // CELL_PX
-    per_cell = filled.reshape(rows, CELL_PX, cols, CELL_PX).sum(axis=(1, 3))
+    per_cell = _by_cell(filled).sum(axis=(1, 3))
     low_rows = np.floor(local[0]).astype(np.int64)
     low_cols = np.floor(local[1]).astype(np.int64)
     read = {
