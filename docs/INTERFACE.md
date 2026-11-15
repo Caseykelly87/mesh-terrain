@@ -12,11 +12,11 @@ One command, one config file:
 make engine CONFIG=runs/test-tile.yaml
 ```
 
-or, inside the Docker image, `python -m engine run runs/test-tile.yaml`. The command reads only the config file, the snapshots it names and the fixture or caller-supplied layers it names. It writes only into the output folder named in the config. It exits non-zero and writes no manifest when any step fails, so a folder with a manifest is a complete run and a folder without one is not. A refused endpoint draw (ADR 0006 item 11) is not a failed step: it is dropped for every model and counted in `refused_draws`.
+or, inside the Docker image, `python -m engine run runs/test-tile.yaml`. The command reads only the config file, the snapshots it names and the fixture or caller-supplied layers it names. It writes only into the output folder named in the config: into `<output_dir>/<run_id>.partial/`, renamed to `<output_dir>/<run_id>/` once the manifest is written, as snapshots are. Nothing deletes a run folder automatically, and a run never writes into a folder that already exists. It exits non-zero and writes no manifest when any step fails, so a folder with a manifest is a complete run and a folder without one is not. A refused endpoint draw (ADR 0006 item 11) is not a failed step: it is dropped for every model and counted in `refused_draws`.
 
 ## The config file
 
-YAML, every field explicit, no defaults hidden in code:
+YAML, loaded with `yaml.safe_load` only, every field explicit, no defaults hidden in code:
 
 | Field | Meaning |
 | --- | --- |
@@ -88,7 +88,7 @@ Rules:
 - `manifest_version` follows semantic versioning. A minor bump adds a field; a major bump changes or removes one. A reader that knows 1.x reads every 1.y.
 - `schema_version` is the version of the artifact columns; `engine_version` is the package version. Both are recorded so a reader can tell a column change from a numerical change.
 - Every input and artifact carries its file sha256, and every artifact also carries a `content_sha256`: the hash of its rows (Parquet, in row order) or its cell values (COG), not of the file, because Parquet and COG writers embed timestamps. Two runs with the same config, seed and snapshots produce identical `content_sha256` values; that is the reproducibility test (`snp_01`). `make check` and CI run it on a committed 1 km sub-tile fixture (a few megabytes, no network); the full 10 km test tile (about 2.2 to 2.9 GB of EPT streamed through PDAL and not kept, about 0.5 GB kept) is a documented manual acceptance run.
-- The manifest is written last. Its presence means the run completed.
+- The manifest is written last, and the `.partial` folder is renamed after it. A folder named `<run_id>/` with a manifest means the run completed.
 
 ## Loading without the database
 
