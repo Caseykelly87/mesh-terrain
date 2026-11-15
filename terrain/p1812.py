@@ -44,7 +44,7 @@ import numpy.typing as npt
 import structlog
 from pyproj import Transformer
 
-from terrain.errors import RefusalReason, RefusedDrawError
+from terrain.errors import RefusalReason, RefusedDrawError, ZeroLengthPathError
 from terrain.profile import PathProfile
 from terrain.result import PathLossResult
 
@@ -383,10 +383,13 @@ def _checked_clutter(profile: PathProfile) -> FloatArray:
         raise ValueError("P.1812 needs clutter heights; it is null where only the metro DEM exists")
     distance_m = profile.distance_m
     if distance_m.size < MIN_SAMPLES:
-        raise ValueError(f"a P.1812 profile needs at least five samples, got {distance_m.size}")
+        raise RefusedDrawError(
+            "short_profile",
+            f"a P.1812 profile needs at least five samples, got {distance_m.size}",
+        )
     endpoint_distance_m = math.dist(profile.tx_xy_m, profile.rx_xy_m)
     if endpoint_distance_m == 0.0:
-        raise ValueError("zero-length path: transmitter and receiver coincide")
+        raise ZeroLengthPathError("zero-length path: transmitter and receiver coincide")
     if abs(distance_m[-1] - endpoint_distance_m) > ENDPOINT_TOLERANCE_M:
         raise ValueError(
             f"profile ends at {distance_m[-1]:.3f} m but the receiver is "
@@ -420,9 +423,11 @@ def p1812_loss(
         Lb in dB, antenna gains excluded, with Lbs (equation 44) as a diagnostic.
 
     Raises:
-        ValueError: for a profile without clutter, a zero-length path, fewer
-            than five samples, or distances that do not end at the receiver.
-        RefusedDrawError: if a ground or clutter height is missing.
+        ZeroLengthPathError: if the two endpoints coincide.
+        ValueError: for a profile without clutter or distances that do not end
+            at the receiver.
+        RefusedDrawError: `short_profile` for fewer than five samples, `dem_gap`
+            or `clutter_nan` for a missing ground or clutter height.
         RuntimeError: if Py1812 returns a non-finite loss or an unusable log.
     """
     clutter_m = _checked_clutter(profile)
