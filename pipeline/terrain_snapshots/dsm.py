@@ -43,7 +43,10 @@ from rasterio.transform import from_origin
 from pipeline.common.settings import REPO_ROOT
 from pipeline.common.snapshot import (
     MANIFEST_NAME,
+    PARTIAL_SUFFIX,
+    PartialExistsError,
     SnapshotError,
+    SnapshotExistsError,
     sha256_file,
     snapshot_folder,
     verified_manifest,
@@ -150,6 +153,24 @@ def check_pdal_version(runner: Runner) -> str:
     return reported
 
 
+def refuse_existing(root: Path, snapshot_id: str) -> None:
+    """Refuse a snapshot id that exists finished or partial, before any PDAL run or scratch folder.
+
+    build_snapshot refuses the same later; this check spares a long build that
+    could never be written.
+
+    Raises:
+        SnapshotExistsError: when `<root>/<id>/` exists.
+        PartialExistsError: when `<root>/<id>.partial/` exists.
+    """
+    if (root / snapshot_id).exists():
+        raise SnapshotExistsError(f"{root / snapshot_id} exists; a refresh needs a new snapshot id")
+    if (root / f"{snapshot_id}{PARTIAL_SUFFIX}").exists():
+        raise PartialExistsError(
+            f"{root / snapshot_id}{PARTIAL_SUFFIX} exists from an earlier run; Casey decides"
+        )
+
+
 def scratch_folder(root: Path, scratch: Path, snapshot_id: str) -> Path:
     """Create `<scratch>/<snapshot id>/` for the window rasters.
 
@@ -232,7 +253,8 @@ def build_window(ctx: _Context, window: Window) -> tuple[dict[str, Any], FloatGr
     grid = ctx.source.grid
     west, south, east, north = window.bounds(grid)
     transform = from_origin(west, north, grid.resolution, grid.resolution)
-    wet = water_mask(ctx.water, transform, (window.height, window.width))
+    nearby = ctx.water.cx[west:east, south:north]
+    wet = water_mask(nearby, transform, (window.height, window.width))
     cell_m2 = grid.resolution * grid.resolution
     land_m2, water_m2 = float((~wet).sum()) * cell_m2, float(wet.sum()) * cell_m2
     record: dict[str, Any] = {"name": window.name, "bounds": [west, south, east, north]}
@@ -327,6 +349,7 @@ def build_dsm(
             failed PDAL run.
     """
     with timed("dsm_snapshot", snapshot_id=source.snapshot_id) as details:
+        refuse_existing(root, source.snapshot_id)
         water, osm = osm_water(root, osm_snapshot_id)
         version = check_pdal_version(runner)
         workdir = scratch_folder(root, scratch, source.snapshot_id)
