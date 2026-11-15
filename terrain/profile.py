@@ -106,13 +106,15 @@ def profile_distances_m(length_m: float, step_m: float) -> FloatArray:
         Distances in metres.
 
     Raises:
-        ZeroLengthPathError: for a path of zero length.
-        ValueError: for a step that is not positive.
+        ZeroLengthPathError: for a length of exactly 0.
+        ValueError: for a negative or NaN length, or a step that is not positive.
     """
     if not math.isfinite(step_m) or step_m <= 0.0:
         raise ValueError(f"step_m must be positive, got {step_m}")
-    if length_m <= 0.0:
+    if length_m == 0.0:
         raise ZeroLengthPathError("zero-length path: the two endpoints coincide")
+    if not length_m > 0.0:
+        raise ValueError(f"length_m must be positive, got {length_m}")
     intervals = max(1, math.ceil(length_m / step_m - _STEP_TOLERANCE))
     return np.linspace(0.0, length_m, intervals + 1)
 
