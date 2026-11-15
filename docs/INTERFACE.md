@@ -12,7 +12,7 @@ One command, one config file:
 make engine CONFIG=runs/test-tile.yaml
 ```
 
-or, inside the Docker image, `python -m engine run runs/test-tile.yaml`. The command reads only the config file, the snapshots it names and the fixture or caller-supplied layers it names. It writes only into the output folder named in the config: into `<output_dir>/<run_id>.partial/`, renamed to `<output_dir>/<run_id>/` once the manifest is written, as snapshots are. Nothing deletes a run folder automatically, and a run never writes into a folder that already exists. It exits non-zero and writes no manifest when any step fails, so a folder with a manifest is a complete run and a folder without one is not. A refused endpoint draw (ADR 0006 item 11) is not a failed step: it is dropped for every model and counted in `refused_draws`.
+or, inside the Docker image, `python -m engine run runs/test-tile.yaml`. The command reads only the config file, the snapshots it names and the fixture or caller-supplied layers it names. It writes only into the output folder named in the config: into `<output_dir>/<run_id>.partial/`, renamed to `<output_dir>/<run_id>/` once the manifest is written, as snapshots are. Nothing deletes a run folder automatically. It exits non-zero and writes no manifest when any step fails, so a folder with a manifest is a complete run and a folder without one is not. A refused endpoint draw (ADR 0006 item 11) is not a failed step: it is dropped for every model and counted in `refused_draws`.
 
 ## The config file
 
@@ -48,7 +48,7 @@ Every run writes these into `<output_dir>/<run_id>/`:
 | Artifact | Format | Content |
 | --- | --- | --- |
 | `terrain/dem.tif`, and when the config names them `terrain/dsm.tif`, `terrain/canopy.tif`, `terrain/clutter.tif` | COG, EPSG:26915, float32 metres, nodata set | the terrain build for the run's extent; `clutter` is max(dsm minus dem, canopy where nonzero) and is written only when a DSM or canopy snapshot is named; without one, clutter columns are null, never zero |
-| `predictions.parquet` | GeoParquet, EPSG:26915, LINESTRING site to receiver | one row per (site_id, rx_id): distance_m, bearing_deg, `<model>_db_median` and `<model>_db_iqr` for each model in `models` (fspl, knife_edge, hata, itm, p1812), los_share, fresnel_clearance_pct_median, clutter_height_m_median, hata_variant, `endpoint_draws`, `refused_draws` (draws refused for a missing height or clutter value, from 0 to `endpoint_draws`; every median, interquartile range and share comes from the other draws, and all are null when every draw is refused; ADR 0006 item 11), `tx_building_draws` and `rx_building_draws` (of all drawn pairs, how many have their transmitter or receiver end on a building pixel), `p1812_at_cap_share` (share of the unrefused draws where P.1812's loss is within 0.1 dB of its troposcatter loss; null where `p1812_db_median` is null; ADR 0006 item 2) |
+| `predictions.parquet` | GeoParquet, EPSG:26915, LINESTRING site to receiver | one row per (site_id, rx_id): distance_m, bearing_deg, `<model>_db_median` and `<model>_db_iqr` for each model in `models` (fspl, knife_edge, hata, itm, p1812), los_share, fresnel_clearance_pct_median, clutter_height_m_median, hata_variant, `endpoint_draws`, `refused_draws` (draws refused for a missing height or clutter value, from 0 to `endpoint_draws`; every median, interquartile range and share comes from the other draws, and all are null when every draw is refused; ADR 0006 item 11), `tx_building_draws` and `rx_building_draws` (of all drawn pairs, how many have their transmitter or receiver end on a building pixel of the 1 m layers; null where the run has no 1 m DEM), `p1812_at_cap_share` (share of the unrefused draws where P.1812's loss is within 0.1 dB of its troposcatter loss; null where `p1812_db_median` is null; ADR 0006 item 2) |
 | `coverage_<site_id>_<model>.tif` | COG, EPSG:26915, float32 dB, nodata set | predicted path loss from one site at each receiver point interpolated to the run's grid; one file per site and model, derived from `predictions.parquet` and never computed separately. Sites are not combined; a caller wanting best-server coverage takes the minimum across files |
 | `calibration.parquet`, `calibration.md` | Parquet and Markdown | only when `calibration` is set: per observation, predicted and observed, residual per model; RMSE, MAE, bias and n per model in the Markdown. It is labelled with the run id and never alters `predictions.parquet` |
 | `manifest.json` | JSON | below |
@@ -72,7 +72,7 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
     {"id": "ept-mo-stlouis-2017-x72y429", "manifest_sha256": "..."},
     {"id": "canopy-v2-0231113111", "manifest_sha256": "..."},
     {"id": "itu-r-p1812-8-202509", "manifest_sha256": "..."},
-    {"id": "osm-buildings-<extract date>", "manifest_sha256": "..."}
+    {"id": "osm-geofabrik-mo-il-<extract date>", "manifest_sha256": "..."}
   ],
   "inputs": [
     {"path": "fixtures/two_sites.parquet", "sha256": "..."},

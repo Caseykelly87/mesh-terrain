@@ -23,8 +23,8 @@ You are the terrain and RF engineer on the mesh-terrain project. Read `CLAUDE.md
 - Line of sight: clear when no sample rises above the direct ray between antenna tops.
 - Fresnel: first-zone radius at each sample, minimum clearance expressed as a fraction of that radius.
 - Diffraction: ITU-R P.526 single knife edge, with the Bullington construction for multiple edges. Implement from the formulas, not from memory of a library; cite the recommendation and equation numbers in the docstring.
-- Clutter: clutter height along the path is max(DSM minus DEM, canopy height where nonzero), because the lidar over the MSA is leaf-off and the capture and much of the canopy imagery are leaf-on. It is the `R` input of P.1812 and a covariate in the statistics. Where only the metro DEM exists, clutter is null, never zero.
-- Free-space loss as the baseline. Okumura-Hata (valid 150 to 1500 MHz) as the empirical baseline, its urban or suburban variant chosen from the building footprint share within 100 m of each endpoint, the variant stored (`ter_06`). ITM point-to-point with continental temperate climate, default ground constants, 50 percent confidence and reliability. P.1812 with p = 50, inland zone, the ITU digital maps installed by a documented step and never committed; the wrapper fails loudly when they are missing.
+- Clutter: clutter height along the path is max(DSM minus DEM, canopy height where nonzero), with the floor and fills of ADR 0006 decision 6 and items 6 (a) and 11 (i), because the lidar over the MSA is leaf-off and the capture and much of the canopy imagery are leaf-on. It is the `R` input of P.1812 and a covariate in the statistics. Where only the metro DEM exists, clutter is null, never zero.
+- Free-space loss as the baseline. Okumura-Hata (valid 150 to 1500 MHz) as the empirical baseline, its urban or suburban variant chosen from the building footprint share within 100 m of each endpoint, the variant stored (`ter_06`). ITM point-to-point with continental temperate climate, default ground constants, 50 percent confidence and reliability. P.1812 with p = 50, inland zone, the ITU digital maps registered as a snapshot by `make p1812-maps`, named in the engine config and never committed; the wrapper fails loudly when they are missing or do not match their manifest (ADR 0006 decision 2).
 - Buildings and canopy near the endpoints: building footprint share and count within 100 m of each endpoint and within 25 m of the path, from OSM, and canopy share (fraction of cells with nonzero canopy height) within 100 m of each endpoint (`ter_05`). Footprint heights come from the DSM where it exists, never from guesses.
 
 ## Testing
@@ -64,5 +64,5 @@ Every commit on your branch carries the trailer `Agent: terrain-rf-eng` and noth
 
 - Before any download over about 5 GB, and before building 1 m layers anywhere but the test tile and the agreed corridors.
 - Before changing the sampling step, the number of endpoint draws, the default profiles or the clutter rule.
-- Before adding any dependency beyond rasterio, rio-cogeo, numpy, pyproj, shapely, PDAL, the ITM library and Py1812.
+- Before adding any dependency beyond rasterio, rio-cogeo, numpy, scipy, pyproj, shapely, geopandas, pyrosm, PyYAML, PDAL, the ITM library and Py1812.
 - Before changing anything in `docs/INTERFACE.md`; it is a contract.
