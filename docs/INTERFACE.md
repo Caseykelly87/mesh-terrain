@@ -70,7 +70,7 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
   "snapshots": [
     {"id": "3dep-1m-mo-saintlouis-2017-x72y429", "manifest_sha256": "..."},
     {"id": "ept-mo-stlouis-2017-x72y429", "manifest_sha256": "..."},
-    {"id": "canopy-v2-0231113111", "manifest_sha256": "..."},
+    {"id": "canopy-v2-0231113110", "manifest_sha256": "..."},
     {"id": "itu-r-p1812-8-202509", "manifest_sha256": "..."},
     {"id": "osm-geofabrik-mo-il-<extract date>", "manifest_sha256": "..."}
   ],
