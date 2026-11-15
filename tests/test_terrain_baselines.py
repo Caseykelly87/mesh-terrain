@@ -5,6 +5,7 @@ import math
 import pytest
 
 from terrain.baselines import fspl_db, hata_db, hata_variant
+from terrain.errors import ZeroLengthPathError
 
 
 def test_fspl_matches_the_closed_form_at_10_km_and_915_mhz() -> None:
@@ -23,12 +24,18 @@ def test_fspl_grows_6_db_per_doubling_of_distance() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("distance_m", "frequency_mhz"), [(0.0, 915.0), (-1.0, 915.0), (10.0, 0.0)]
-)
-def test_fspl_rejects_non_positive_inputs(distance_m: float, frequency_mhz: float) -> None:
-    with pytest.raises(ValueError):
+def test_fspl_at_zero_distance_is_a_zero_length_path() -> None:
+    with pytest.raises(ZeroLengthPathError):
+        fspl_db(0.0, 915.0)
+
+
+@pytest.mark.parametrize(("distance_m", "frequency_mhz"), [(-1.0, 915.0), (10.0, 0.0)])
+def test_fspl_rejects_malformed_inputs_as_plain_value_errors(
+    distance_m: float, frequency_mhz: float
+) -> None:
+    with pytest.raises(ValueError) as raised:
         fspl_db(distance_m, frequency_mhz)
+    assert not isinstance(raised.value, ZeroLengthPathError)
 
 
 # Okumura-Hata worked by hand from the published formula.
@@ -104,9 +111,15 @@ def test_hata_refuses_frequencies_outside_150_to_1500_mhz(frequency_mhz: float) 
         hata_db(4_000.0, frequency_mhz, 30.0, 2.0, "urban")
 
 
-def test_hata_refuses_zero_distance() -> None:
-    with pytest.raises(ValueError):
+def test_hata_at_zero_distance_is_a_zero_length_path() -> None:
+    with pytest.raises(ZeroLengthPathError):
         hata_db(0.0, 915.0, 30.0, 2.0, "urban")
+
+
+def test_hata_rejects_a_zero_antenna_as_a_plain_value_error() -> None:
+    with pytest.raises(ValueError) as raised:
+        hata_db(4_000.0, 915.0, 0.0, 2.0, "urban")
+    assert not isinstance(raised.value, ZeroLengthPathError)
 
 
 def test_hata_refuses_an_unknown_variant() -> None:
