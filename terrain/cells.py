@@ -89,15 +89,17 @@ class FineLayers:
 
         Raises:
             ValueError: without a DSM or a canopy layer, when the DEM is not
-                north-up in EPSG:26915 with 1 m pixels whose edges sit on whole
-                metres, or when a layer's grid differs from the DEM's.
+                north-up in EPSG:26915 with 1 m pixels running west to east
+                whose edges sit on whole metres, or when a layer's grid differs from the DEM's.
         """
         if self.dsm is None and self.canopy is None:
             raise ValueError("the 1 m layers need a DSM or a canopy layer for clutter")
         name = Path(self.dem.name).name
         check_grid(self.dem, name)
-        if abs(self.dem.transform.a) != 1.0 or abs(self.dem.transform.e) != 1.0:
-            raise ValueError(f"{name} must have 1 m pixels for 10 m cells")
+        if self.dem.transform.a != 1.0 or self.dem.transform.e != -1.0:
+            raise ValueError(
+                f"{name} must have 1 m pixels, columns west to east and rows north to south"
+            )
         if not (
             float(self.dem.transform.c).is_integer() and float(self.dem.transform.f).is_integer()
         ):
