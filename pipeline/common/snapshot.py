@@ -50,8 +50,6 @@ SNAPSHOT_COLUMNS = (
     "manifest_sha256",
     "registered_at",
 )
-# The manifest fields raw.snapshot stores; seeds stay in the manifest.
-REGISTRY_FIELDS = ("snapshot_id", "capture_date", "source_url", "licence")
 _CHUNK_BYTES = 1 << 20
 
 ManifestCheck = Callable[[Path, list[Path]], Mapping[str, object]]
@@ -314,7 +312,7 @@ def _registry_values(folder: Path, manifest: Mapping[str, Any]) -> tuple[str, ..
     """The raw.snapshot values of a finished folder, hashing the manifest bytes it was read from."""
     if folder.name.endswith(PARTIAL_SUFFIX):
         raise SnapshotError(f"{folder} is an unfinished run; it is never registered")
-    missing = [name for name in REGISTRY_FIELDS if name not in manifest]
+    missing = [name for name in REQUIRED_METADATA if name not in manifest]
     if missing:
         raise SnapshotError(f"manifest lacks {', '.join(missing)}; it is not registered")
     if manifest["snapshot_id"] != folder.name:
@@ -352,8 +350,9 @@ def register(conn: psycopg.Connection, folder: Path, manifest: Mapping[str, Any]
 
     Raises:
         SnapshotError: for a `.partial` folder, a folder without a manifest, a
-            manifest that lacks an snp_01 field, names another snapshot or
-            differs from the file in the folder.
+            manifest that lacks a REQUIRED_METADATA field (snapshot_id,
+            capture_date, source_url, licence or seeds), names another
+            snapshot or differs from the file in the folder.
     """
     values = _registry_values(folder, manifest)
     with _logged("snapshot_register", values[0]) as details:
