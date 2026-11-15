@@ -25,6 +25,7 @@ dependencies = [
     "pydantic-settings==2.16.1",
     "pyproj==3.8.0",
     "pyrosm==0.29.0",
+    "pyyaml==6.0.3",
     "rasterio==1.5.2",
     "rio-cogeo==7.0.4",
     "scipy==1.18.1",
@@ -72,7 +73,10 @@ target-version = "py312"
 extend-exclude = ["notebooks", "dbt/dbt_packages", "dbt/target", "docs/adr", "*.md"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "N"]
+# S506 alone from the bandit set: the engine config is loaded with
+# yaml.safe_load only (Casey, PR #27, 2026-11-15), and S506 fails a yaml.load
+# without a safe Loader.
+select = ["E", "F", "I", "UP", "B", "N", "S506"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["pipeline", "terrain", "ingester"]
@@ -90,11 +94,11 @@ plugins = ["pydantic.mypy"]
 # see pyarrow's public names, which come from compiled modules, and protobuf's
 # runtime is unannotated, which strict mode rejects at every call.
 #
-# The untyped raster and vector packages are listed whole, with their
+# The untyped engine packages and PyYAML are listed whole, with their
 # submodules, because the decision is the same for every module in them and
-# the engine will import many. Stub packages exist for scipy, shapely and
-# geopandas, but they are outside the plan's stack table. numpy, pyproj and
-# rio-cogeo ship py.typed and are checked.
+# the engine will import many. Stub packages exist for scipy, shapely,
+# geopandas and PyYAML, but they are outside the plan's stack table. numpy,
+# pyproj and rio-cogeo ship py.typed and are checked.
 [[tool.mypy.overrides]]
 module = [
     "google.protobuf.message",
@@ -114,6 +118,8 @@ module = [
     "scipy.*",
     "shapely",
     "shapely.*",
+    "yaml",
+    "yaml.*",
 ]
 ignore_missing_imports = true
 
