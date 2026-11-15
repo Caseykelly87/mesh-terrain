@@ -58,8 +58,8 @@ def curved_path(
         The interior samples with the bulge added, and both antenna tops.
 
     Raises:
-        ValueError: if the profile has no interior sample.
-        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
+        RefusedDrawError: if the profile has no interior sample (reason
+            "short_profile") or a ground height is NaN (reason "dem_gap").
     """
     require_complete_ground(profile)
     distance = profile.distance_m[1:-1]
@@ -88,8 +88,8 @@ def clearance_m(
         Metres at samples 1 to n-2; negative where the ground rises above the ray.
 
     Raises:
-        ValueError: if the profile has no interior sample.
-        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
+        RefusedDrawError: if the profile has no interior sample (reason
+            "short_profile") or a ground height is NaN (reason "dem_gap").
     """
     path = curved_path(profile, tx_height_m, rx_height_m, k_factor)
     clearance: FloatArray = path.ray_m(path.distance_m) - path.ground_m
@@ -103,11 +103,14 @@ def require_complete_ground(profile: PathProfile) -> None:
         profile: Ground profile in EPSG:26915.
 
     Raises:
-        ValueError: if the profile has fewer than three samples.
-        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
+        RefusedDrawError: if the profile has fewer than three samples (reason
+            "short_profile") or a ground height is NaN (reason "dem_gap").
     """
     if profile.distance_m.size < 3:
-        raise ValueError("the profile needs at least one interior sample")
+        detail = (
+            f"{profile.distance_m.size} samples over {profile.length_m:.2f} m, no interior sample"
+        )
+        raise RefusedDrawError("short_profile", detail)
     missing = np.flatnonzero(~np.isfinite(profile.ground_m))
     if missing.size:
         raise RefusedDrawError("dem_gap", f"no ground height at profile index {missing[0]}")
@@ -128,8 +131,8 @@ def los_clear(
         True when every interior sample is at or below the ray.
 
     Raises:
-        ValueError: if the profile has no interior sample.
-        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
+        RefusedDrawError: if the profile has no interior sample (reason
+            "short_profile") or a ground height is NaN (reason "dem_gap").
     """
     return bool(np.all(clearance_m(profile, tx_height_m, rx_height_m, k_factor) >= 0.0))
 
@@ -149,8 +152,8 @@ def obstruction_m(
         Metres; positive when the path is obstructed, negative when clear.
 
     Raises:
-        ValueError: if the profile has no interior sample.
-        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
+        RefusedDrawError: if the profile has no interior sample (reason
+            "short_profile") or a ground height is NaN (reason "dem_gap").
     """
     return float(-clearance_m(profile, tx_height_m, rx_height_m, k_factor).min())
 
@@ -200,8 +203,8 @@ def fresnel_clearance_pct(
         0.0 means the ground touches the ray; negative means obstructed.
 
     Raises:
-        ValueError: if the profile has no interior sample.
-        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
+        RefusedDrawError: if the profile has no interior sample (reason
+            "short_profile") or a ground height is NaN (reason "dem_gap").
     """
     clearance = clearance_m(profile, tx_height_m, rx_height_m, k_factor)
     radius = fresnel_radius_m(profile.distance_m[1:-1], profile.length_m, frequency_mhz)
