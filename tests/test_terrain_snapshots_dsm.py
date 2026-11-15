@@ -23,6 +23,7 @@ from shapely.geometry import box
 
 from pipeline.common.snapshot import (
     SnapshotError,
+    SnapshotExistsError,
     finish_snapshot,
     read_manifest,
     sha256_file,
@@ -271,3 +272,14 @@ def test_x72y429_splits_into_sixteen_windows_on_the_dem_grid() -> None:
     assert {(w.width, w.height) for w in windows} == {(2503, 2503)}
     assert sum(w.width * w.height for w in windows) == 10_012 * 10_012
     assert re.fullmatch(r"r\dc\d", windows[5].name)
+
+
+def test_an_existing_dsm_snapshot_is_refused_before_pdal_or_scratch(tmp_path: Path) -> None:
+    root, scratch = _dirs(tmp_path)
+    _osm_snapshot(root, [])
+    (root / SOURCE.snapshot_id).mkdir()
+    make = FakeMake()
+    with pytest.raises(SnapshotExistsError):
+        build_dsm(root, OSM_ID, scratch, source=SOURCE, runner=make, today=TODAY)
+    assert make.calls == []
+    assert list(scratch.iterdir()) == []
