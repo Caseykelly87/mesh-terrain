@@ -130,8 +130,7 @@ def sample_profile(
         tx_xy_m: Transmitter easting and northing in EPSG:26915, metres.
         rx_xy_m: Receiver easting and northing in EPSG:26915, metres.
         step_m: Largest sample spacing in metres (see `profile_distances_m`).
-        max_window_px: Largest window side in pixels for one read; about 1 km
-            on the 1 m layers.
+        max_window_px: Largest window side in pixels per read; 1 km on 1 m layers.
         margin_px: Pixels read beyond the samples on every side of a window.
 
     Returns:
@@ -139,28 +138,28 @@ def sample_profile(
         any sample whose four neighbouring pixels include one is NaN.
 
     Raises:
-        ValueError: for a zero-length path, a step that is not positive, or a
-            raster that is not north-up in EPSG:26915.
+        ValueError: zero-length path, step not positive, or raster not north-up
+            in EPSG:26915.
         OutOfExtentError: if any sample lies outside the raster.
     """
     length_m = math.hypot(rx_xy_m[0] - tx_xy_m[0], rx_xy_m[1] - tx_xy_m[1])
     distance_m = profile_distances_m(length_m, step_m)
-    fraction = distance_m / length_m
-    x_m = tx_xy_m[0] + (rx_xy_m[0] - tx_xy_m[0]) * fraction
-    y_m = tx_xy_m[1] + (rx_xy_m[1] - tx_xy_m[1]) * fraction
+    x_m, y_m = _points_along(tx_xy_m, rx_xy_m, distance_m / length_m)
     with rasterio.open(raster_path) as source:
         _check_grid(source, raster_path)
         rows, cols = _pixel_indices(source, x_m, y_m)
         _check_extent(rows, cols, source.height, source.width, raster_path)
         ground_m, windows = _sample_in_segments(source, rows, cols, max_window_px, margin_px)
-    log.debug(
-        "profile_sampled",
-        raster=raster_path.name,
-        samples=int(distance_m.size),
-        windows=windows,
-        missing=int(np.isnan(ground_m).sum()),
-    )
+    missing = int(np.isnan(ground_m).sum())
+    log.debug("profile_sampled", raster=raster_path.name, windows=windows, missing=missing)
     return PathProfile(distance_m=distance_m, ground_m=ground_m, tx_xy_m=tx_xy_m, rx_xy_m=rx_xy_m)
+
+
+def _points_along(tx_xy_m: XY, rx_xy_m: XY, fraction: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Eastings and northings at fractions 0 to 1 of the way from tx to rx."""
+    x_m: FloatArray = tx_xy_m[0] + (rx_xy_m[0] - tx_xy_m[0]) * fraction
+    y_m: FloatArray = tx_xy_m[1] + (rx_xy_m[1] - tx_xy_m[1]) * fraction
+    return x_m, y_m
 
 
 def _check_grid(source: DatasetReader, raster_path: Path) -> None:

@@ -74,25 +74,34 @@ def hata_db(
         ValueError: for a frequency outside 150 to 1500 MHz, a distance or
             antenna height that is not positive, or an unknown variant.
     """
+    _check_hata_inputs(distance_m, frequency_mhz, tx_height_m, rx_height_m, variant)
+    base_m, mobile_m = max(tx_height_m, rx_height_m), min(tx_height_m, rx_height_m)
+    urban_db = _hata_urban_db(distance_m, frequency_mhz, base_m, mobile_m)
+    if variant == "urban":
+        return urban_db
+    return urban_db - 2.0 * math.log10(frequency_mhz / 28.0) ** 2 - 5.4
+
+
+def _check_hata_inputs(
+    distance_m: float, frequency_mhz: float, tx_height_m: float, rx_height_m: float, variant: str
+) -> None:
     if not HATA_MIN_MHZ <= frequency_mhz <= HATA_MAX_MHZ:
         raise ValueError(f"Hata is valid from 150 to 1500 MHz, got {frequency_mhz}")
     if not (distance_m > 0.0 and tx_height_m > 0.0 and rx_height_m > 0.0):
         raise ValueError("distance and antenna heights must be positive")
     if variant not in ("urban", "suburban"):
         raise ValueError(f"unknown Hata variant {variant!r}")
-    base_m, mobile_m = max(tx_height_m, rx_height_m), min(tx_height_m, rx_height_m)
+
+
+def _hata_urban_db(
+    distance_m: float, frequency_mhz: float, base_m: float, mobile_m: float
+) -> float:
+    """Hata's urban loss with the small and medium city a(hm); distance in metres."""
     log_f = math.log10(frequency_mhz)
+    log_base = math.log10(base_m)
     mobile_correction_db = (1.1 * log_f - 0.7) * mobile_m - (1.56 * log_f - 0.8)
-    urban_db = (
-        69.55
-        + 26.16 * log_f
-        - 13.82 * math.log10(base_m)
-        - mobile_correction_db
-        + (44.9 - 6.55 * math.log10(base_m)) * math.log10(distance_m / 1000.0)
-    )
-    if variant == "urban":
-        return urban_db
-    return urban_db - 2.0 * math.log10(frequency_mhz / 28.0) ** 2 - 5.4
+    distance_term_db = (44.9 - 6.55 * log_base) * math.log10(distance_m / 1000.0)
+    return 69.55 + 26.16 * log_f - 13.82 * log_base - mobile_correction_db + distance_term_db
 
 
 def hata_variant(tx_building_share: float, rx_building_share: float) -> HataVariant:

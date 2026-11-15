@@ -8,12 +8,66 @@ ends the ray is the antenna height above the ground by construction. The ground
 is bare earth; clutter enters through P.1812 and the statistics, not here.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from terrain.curvature import K_FACTOR, earth_bulge_m
 from terrain.errors import RefusedDrawError
 from terrain.profile import FloatArray, PathProfile
 from terrain.units import wavelength_m
+
+
+@dataclass(frozen=True)
+class CurvedPath:
+    """Interior samples of a profile with the earth bulge added, and the antenna tops.
+
+    Attributes:
+        distance_m: Distances of samples 1 to n-2 from the transmitter, metres.
+        ground_m: Ground plus earth bulge at those samples, metres above NAVD88.
+        tx_top_m: Transmitting antenna top, metres above NAVD88.
+        rx_top_m: Receiving antenna top, metres above NAVD88.
+        length_m: Path length, metres.
+    """
+
+    distance_m: FloatArray
+    ground_m: FloatArray
+    tx_top_m: float
+    rx_top_m: float
+    length_m: float
+
+    def ray_m(self, distance_m: FloatArray) -> FloatArray:
+        """Height of the straight ray between the antenna tops, metres above NAVD88."""
+        rise_m = self.rx_top_m - self.tx_top_m
+        ray: FloatArray = self.tx_top_m + rise_m * distance_m / self.length_m
+        return ray
+
+
+def curved_path(
+    profile: PathProfile, tx_height_m: float, rx_height_m: float, k_factor: float = K_FACTOR
+) -> CurvedPath:
+    """Add the earth bulge to the interior ground and place the antennas.
+
+    Args:
+        profile: Uncurved ground profile in EPSG:26915.
+        tx_height_m: Transmitting antenna height above ground, metres.
+        rx_height_m: Receiving antenna height above ground, metres.
+        k_factor: Effective earth radius factor; math.inf gives a flat earth.
+
+    Raises:
+        ValueError: if the profile has no interior sample.
+        RefusedDrawError: if a ground height is NaN (reason "dem_gap").
+    """
+    require_complete_ground(profile)
+    distance = profile.distance_m[1:-1]
+    bulge = earth_bulge_m(distance, profile.length_m, k_factor)
+    return CurvedPath(
+        distance_m=distance,
+        ground_m=profile.ground_m[1:-1] + bulge,
+        tx_top_m=float(profile.ground_m[0]) + tx_height_m,
+        rx_top_m=float(profile.ground_m[-1]) + rx_height_m,
+        length_m=profile.length_m,
+    )
 
 
 def clearance_m(
@@ -34,13 +88,8 @@ def clearance_m(
         ValueError: if the profile has no interior sample.
         RefusedDrawError: if a ground height is NaN (reason "dem_gap").
     """
-    require_complete_ground(profile)
-    distance = profile.distance_m[1:-1]
-    tx_top_m = float(profile.ground_m[0]) + tx_height_m
-    rx_top_m = float(profile.ground_m[-1]) + rx_height_m
-    ray_m = tx_top_m + (rx_top_m - tx_top_m) * distance / profile.length_m
-    ground_m = profile.ground_m[1:-1] + earth_bulge_m(distance, profile.length_m, k_factor)
-    clearance: FloatArray = ray_m - ground_m
+    path = curved_path(profile, tx_height_m, rx_height_m, k_factor)
+    clearance: FloatArray = path.ray_m(path.distance_m) - path.ground_m
     return clearance
 
 
