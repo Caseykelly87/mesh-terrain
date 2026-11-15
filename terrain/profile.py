@@ -263,19 +263,18 @@ def check_extent(rows: FloatArray, cols: FloatArray, height: int, width: int, ra
         raise OutOfExtentError(f"profile leaves the extent of {raster}")
 
 
-def window_slices(
-    rows: FloatArray, cols: FloatArray, max_window_px: int, margin_px: int
-) -> list[slice]:
+def window_slices(rows: FloatArray, cols: FloatArray, max_window: int, margin: int) -> list[slice]:
     """Split evenly spaced samples into runs that each fit one bounded window.
 
-    A run's window spans its samples' four neighbours plus `margin_px` on every
-    side, and stays at most `max_window_px` on a side.
+    Works on any grid: pixels for `sample_profile`, 10 m cells for
+    `terrain.cells`. A run's window spans its samples' four neighbours plus
+    `margin` on every side, and stays at most `max_window` on a side.
 
     Args:
-        rows: Fractional row indices of the samples, evenly spaced.
+        rows: Fractional row indices of the samples on the grid, evenly spaced.
         cols: Fractional column indices, the same convention.
-        max_window_px: Largest window side, in grid units (pixels or cells).
-        margin_px: Grid units read beyond the samples on every side.
+        max_window: Largest window side, in grid units.
+        margin: Grid units read beyond the samples on every side.
 
     Returns:
         Slices into the sample arrays, in order, covering every sample.
@@ -283,13 +282,13 @@ def window_slices(
     Raises:
         ValueError: if the window is too small for the margin.
     """
-    span_px = max_window_px - 2 * margin_px - 3
-    if span_px < 1:
-        raise ValueError("max_window_px is too small for the margin")
+    span = max_window - 2 * margin - 3
+    if span < 1:
+        raise ValueError("the window is too small for the margin")
     if rows.size < 2:
         return [slice(0, rows.size)] if rows.size else []
-    advance_px = max(abs(float(rows[1] - rows[0])), abs(float(cols[1] - cols[0])))
-    per_window = rows.size if advance_px == 0.0 else int(span_px // advance_px) + 1
+    advance = max(abs(float(rows[1] - rows[0])), abs(float(cols[1] - cols[0])))
+    per_window = rows.size if advance == 0.0 else int(span // advance) + 1
     return [
         slice(start, min(rows.size, start + per_window))
         for start in range(0, rows.size, per_window)
