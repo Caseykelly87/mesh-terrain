@@ -5,6 +5,7 @@ constants (DN 40, N0 325), never the ITU maps. Paths are in EPSG:26915.
 """
 
 import hashlib
+import inspect
 import json
 import shutil
 import subprocess
@@ -17,6 +18,7 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 from pyproj import Transformer
+from structlog.testing import capture_logs
 
 from terrain import p1812
 from terrain.errors import RefusedDrawError
@@ -78,6 +80,7 @@ def call_flat(**overrides: Any) -> PathLossResult:
         "rx_height_m": 2.0,
         "frequency_mhz": 915.0,
         "maps": load_maps(FIXTURE),
+        "polarisation": "vertical",
     }
     for name, value in overrides.items():
         (fields if name in PROFILE_FIELDS else options)[name] = value
@@ -158,6 +161,17 @@ def test_load_maps_reads_the_verified_fixture() -> None:
     assert maps.manifest_sha256 == manifest_sha256
     assert maps.dn50.shape == (121, 241) and float(maps.dn50[60, 180]) == 40.0
     assert float(maps.n050[0, 0]) == 325.0
+
+
+def test_load_maps_logs_its_start_and_end() -> None:
+    with capture_logs() as logs:
+        maps = load_maps(FIXTURE)
+    events = {entry["event"]: entry for entry in logs}
+    assert events["p1812_maps_load_begin"]["path"] == str(FIXTURE)
+    end = events["p1812_maps_load_end"]
+    assert end["path"] == str(FIXTURE) and end["duration_s"] >= 0.0
+    assert end["snapshot_id"] == maps.snapshot_id
+    assert end["manifest_sha256"] == maps.manifest_sha256
 
 
 def test_load_maps_refuses_a_missing_folder(tmp_path: Path) -> None:
@@ -324,10 +338,16 @@ def test_call_converts_units_and_coordinates_at_the_edge(
     assert inputs.rx_lon_deg > inputs.tx_lon_deg
 
 
-def test_vertical_is_the_default_polarisation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_vertical_maps_to_pythons_code_2(monkeypatch: pytest.MonkeyPatch) -> None:
     seen = spy_on(monkeypatch, "call_bt_loss")
-    call_flat()
+    call_flat(polarisation="vertical")
     assert seen[0].polarisation_code == 2
+
+
+def test_polarisation_is_a_required_keyword() -> None:
+    parameter = inspect.signature(p1812_loss).parameters["polarisation"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
 
 
 def test_result_agrees_with_the_logged_call() -> None:

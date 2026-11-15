@@ -3,13 +3,17 @@
 The profile builder, the input checks and the status codes run everywhere.
 The tests marked `needs_itm_library` call libitm.so, which exists only in the
 Dagster image (ITM_LIBRARY_PATH, default /usr/local/lib/libitm.so); they skip
-where it is missing. CI runs them inside the image through `make check-itm`.
+where it is missing, which today includes CI: `make check-itm` still runs only
+the ADR 0002 spike script, so these skip in CI until platform-eng changes it to
+run this file inside the image (docs/STATUS.md, Known issues, the ITM tests line).
 """
 
+import inspect
 from pathlib import Path
 
 import numpy as np
 import pytest
+from structlog.testing import capture_logs
 
 from pipeline.common.settings import get_settings
 from terrain.errors import RefusedDrawError
@@ -99,8 +103,16 @@ def test_missing_ground_refuses_the_draw() -> None:
 
 
 def test_missing_library_names_the_install_step(tmp_path: Path) -> None:
-    with pytest.raises(RuntimeError, match="ITM_LIBRARY_PATH"):
+    with capture_logs() as logs, pytest.raises(RuntimeError, match="ITM_LIBRARY_PATH"):
         load_itm_library(tmp_path / "libitm.so")
+    assert [entry["event"] for entry in logs] == ["itm_library_load_begin"]
+    assert logs[0]["path"] == str(tmp_path / "libitm.so")
+
+
+def test_polarisation_is_a_required_keyword() -> None:
+    parameter = inspect.signature(itm_loss).parameters["polarisation"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
 
 
 def test_default_settings_follow_adr_0002() -> None:
@@ -131,11 +143,29 @@ def test_error_codes_raise_with_their_name(code: int, name: str) -> None:
 def test_flat_path_reproduces_the_adr_0002_figure(itm_library: ItmLibrary) -> None:
     """10 km flat at sea level, 10 m step, 915 MHz, 2 m antennas: 151.76 dB."""
     result = itm_loss(
-        itm_library, FLAT_PROFILE, tx_height_m=2.0, rx_height_m=2.0, frequency_mhz=915.0
+        itm_library,
+        FLAT_PROFILE,
+        tx_height_m=2.0,
+        rx_height_m=2.0,
+        frequency_mhz=915.0,
+        polarisation="vertical",
     )
     assert result.loss_db == pytest.approx(151.76, abs=0.005)
     assert result.troposcatter_loss_db is None
     assert result.itm_warning_flags is not None
+
+
+def test_library_load_logs_its_start_and_end() -> None:
+    path = get_settings().itm_library_path
+    if not Path(path).is_file():
+        pytest.skip(f"no ITM library at {path}; it is built into the Dagster image")
+    load_itm_library.cache_clear()
+    with capture_logs() as logs:
+        load_itm_library(path)
+    events = {entry["event"]: entry for entry in logs}
+    assert events["itm_library_load_begin"]["path"] == str(path)
+    assert events["itm_library_load_end"]["path"] == str(path)
+    assert events["itm_library_load_end"]["duration_s"] >= 0.0
 
 
 def test_ntia_point_to_point_example(itm_library: ItmLibrary) -> None:
@@ -153,6 +183,7 @@ def test_ntia_point_to_point_example(itm_library: ItmLibrary) -> None:
         tx_height_m=15.0,
         rx_height_m=3.0,
         frequency_mhz=3500.0,
+        polarisation="vertical",
         settings=ItmSettings(mdvar=1),
     )
     assert result.loss_db == pytest.approx(114.5, abs=0.05)
@@ -161,4 +192,11 @@ def test_ntia_point_to_point_example(itm_library: ItmLibrary) -> None:
 
 def test_out_of_range_input_raises(itm_library: ItmLibrary) -> None:
     with pytest.raises(RuntimeError, match="FREQUENCY"):
-        itm_loss(itm_library, FLAT_PROFILE, tx_height_m=2.0, rx_height_m=2.0, frequency_mhz=1.0)
+        itm_loss(
+            itm_library,
+            FLAT_PROFILE,
+            tx_height_m=2.0,
+            rx_height_m=2.0,
+            frequency_mhz=1.0,
+            polarisation="vertical",
+        )
