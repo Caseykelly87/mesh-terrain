@@ -108,12 +108,17 @@ flat, R 10: Lb 160.170552 dB; NaN at point 300: 160.170552 dB; 0 at point 300: 1
 flat, R 0: Lb 149.479180 dB; NaN at point 500: 149.479175 dB; 0 at point 500: 149.479180 dB
 flat, one 30 m clutter point at 500: Lb 159.742181 dB; NaN at point 500: 149.479175 dB; 0 at point 500: 149.479180 dB
 hilly, R 10: Lb 190.228103 dB; NaN at point 400: 190.228103 dB; 0 at point 400: 190.228103 dB
+flat, R 10: Lb 160.170552 dB; NaN at point 1: 137.361142 dB; 0 at point 1: 160.170552 dB
+flat, R 10: Lb 160.170552 dB; NaN at point 999: 160.170552 dB; 0 at point 999: 160.170552 dB
+hilly, R 10: Lb 190.228103 dB; NaN at point 1: 137.361202 dB; 0 at point 1: 190.224333 dB
+hilly, R 0: Lb 176.549174 dB; NaN at point 1: 137.361202 dB; 0 at point 1: 176.549174 dB
+hilly, R 10: Lb 190.228103 dB; NaN at point 999: 190.224333 dB; 0 at point 999: 190.224333 dB
 ```
 
 What it shows:
 
 - The in-memory placeholder gives the same import, the same 149.48 dB with DN and N0, and the same `IndexError` without them as run 2's file. The installed package holds no npz after the import. `P1812.files` keeps the replacement after the import, which is harmless because line 19 is its only use.
-- A NaN in R never makes Lb NaN, and no warning is raised. The NaN enters `g = h + R` (`P1812.py` line 330), and the comparisons after it skip that point, so the point acts as if it had no clutter. Where the NaN point does not set the loss, nothing changes (160.17 dB with or without it). Where it does, the obstacle disappears: the single 30 m clutter point gives 159.74 dB, and the same point marked NaN gives 149.48 dB, the bare-ground figure. The hilly case is a 40 m sinusoidal relief with R = 10 m, and stays finite at 190.23 dB. So the wrapper has to fill or refuse every NaN in R before it calls `bt_loss`.
+- A NaN in R never makes Lb NaN, and no warning is raised. The NaN enters `g = h + R` (`P1812.py` line 330). At most points the comparisons after it skip that point, as though it had no clutter: on the flat path with R = 10 m a NaN at index 300 or 999 leaves 160.17 dB. Where the skipped point is the one obstacle that sets the loss, the obstacle vanishes: the single 30 m clutter point gives 159.74 dB, and the same point marked NaN gives 149.48 dB, the bare-ground figure. At index 1, the first interior point next to the transmitter, a NaN does worse. `dl_bull` (lines 1819 to 1846) takes its largest slope with Python's built-in `max`, which returns NaN when the first element is NaN; every test after that is false, and the knife-edge loss of the whole path is 0. The flat path then gives 137.36 dB, below the bare-ground 149.48 dB, and the hilly path (a 40 m sinusoidal relief: 190.23 dB with R = 10 m, 176.55 dB bare) also gives 137.36 dB, 52.87 dB too low. So a NaN is skipped, except at the first interior point, where it removes the path's diffraction loss, and the wrapper has to fill or refuse every NaN in R before it calls `bt_loss`.
 
 ## Install form checks
 
