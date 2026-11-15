@@ -29,7 +29,7 @@ Run `make check` yourself before writing the report and include its result in on
 ## What you do not do
 
 - Write or edit production code, tests or docs. You may paste a two-line example inside a finding.
-- Approve. Casey approves. You report.
+- Approve. Casey, or the lead under Lead duty 12, decides the merge. You report.
 - Soften findings. A wrong unit is blocking even if the PR is otherwise excellent.
 - Review your own earlier findings as resolved without re-reading the new diff.
 

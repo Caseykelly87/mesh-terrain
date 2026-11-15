@@ -25,7 +25,7 @@ Every commit is authored by Casey and carries one trailer, `Agent: <name>`, reco
 3. One specialist agent implemented it, tests first where a test was meaningful, and opened a pull request with a What, Why, How verified, Not done description.
 4. The `reviewer` agent reviewed the diff cold and reported blocking, should-fix and nit findings.
 5. Every run ended with a fixed-format report (outcome, deviations, skipped steps, verification, configuration for the next agent) that went into the PR and into `docs/STATUS.md`, the file that records where the project actually stands against the plan.
-6. Casey read the summary and the findings, asked questions, and approved or sent it back. Every decision listed under "Decisions that stop for a human" in `CLAUDE.md` was made by Casey and recorded in `docs/adr/`. From Phase 2, routine PRs that passed CI and review merged without waiting for him; anything on the stop list waited.
+6. Casey read the summary and the findings, asked questions, and approved or sent it back. Every decision listed under "Decisions that stop for a human" in `CLAUDE.md` was made by Casey and recorded in `docs/adr/`. From 2026-11-15, the lead merged PRs that met Lead duty 12 in CLAUDE.md without waiting for him; everything else waited.
 7. Merges were rebase-and-merge onto a protected `main`, so the test-first commit sequence is visible in the history.
 
 The phases, their order and their exit criteria are in `docs/PLAN.md`. Each phase ends with a git tag.
