@@ -153,8 +153,10 @@ def test_surface_and_canopy_gaps_are_filled_and_counted_not_refused(tmp_path: Pa
     dem = np.full((60, 300), 100.0, dtype=np.float32)
     dsm = dem + 3.0
     canopy = np.zeros_like(dem)
-    dsm[21, 52] = dsm[21, 53] = -999999.0
-    dsm[55, 55] = -999999.0  # cell (5, 5): the profile does not read it
+    dsm[21, 52] = dsm[21, 53] = -999999.0  # cell (2, 5), read at weight 1
+    dsm[35, 72] = -999999.0  # cell (3, 7), the row after: read at weight 0
+    dsm[15, 52] = -999999.0  # cell (1, 5), inside the read window's margin, not read
+    dsm[55, 55] = -999999.0  # cell (5, 5), outside the window
     canopy[22, 60] = -999999.0
     paths = {
         name: write_dem(tmp_path / f"{name}.tif", grid)
@@ -174,7 +176,9 @@ def test_surface_and_canopy_gaps_are_filled_and_counted_not_refused(tmp_path: Pa
     # Two of cell (2, 5)'s 100 pixels are filled with 0 instead of 3 m.
     assert result.profile.clutter_m[4] == pytest.approx(3.0 * 98 / 100)
     assert result.profile.clutter_m[5] == pytest.approx(3.0)
-    assert result.dsm_filled_pixels == 2
+    # The samples lie on cell row 2, so bilinear reads rows 2 and 3: the two
+    # pixels in (2, 5) and the one in (3, 7) count, the margin's (1, 5) does not.
+    assert result.dsm_filled_pixels == 3
 
 
 def test_without_a_dsm_no_pixel_counts_as_filled(tmp_path: Path) -> None:
@@ -298,3 +302,32 @@ def test_a_window_too_small_for_its_margin_is_rejected(tmp_path: Path) -> None:
             rx_ground_m=100.0,
             max_window_cells=5,
         )
+
+
+def test_cells_sit_on_utm_multiples_of_10_m_whatever_the_raster_origin(tmp_path: Path) -> None:
+    dem_path, dsm_path, dem, dsm = rough_layers(tmp_path)
+    # The same ground cropped 4 m from the north and 3 m from the west, as a
+    # corridor raster or the engine's cropped dem.tif might start.
+    shifted = (ORIGIN_X_M + 3.0, ORIGIN_Y_M - 4.0)
+    shifted_dem = write_dem(tmp_path / "dem_shift.tif", dem[4:, 3:], origin_xy_m=shifted)
+    shifted_dsm = write_dem(tmp_path / "dsm_shift.tif", dsm[4:, 3:], origin_xy_m=shifted)
+    tx, rx = (ORIGIN_X_M + 22.0, ORIGIN_Y_M - 23.0), (ORIGIN_X_M + 263.0, ORIGIN_Y_M - 41.0)
+
+    with open_layers(dem_path, dsm=dsm_path) as layers:
+        whole = cell_profile(layers, tx, rx, tx_ground_m=100.0, rx_ground_m=100.0)
+    with open_layers(shifted_dem, dsm=shifted_dsm) as layers:
+        cropped = cell_profile(layers, tx, rx, tx_ground_m=100.0, rx_ground_m=100.0)
+
+    assert np.array_equal(whole.profile.ground_m, cropped.profile.ground_m)
+    assert whole.profile.clutter_m is not None and cropped.profile.clutter_m is not None
+    assert np.array_equal(whole.profile.clutter_m, cropped.profile.clutter_m)
+
+
+def test_layers_must_sit_on_whole_metres(tmp_path: Path) -> None:
+    grid = np.zeros((20, 20), dtype=np.float32)
+    origin = (ORIGIN_X_M + 0.5, ORIGIN_Y_M)
+    dem_path = write_dem(tmp_path / "dem.tif", grid, origin_xy_m=origin)
+    canopy_path = write_dem(tmp_path / "canopy.tif", grid, origin_xy_m=origin)
+
+    with pytest.raises(ValueError, match="whole metres"), open_layers(dem_path, canopy=canopy_path):
+        pass

@@ -212,7 +212,7 @@ def test_every_draw_refused_leaves_every_number_null() -> None:
 
     assert summary.refused_draws == 16
     assert summary.refusals == {**NO_REFUSALS, "clutter_nan": 16}
-    for name in ("fspl_db", "fresnel"):
+    for name in ("fspl_db", "fresnel", "never-reported"):
         assert summary.median(name) is None
         assert summary.iqr(name) is None
     assert summary.share("los") is None
@@ -389,7 +389,108 @@ def test_summary_type_is_exported() -> None:
     assert isinstance(summary, DrawSummary)
     assert summary.endpoint_draws == 4
     assert summary.refusals == NO_REFUSALS
-    assert summary.median("not-a-quantity") is None
+
+
+def test_a_name_no_kept_draw_reported_is_a_key_error() -> None:
+    summary = sample_link("t", TX, RX, flat_profiles, geometry, run_seed=RUN_SEED, n_draws=4)
+
+    with pytest.raises(KeyError, match="not-a-quantity"):
+        summary.median("not-a-quantity")
+    with pytest.raises(KeyError):
+        summary.iqr("los")
+    with pytest.raises(KeyError):
+        summary.share("fspl_db")
+
+
+def test_first_draw_is_pinned_for_a_fixed_seed() -> None:
+    # numpy's PCG64 stream and the draw order (tx easting, tx northing, rx
+    # easting, rx northing) together decide every draw; a change to either
+    # changes every published median.
+    first = draw_endpoints(TX, RX, n_draws=16, seed=20261108)[0]
+
+    assert first == (
+        (721024.9386824487, 4288971.692172184),
+        (723995.9430615588, 4289495.067429672),
+    )
+
+
+def test_metro_builder_refuses_an_interior_dem_gap_for_every_model(tmp_path: Path) -> None:
+    heights = np.full((80, 400), 150.0, dtype=np.float32)
+    heights[30, 200] = -999999.0
+    dem_path = write_dem(tmp_path / "metro.tif", heights, resolution_m=10.0)
+    tx = EndpointBox(centre_xy_m=centre_xy_m(30, 20, 10.0), half_width_m=0.0)
+    rx = EndpointBox(centre_xy_m=centre_xy_m(30, 370, 10.0), half_width_m=0.0)
+
+    with rasterio.open(dem_path) as dem:
+        summary = sample_link("m", tx, rx, MetroProfileBuilder(dem=dem), free_space, run_seed=1)
+
+    assert summary.refusals == {**NO_REFUSALS, "dem_gap": 16}
+    assert summary.median("fspl_db") is None
+
+
+def test_fine_builder_refuses_a_gap_on_the_1_m_line_as_dem_gap(tmp_path: Path) -> None:
+    dem = np.full((60, 400), 100.0, dtype=np.float32)
+    dem[25, 200] = -999999.0  # on the 1 m line, far from both ends
+    paths = {
+        "dem": write_dem(tmp_path / "dem.tif", dem),
+        "dsm": write_dem(tmp_path / "dsm.tif", dem),
+    }
+
+    with (
+        open_layers(paths["dem"], dsm=paths["dsm"]) as layers,
+        pytest.raises(RefusedDrawError) as caught,
+    ):
+        FineProfileBuilder(layers=layers)(centre_xy_m(25, 15), centre_xy_m(25, 315))
+
+    # The 10 m profile would also refuse this cell, but as empty_cell: the
+    # reason shows the ground profile was checked first.
+    assert caught.value.reason == "dem_gap"
+
+
+def test_building_mask_must_share_the_builder_dem_grid(tmp_path: Path) -> None:
+    paths = flat_fine_layers(tmp_path)
+    tx = EndpointBox(centre_xy_m=centre_xy_m(100, 50), half_width_m=0.0)
+    rx = EndpointBox(centre_xy_m=centre_xy_m(100, 1050), half_width_m=0.0)
+
+    with open_layers(paths["dem"], dsm=paths["dsm"]) as layers:
+        builder = FineProfileBuilder(layers=layers)
+        on_grid = BuildingPixels(
+            mask=np.zeros((200, 1100), dtype=bool), transform=layers.dem.transform
+        )
+        off_grid = BuildingPixels(
+            mask=np.zeros((200, 1200), dtype=bool), transform=layers.dem.transform
+        )
+        summary = sample_link("b", tx, rx, builder, free_space, run_seed=1, buildings=on_grid)
+        with pytest.raises(ValueError, match="grid"):
+            sample_link("b", tx, rx, builder, free_space, run_seed=1, buildings=off_grid)
+
+    assert summary.tx_building_draws == 0
+
+
+def test_metro_builder_takes_no_building_mask(tmp_path: Path) -> None:
+    with rasterio.open(rough_metro_dem(tmp_path)) as dem:
+        mask = BuildingPixels(
+            mask=np.zeros((80, 400), dtype=bool),
+            transform=from_origin(ORIGIN_X_M, ORIGIN_Y_M, 1.0, 1.0),
+        )
+        tx = EndpointBox(centre_xy_m=centre_xy_m(40, 20, 10.0), half_width_m=0.0)
+        rx = EndpointBox(centre_xy_m=centre_xy_m(30, 370, 10.0), half_width_m=0.0)
+        with pytest.raises(ValueError, match="grid"):
+            sample_link(
+                "m", tx, rx, MetroProfileBuilder(dem=dem), free_space, run_seed=1, buildings=mask
+            )
+
+
+def test_building_lookup_takes_the_pixel_holding_the_point() -> None:
+    mask = np.zeros((1000, 2000), dtype=bool)
+    mask[:500, :1000] = True
+    buildings = BuildingPixels(mask=mask, transform=from_origin(ORIGIN_X_M, ORIGIN_Y_M, 1.0, 1.0))
+
+    # 0.1 m inside the last building pixel on each axis: rounding would step out.
+    assert buildings.contains((ORIGIN_X_M + 999.9, ORIGIN_Y_M - 10.0))
+    assert buildings.contains((ORIGIN_X_M + 10.0, ORIGIN_Y_M - 499.9))
+    assert not buildings.contains((ORIGIN_X_M + 1000.1, ORIGIN_Y_M - 10.0))
+    assert not buildings.contains((ORIGIN_X_M + 10.0, ORIGIN_Y_M - 500.1))
 
 
 def test_building_mask_must_be_a_north_up_grid() -> None:
