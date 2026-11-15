@@ -31,7 +31,12 @@ from terrain.diffraction import knife_edge_db
 from terrain.draws import DrawProfiles, DrawQuantities
 from terrain.errors import RefusedDrawError, ZeroLengthPathError
 from terrain.itm import DEFAULT_SETTINGS, ItmLibrary, ItmSettings, Polarisation, itm_loss
-from terrain.profile import PathProfile, refuse_ground_gap
+from terrain.profile import (
+    ENDPOINT_TOLERANCE_M,
+    MIN_SAMPLES,
+    PathProfile,
+    refuse_ground_gap,
+)
 from terrain.result import PathLossResult
 
 if TYPE_CHECKING:
@@ -39,12 +44,6 @@ if TYPE_CHECKING:
 
 Model = Literal["fspl", "knife_edge", "hata", "itm", "p1812"]
 MODELS: tuple[Model, ...] = get_args(Model)
-
-MIN_SAMPLES = 5
-"""Fewest profile samples any model is given (decision 3, refused as short_profile)."""
-
-# The samplers put the last sample on the receiver; further apart is a bug.
-ENDPOINT_TOLERANCE_M = 0.01
 
 ITM_HINT = (
     "itm needs the NTIA library: the Dagster image builds it (docker/dagster/Dockerfile, "
