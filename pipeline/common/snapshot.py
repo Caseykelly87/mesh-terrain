@@ -50,6 +50,8 @@ SNAPSHOT_COLUMNS = (
     "manifest_sha256",
     "registered_at",
 )
+# The manifest fields raw.snapshot stores; seeds stay in the manifest.
+REGISTRY_FIELDS = ("snapshot_id", "capture_date", "source_url", "licence")
 _CHUNK_BYTES = 1 << 20
 
 ManifestCheck = Callable[[Path, list[Path]], Mapping[str, object]]
@@ -130,14 +132,16 @@ def snapshot_files(folder: Path) -> list[Path]:
 def check_metadata(
     partial: Path, metadata: Mapping[str, object], required: Sequence[str] = REQUIRED_METADATA
 ) -> None:
-    """Refuse metadata that lacks a required field or names another snapshot.
+    """Refuse metadata that lacks a required field, has non-mapping seeds or names another snapshot.
 
     Raises:
-        SnapshotError: naming the missing fields, or the folder when the id differs.
+        SnapshotError: naming the missing fields, the seeds, or the folder whose id differs.
     """
     missing = [name for name in required if name not in metadata]
     if missing:
         raise SnapshotError(f"manifest metadata lacks {', '.join(missing)}")
+    if "seeds" in metadata and not isinstance(metadata["seeds"], Mapping):
+        raise SnapshotError("manifest seeds must be a mapping of draw name to seed, {} for none")
     if f"{metadata['snapshot_id']}{PARTIAL_SUFFIX}" != partial.name:
         raise SnapshotError(f"metadata snapshot_id does not match folder {partial.name}")
 
@@ -214,16 +218,20 @@ def finish_snapshot(partial: Path) -> Path:
     return renamed
 
 
+def _manifest_bytes(folder: Path) -> bytes:
+    manifest_path = folder / MANIFEST_NAME
+    if not manifest_path.is_file():
+        raise SnapshotError(f"{folder} has no manifest")
+    return manifest_path.read_bytes()
+
+
 def read_manifest(folder: Path) -> dict[str, Any]:
     """The parsed manifest of a snapshot folder.
 
     Raises:
         SnapshotError: if the folder has no manifest.
     """
-    manifest_path = folder / MANIFEST_NAME
-    if not manifest_path.is_file():
-        raise SnapshotError(f"{folder} has no manifest")
-    manifest: dict[str, Any] = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest: dict[str, Any] = json.loads(_manifest_bytes(folder))
     return manifest
 
 
@@ -237,7 +245,10 @@ def verify_manifest(folder: Path) -> list[str]:
     Raises:
         SnapshotError: if the folder has no manifest.
     """
-    manifest = read_manifest(folder)
+    return _problems(folder, read_manifest(folder))
+
+
+def _problems(folder: Path, manifest: Mapping[str, Any]) -> list[str]:
     with _logged("manifest_verify", snapshot_id_of(folder)) as details:
         expected = {entry["path"]: entry["sha256"] for entry in manifest["files"]}
         present = {path.relative_to(folder).as_posix(): path for path in snapshot_files(folder)}
@@ -262,10 +273,11 @@ def verified_manifest(folder: Path) -> dict[str, Any]:
     Raises:
         SnapshotError: if the folder has no manifest or a file differs from it.
     """
-    problems = verify_manifest(folder)
+    manifest = read_manifest(folder)
+    problems = _problems(folder, manifest)
     if problems:
         raise SnapshotError(f"{len(problems)} files differ from the manifest: {problems[:3]}")
-    return read_manifest(folder)
+    return manifest
 
 
 def partial_folders(root: Path) -> list[Path]:
@@ -298,13 +310,29 @@ def snapshot_folder(root: Path, snapshot_id: str) -> Path:
     return folder
 
 
-def _check_registrable(folder: Path, manifest: Mapping[str, Any]) -> None:
+def _registry_values(folder: Path, manifest: Mapping[str, Any]) -> tuple[str, ...]:
+    """The raw.snapshot values of a finished folder, hashing the manifest bytes it was read from."""
     if folder.name.endswith(PARTIAL_SUFFIX):
         raise SnapshotError(f"{folder} is an unfinished run; it is never registered")
-    if not (folder / MANIFEST_NAME).is_file():
-        raise SnapshotError(f"{folder} has no manifest; only finished snapshots register")
+    missing = [name for name in REGISTRY_FIELDS if name not in manifest]
+    if missing:
+        raise SnapshotError(f"manifest lacks {', '.join(missing)}; it is not registered")
     if manifest["snapshot_id"] != folder.name:
         raise SnapshotError(f"manifest snapshot_id does not match folder {folder.name}")
+    # Hash and compare the same bytes, so the stored sha256 belongs to the
+    # manifest the caller verified, not to one written since.
+    raw = _manifest_bytes(folder)
+    if json.loads(raw) != manifest:
+        raise SnapshotError(f"{folder / MANIFEST_NAME} changed since it was read")
+    source_url = manifest["source_url"]
+    return (
+        manifest["snapshot_id"],
+        manifest["capture_date"],
+        ", ".join(source_url) if isinstance(source_url, list) else source_url,
+        manifest["licence"],
+        str(folder / MANIFEST_NAME),
+        hashlib.sha256(raw).hexdigest(),
+    )
 
 
 def register(conn: psycopg.Connection, folder: Path, manifest: Mapping[str, Any]) -> int:
@@ -317,32 +345,26 @@ def register(conn: psycopg.Connection, folder: Path, manifest: Mapping[str, Any]
     Args:
         conn: An open warehouse connection where raw.snapshot exists.
         folder: The finished `<root>/<id>/` folder.
-        manifest: Its parsed manifest.
+        manifest: Its parsed manifest, as read from the folder.
 
     Returns:
         1 when the row is new, 0 when the snapshot id was already registered.
 
     Raises:
-        SnapshotError: for a `.partial` folder, a folder without a manifest, or
-            a manifest whose snapshot_id is not the folder's name.
+        SnapshotError: for a `.partial` folder, a folder without a manifest, a
+            manifest that lacks an snp_01 field, names another snapshot or
+            differs from the file in the folder.
     """
-    _check_registrable(folder, manifest)
-    source_url = manifest["source_url"]
-    values = (
-        manifest["snapshot_id"],
-        manifest["capture_date"],
-        ", ".join(source_url) if isinstance(source_url, list) else source_url,
-        manifest["licence"],
-        str(folder / MANIFEST_NAME),
-        sha256_file(folder / MANIFEST_NAME),
-    )
-    cursor = conn.execute(
-        "insert into raw.snapshot "
-        "(snapshot_id, capture_date, source_url, licence, manifest_path, manifest_sha256, "
-        "registered_at) values (%s, %s, %s, %s, %s, %s, now()) "
-        "on conflict (snapshot_id) do nothing",
-        values,
-    )
+    values = _registry_values(folder, manifest)
+    with _logged("snapshot_register", values[0]) as details:
+        cursor = conn.execute(
+            "insert into raw.snapshot "
+            "(snapshot_id, capture_date, source_url, licence, manifest_path, manifest_sha256, "
+            "registered_at) values (%s, %s, %s, %s, %s, %s, now()) "
+            "on conflict (snapshot_id) do nothing",
+            values,
+        )
+        details["inserted"] = cursor.rowcount
     return cursor.rowcount
 
 
@@ -353,7 +375,8 @@ def register_verified(conn: psycopg.Connection, folder: Path) -> int:
         1 when the row is new, 0 when the snapshot id was already registered.
 
     Raises:
-        SnapshotError: if the folder is partial, has no manifest or differs from it.
+        SnapshotError: if the folder is partial, has no manifest, a file
+            differs from it, or register refuses the manifest.
     """
     if folder.name.endswith(PARTIAL_SUFFIX):
         raise SnapshotError(f"{folder} is an unfinished run; it is never registered")
