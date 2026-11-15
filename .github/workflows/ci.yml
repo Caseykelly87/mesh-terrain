@@ -65,6 +65,17 @@ jobs:
       - if: always()
         run: docker compose down --volumes --remove-orphans
 
+  # A job of its own because the PDAL image is 821 MB compressed; in parallel
+  # it adds about a minute of pull without lengthening the stack smoke test.
+  # No lidar is read: the runner has no CA problem to test, and the EPT read
+  # is the snapshot command's to verify.
+  pdal-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - run: make check-pdal
+
   compose-smoke:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -85,11 +96,12 @@ jobs:
       # Casey decided that nothing in this project starts on its own (PR #12),
       # so a restart policy other than "no" fails here. Capture runs are started
       # by hand and are not Compose services (ADR 0005 item 1), so nothing is
-      # exempt.
+      # exempt. Every profile is enabled because config leaves out a service
+      # whose profile is off, such as pdal.
       - name: check that no service restarts on its own
         run: |
           make env
-          docker compose config --format json | jq -e '[.services[].restart] | all(. == "no")'
+          docker compose --profile '*' config --format json | jq -e '[.services[].restart] | all(. == "no")'
       - run: make up
       # make up passes when the code location fails to import, because the
       # webserver reports the error in its UI and stays healthy. PR #15's
