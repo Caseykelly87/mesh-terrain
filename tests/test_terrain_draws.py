@@ -390,3 +390,13 @@ def test_summary_type_is_exported() -> None:
     assert summary.endpoint_draws == 4
     assert summary.refusals == NO_REFUSALS
     assert summary.median("not-a-quantity") is None
+
+
+def test_building_mask_must_be_a_north_up_grid() -> None:
+    north_up = from_origin(ORIGIN_X_M, ORIGIN_Y_M, 1.0, 1.0)
+    south_up = north_up @ north_up.scale(1.0, -1.0)
+
+    with pytest.raises(ValueError, match="2-D"):
+        BuildingPixels(mask=np.zeros(10, dtype=bool), transform=north_up)
+    with pytest.raises(ValueError, match="north-up"):
+        BuildingPixels(mask=np.zeros((10, 10), dtype=bool), transform=south_up)

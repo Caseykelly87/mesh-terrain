@@ -77,7 +77,7 @@ def test_cells_sit_on_the_fixed_grid_whatever_the_window(tmp_path: Path) -> None
     with open_layers(dem_path, dsm=dsm_path) as layers:
         wide = cell_profile(layers, tx, rx, tx_ground_m=100.0, rx_ground_m=100.0)
         narrow = cell_profile(
-            layers, tx, rx, tx_ground_m=100.0, rx_ground_m=100.0, max_window_cells=4
+            layers, tx, rx, tx_ground_m=100.0, rx_ground_m=100.0, max_window_cells=6
         )
         down = cell_profile(
             layers,
@@ -259,3 +259,42 @@ def test_layers_must_have_1_m_pixels(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="1 m"), open_layers(dem_path, canopy=canopy_path):
         pass
+
+
+def test_an_end_without_1_m_ground_is_a_dem_gap(tmp_path: Path) -> None:
+    dem = np.full((40, 300), 100.0, dtype=np.float32)
+    dem_path = write_dem(tmp_path / "dem.tif", dem)
+    canopy_path = write_dem(tmp_path / "canopy.tif", np.zeros_like(dem))
+
+    with (
+        open_layers(dem_path, canopy=canopy_path) as layers,
+        pytest.raises(RefusedDrawError) as caught,
+    ):
+        cell_profile(
+            layers,
+            cell_centre_xy_m(2, 1),
+            cell_centre_xy_m(2, 25),
+            tx_ground_m=100.0,
+            rx_ground_m=float("nan"),
+        )
+
+    assert caught.value.reason == "dem_gap"
+
+
+def test_a_window_too_small_for_its_margin_is_rejected(tmp_path: Path) -> None:
+    dem = np.full((40, 300), 100.0, dtype=np.float32)
+    dem_path = write_dem(tmp_path / "dem.tif", dem)
+    canopy_path = write_dem(tmp_path / "canopy.tif", np.zeros_like(dem))
+
+    with (
+        open_layers(dem_path, canopy=canopy_path) as layers,
+        pytest.raises(ValueError, match="small"),
+    ):
+        cell_profile(
+            layers,
+            cell_centre_xy_m(2, 1),
+            cell_centre_xy_m(2, 25),
+            tx_ground_m=100.0,
+            rx_ground_m=100.0,
+            max_window_cells=5,
+        )
