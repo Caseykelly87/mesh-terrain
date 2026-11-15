@@ -1,6 +1,6 @@
 # terrain
 
-Pure functions for terrain profiles, line of sight, Fresnel clearance, diffraction and the terrain-free baseline losses. Every coordinate is EPSG:26915 (UTM zone 15N, metres); every height is metres above NAVD88; frequencies are MHz.
+Pure functions for terrain profiles, line of sight, Fresnel clearance, diffraction, the terrain-free baseline losses, and the ITM and P.1812 wrappers. Every coordinate is EPSG:26915 (UTM zone 15N, metres); every height is metres above NAVD88; frequencies are MHz.
 
 | Module | Holds |
 | --- | --- |
@@ -13,6 +13,9 @@ Pure functions for terrain profiles, line of sight, Fresnel clearance, diffracti
 | `cells.py` | `FineLayers` (the open 1 m DEM, DSM and canopy on one grid) and `cell_profile`, P.1812's 10 m profile from fixed 10 by 10 pixel cells (items 7 to 9) |
 | `draws.py` | `sample_link`, the endpoint sampler: N draws per link-hour, seeded by `draw_seed`, profiles from `MetroProfileBuilder` or `FineProfileBuilder`, models through a function the caller passes in, medians, interquartile ranges, shares, refusal counts and building draw counts |
 | `errors.py` | `OutOfExtentError` and `RefusedDrawError`, neither a `ValueError` (ADR 0006 item 11); `ZeroLengthPathError`, a `ValueError` subclass and the one error the feature asset catches, for a path whose endpoints are exactly 0 m apart |
+| `result.py` | `PathLossResult`, what every model returns for one draw: the loss in dB plus diagnostics only some models fill, Lbs for P.1812 and the warning flags for ITM (ADR 0006 item 10 (a)) |
+| `itm.py` | `itm_loss`: the Irregular Terrain Model (Longley-Rice), point-to-point, through NTIA's C++ library and `ctypes` (ADR 0002); the library exists only in the Dagster image, at `ITM_LIBRARY_PATH` |
+| `p1812.py` | `p1812_loss` and `load_maps`: ITU-R P.1812-8 through Py1812 (ADR 0006), imported against an empty in-memory placeholder for the ITU maps, with DN and N0 from a verified map snapshot passed on every call; import it lazily, on the first P.1812 call, so loading the Dagster definitions never runs Py1812's import |
 
 A refused draw carries one of four reasons, the causes of ADR 0006 item 11 as amended by Casey on PR #30. Each engine run report counts refused draws under the names on the right; no column holds the breakdown.
 
@@ -41,4 +44,15 @@ A worked example (ADR 0006 item 6): a cell half covered by a roof 8 m above the 
 
 Run: the functions are imported by the engine and the feature asset; `uv run pytest tests/test_terrain_*.py` exercises them on synthetic DEMs written per test.
 
-Deliberately not here: raster downloads, database access, Dagster objects, the building-pixel raster (rasterised from the OpenStreetMap snapshot elsewhere and passed in as an array), the Okumura-Hata variant choice per link, and the ITM and P.1812 wrappers (`itm.py`, `p1812.py`). `sample_profile` and `cell_profile` are the only functions that touch a file: they read windows of rasters the caller has opened, and open nothing themselves.
+Deliberately not here: raster downloads, database access, Dagster objects, the building-pixel raster (rasterised from the OpenStreetMap snapshot elsewhere and passed in as an array) and the Okumura-Hata variant choice per link. Four functions touch a file: `sample_profile` and `cell_profile` read windows of rasters the caller has opened, and open nothing themselves; `load_itm_library` loads the ITM shared library from the path its caller passes (ADR 0002); and `load_maps` reads the two ITU map files from a snapshot folder once per run, after checking their sha256 against the snapshot manifest (ADR 0006 decision 2). Casey accepted both reads on PR #31.
+
+## Map snapshots for P.1812
+
+- Real runs name `itu-r-p1812-8-202509`, written by `make p1812-maps` under `SNAPSHOTS_DIR` and never committed.
+- Tests and the CI engine fixture name `tests/fixtures/snapshots/p1812-maps-synthetic`: the real grid shape filled with made-up constants (DN 40, N0 325). P.1812 numbers from it are not predictions.
+
+## Acknowledgements
+
+- The ITM code is from the National Telecommunications and Information Administration (NTIA), Institute for Telecommunication Sciences, published as public domain software (github.com/NTIA/itm). The two changes made to build it on Linux are recorded with their dates in `docker/dagster/Dockerfile` and `docs/adr/0002-itm-spike/README.md`.
+- Py1812 is by Ivica Stevanovic, Federal Office of Communications (OFCOM), Switzerland (github.com/eeveetza/Py1812), used unmodified at commit 6c9061dd under its MIT-style licence.
+- ITU-R Recommendation P.1812-8 (09/2025) and its digital maps DN50 and N050 are from the International Telecommunication Union. The maps "may not be reproduced, by any means whatsoever, without written permission of ITU", so no copy of them is in this repository or any image.
