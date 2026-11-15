@@ -28,7 +28,7 @@ from rasterio.io import DatasetReader
 from rasterio.windows import Window
 from scipy.ndimage import map_coordinates
 
-from terrain.errors import OutOfExtentError, ZeroLengthPathError
+from terrain.errors import OutOfExtentError, RefusedDrawError, ZeroLengthPathError
 
 FloatArray = npt.NDArray[np.float64]
 XY = tuple[float, float]
@@ -51,8 +51,9 @@ class PathProfile:
             earth curvature applied. NaN where the DEM has no value.
         tx_xy_m: Transmitter easting and northing, metres.
         rx_xy_m: Receiver easting and northing, metres.
-        clutter_m: Clutter height above ground in metres, or None where only the
-            metro DEM exists. Filled by the clutter rule (unit U3b), not here.
+        clutter_m: Clutter height above ground in metres, or None. Only P.1812's
+            10 m profile on the 1 m layers carries it (`terrain.cells`); the
+            ground profiles on the metro DEM and the 1 m DEM have None.
     """
 
     distance_m: FloatArray
@@ -149,7 +150,7 @@ def sample_profile(
     """
     length_m = math.hypot(rx_xy_m[0] - tx_xy_m[0], rx_xy_m[1] - tx_xy_m[1])
     distance_m = profile_distances_m(length_m, step_m)
-    x_m, y_m = _points_along(tx_xy_m, rx_xy_m, distance_m / length_m)
+    x_m, y_m = points_along(tx_xy_m, rx_xy_m, distance_m / length_m)
     rows, cols = _checked_indices(source, x_m, y_m)
     ground_m = _logged_read(source, rows, cols, max_window_px, margin_px)
     return PathProfile(distance_m=distance_m, ground_m=ground_m, tx_xy_m=tx_xy_m, rx_xy_m=rx_xy_m)
@@ -178,20 +179,38 @@ def _checked_indices(
 ) -> tuple[FloatArray, FloatArray]:
     """Pixel indices of the samples, after checking the grid and the extent."""
     raster = Path(source.name).name
-    _check_grid(source, raster)
-    rows, cols = _pixel_indices(source, x_m, y_m)
-    _check_extent(rows, cols, source.height, source.width, raster)
+    check_grid(source, raster)
+    rows, cols = pixel_indices(source, x_m, y_m)
+    check_extent(rows, cols, source.height, source.width, raster)
     return rows, cols
 
 
-def _points_along(tx_xy_m: XY, rx_xy_m: XY, fraction: FloatArray) -> tuple[FloatArray, FloatArray]:
-    """Eastings and northings at fractions 0 to 1 of the way from tx to rx."""
+def points_along(tx_xy_m: XY, rx_xy_m: XY, fraction: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Eastings and northings at fractions of the way along a straight path.
+
+    Args:
+        tx_xy_m: Transmitter easting and northing in EPSG:26915, metres.
+        rx_xy_m: Receiver easting and northing in EPSG:26915, metres.
+        fraction: Fractions from 0 (tx) to 1 (rx).
+
+    Returns:
+        Eastings and northings in EPSG:26915, metres.
+    """
     x_m: FloatArray = tx_xy_m[0] + (rx_xy_m[0] - tx_xy_m[0]) * fraction
     y_m: FloatArray = tx_xy_m[1] + (rx_xy_m[1] - tx_xy_m[1]) * fraction
     return x_m, y_m
 
 
-def _check_grid(source: DatasetReader, raster: str) -> None:
+def check_grid(source: DatasetReader, raster: str) -> None:
+    """Check a raster is north-up in EPSG:26915, the only grid the samplers read.
+
+    Args:
+        source: Open raster.
+        raster: File name for the error message.
+
+    Raises:
+        ValueError: if the raster is in another CRS or rotated or south-up.
+    """
     epsg = source.crs.to_epsg() if source.crs is not None else None
     if epsg != PROFILE_CRS_EPSG:
         raise ValueError(f"{raster} is in EPSG:{epsg}, expected EPSG:26915")
@@ -200,13 +219,21 @@ def _check_grid(source: DatasetReader, raster: str) -> None:
         raise ValueError(f"{raster} is not a north-up raster")
 
 
-def _pixel_indices(
+def pixel_indices(
     source: DatasetReader, x_m: FloatArray, y_m: FloatArray
 ) -> tuple[FloatArray, FloatArray]:
     """Fractional row and column indices, where an integer is a pixel centre.
 
-    The grid is north-up (`_check_grid`), so the affine transform reduces to an
+    The grid is north-up (`check_grid`), so the affine transform reduces to an
     origin and a pixel size per axis.
+
+    Args:
+        source: Open north-up raster in EPSG:26915.
+        x_m: Eastings in EPSG:26915, metres.
+        y_m: Northings in EPSG:26915, metres.
+
+    Returns:
+        Fractional rows and columns.
     """
     transform = source.transform
     cols: FloatArray = (x_m - transform.c) / transform.a - 0.5
@@ -214,7 +241,19 @@ def _pixel_indices(
     return rows, cols
 
 
-def _check_extent(rows: FloatArray, cols: FloatArray, height: int, width: int, raster: str) -> None:
+def check_extent(rows: FloatArray, cols: FloatArray, height: int, width: int, raster: str) -> None:
+    """Check every point lies inside the raster.
+
+    Args:
+        rows: Fractional row indices, an integer being a pixel centre.
+        cols: Fractional column indices, the same convention.
+        height: Raster height in pixels.
+        width: Raster width in pixels.
+        raster: File name for the error message.
+
+    Raises:
+        OutOfExtentError: if any point lies outside the raster.
+    """
     # The outer half pixel lies inside the raster but beyond the last centre;
     # sampling there takes the edge pixel's value.
     low = -0.5 - _EXTENT_TOLERANCE_PX
@@ -224,22 +263,63 @@ def _check_extent(rows: FloatArray, cols: FloatArray, height: int, width: int, r
         raise OutOfExtentError(f"profile leaves the extent of {raster}")
 
 
+def window_slices(
+    rows: FloatArray, cols: FloatArray, max_window_px: int, margin_px: int
+) -> list[slice]:
+    """Split evenly spaced samples into runs that each fit one bounded window.
+
+    A run's window spans its samples' four neighbours plus `margin_px` on every
+    side, and stays at most `max_window_px` on a side.
+
+    Args:
+        rows: Fractional row indices of the samples, evenly spaced.
+        cols: Fractional column indices, the same convention.
+        max_window_px: Largest window side, in grid units (pixels or cells).
+        margin_px: Grid units read beyond the samples on every side.
+
+    Returns:
+        Slices into the sample arrays, in order, covering every sample.
+
+    Raises:
+        ValueError: if the window is too small for the margin.
+    """
+    span_px = max_window_px - 2 * margin_px - 3
+    if span_px < 1:
+        raise ValueError("max_window_px is too small for the margin")
+    if rows.size < 2:
+        return [slice(0, rows.size)] if rows.size else []
+    advance_px = max(abs(float(rows[1] - rows[0])), abs(float(cols[1] - cols[0])))
+    per_window = rows.size if advance_px == 0.0 else int(span_px // advance_px) + 1
+    return [
+        slice(start, min(rows.size, start + per_window))
+        for start in range(0, rows.size, per_window)
+    ]
+
+
+def refuse_ground_gap(profile: PathProfile) -> None:
+    """Refuse a draw whose ground profile reads a DEM pixel without a value.
+
+    Args:
+        profile: Ground profile in EPSG:26915.
+
+    Raises:
+        RefusedDrawError: reason "dem_gap", if any ground height is NaN
+            (ADR 0006 item 11).
+    """
+    missing = np.flatnonzero(~np.isfinite(profile.ground_m))
+    if missing.size:
+        raise RefusedDrawError("dem_gap", f"no ground height at profile index {missing[0]}")
+
+
 def _sample_in_segments(
     source: DatasetReader, rows: FloatArray, cols: FloatArray, max_window_px: int, margin_px: int
 ) -> tuple[FloatArray, int]:
     """Sample every point, reading one bounded window per run of samples."""
-    span_px = max_window_px - 2 * margin_px - 3
-    if span_px < 1:
-        raise ValueError("max_window_px is too small for the margin")
-    advance_px = max(abs(float(rows[1] - rows[0])), abs(float(cols[1] - cols[0])))
-    per_window = rows.size if advance_px == 0.0 else int(span_px // advance_px) + 1
     ground_m = np.empty(rows.size, dtype=np.float64)
-    windows = 0
-    for start in range(0, rows.size, per_window):
-        stop = min(rows.size, start + per_window)
-        ground_m[start:stop] = _sample_window(source, rows[start:stop], cols[start:stop], margin_px)
-        windows += 1
-    return ground_m, windows
+    parts = window_slices(rows, cols, max_window_px, margin_px)
+    for part in parts:
+        ground_m[part] = _sample_window(source, rows[part], cols[part], margin_px)
+    return ground_m, len(parts)
 
 
 def _sample_window(

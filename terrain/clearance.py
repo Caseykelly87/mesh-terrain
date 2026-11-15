@@ -14,7 +14,7 @@ import numpy as np
 
 from terrain.curvature import K_FACTOR, earth_bulge_m
 from terrain.errors import RefusedDrawError
-from terrain.profile import FloatArray, PathProfile
+from terrain.profile import FloatArray, PathProfile, refuse_ground_gap
 from terrain.units import wavelength_m
 
 
@@ -111,9 +111,7 @@ def require_complete_ground(profile: PathProfile) -> None:
             f"{profile.distance_m.size} samples over {profile.length_m:.2f} m, no interior sample"
         )
         raise RefusedDrawError("short_profile", detail)
-    missing = np.flatnonzero(~np.isfinite(profile.ground_m))
-    if missing.size:
-        raise RefusedDrawError("dem_gap", f"no ground height at profile index {missing[0]}")
+    refuse_ground_gap(profile)
 
 
 def los_clear(
