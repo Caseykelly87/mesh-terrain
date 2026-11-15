@@ -130,6 +130,7 @@ When a deviation is resolved or a known issue closed, its line is removed, not s
 7. When a brief or message to an agent carries Casey's decisions, paste them verbatim with his numbers, keep the lead's own instructions separate below them, and list which numbers were passed to which agent on one line after the five-line summary.
 8. Before asking Casey to approve wording that describes code behaviour, have the reviewer check it against the code and tests. Casey sees only wording that has passed that check.
 9. Every brief that ends in an irreversible step (a snapshot write, a deletion, a merge) lists its preconditions as a checklist, and the agent posts each one as met on the PR before it runs that step.
+10. After a PR merges, remove its worktree and local branch without asking Casey when all of these hold: GitHub shows the PR merged, nothing is uncommitted or unpushed, no agent is using it, and its `.env` holds no `NODE_ID_HMAC_KEY` line or the key also remains in the main checkout's `.env`. Report the removal in the merge summary. Every other deletion still needs a listed set and Casey's yes.
 
 ## Commits, pull requests and merging
 
