@@ -19,7 +19,8 @@ from ingester.allowlist import DECODER_VERSION, SCHEMA_VERSION, allowlist
 from ingester.flush import check_merged_counts, check_merged_keys
 from ingester.parquet import content_hash, read_rows, write_rows
 from ingester.readme import render_readme
-from ingester.snapshot import finish_snapshot, flush_file, hour_file, write_manifest
+from ingester.snapshot import flush_file, hour_file, write_manifest
+from pipeline.common.snapshot import finish_snapshot
 
 log = structlog.get_logger(component="ingester.finalise")
 

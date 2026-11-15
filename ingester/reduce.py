@@ -63,8 +63,9 @@ from ingester.keys import delivery_key
 from ingester.parquet import write_rows
 from ingester.settings import get_ingester_settings
 from ingester.sightings import Broker, SightingIndex
-from ingester.snapshot import flush_file, hour_file, sha256_file, start_snapshot
+from ingester.snapshot import flush_file, hour_file
 from ingester.topics import COVERAGE_ROOTS, topic_root
+from pipeline.common.snapshot import sha256_file, start_snapshot
 
 __all__ = [
     "DEFAULT_INFO",

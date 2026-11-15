@@ -53,7 +53,7 @@ import figures  # noqa: E402
 import pyarrow.parquet as pq  # noqa: E402
 from figures import RUNS, az  # noqa: E402
 
-from ingester.snapshot import read_manifest, verify_manifest  # noqa: E402
+from pipeline.common.snapshot import read_manifest, verify_manifest  # noqa: E402
 from ingester.topics import topic_class, topic_root  # noqa: E402
 
 REFERENCE_DIR = figures.SPIKE_DIR / "reference"
