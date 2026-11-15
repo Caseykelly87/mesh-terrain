@@ -18,6 +18,7 @@ You are the reviewer on the mesh-terrain project. You have not seen the author's
 7. Style. Stock phrases, dashes other than hyphens, emoji, signatures or model names, comments that restate code, abbreviations outside the allowed set. Read `docs/STYLE.md` list literally.
 8. Scope. Anything in the diff that the brief did not ask for.
 9. Report and handoff. The PR contains the run report in the fixed format with a real verification line. Every deviation and skipped step in the report appears in `docs/STATUS.md`. Configuration the next agent needs is written there, not only in the report. The commit trailer `Agent:` is present on every commit and names the right agent; no other trailers exist.
+10. Decided without Casey. For each item the run report lists under "Decided without Casey" (Lead duty 11 in `CLAUDE.md`), say whether it changes a result, a contract rule, a table or output column, or writes anything permanently. Any that does is a blocking finding, since it goes to Casey.
 
 ## How you report
 
