@@ -14,6 +14,7 @@ or the committed synthetic map snapshot.
 
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast, get_args
 
@@ -236,8 +237,9 @@ for model in ("itm", "p1812"):
     try:
         path_loss_db(model, profile, 906.875, node, node)
     except RuntimeError:
-        pass
-models = DrawModels(models=("fspl", "knife_edge"), frequency_mhz=906.875, tx=node, rx=node)
+        continue
+    raise SystemExit(f"{model} without its library or maps raised no RuntimeError")
+models =DrawModels(models=("fspl", "knife_edge"), frequency_mhz=906.875, tx=node, rx=node)
 models(DrawProfiles(ground=profile, p1812=profile, dsm_filled_pixels=None))
 assert not p1812_loaded(), f"a call without p1812 loaded {p1812_loaded()}"
 grid = np.full((121, 241), 40.0)
@@ -400,6 +402,17 @@ def test_adapter_reports_each_loss_and_the_cap_flag(monkeypatch: pytest.MonkeyPa
     assert quantities.flags == {"p1812_at_cap": True}
 
 
+def test_adapter_reports_a_draw_below_the_cap_as_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bare flat 10 km path: Lb 149.48 dB against Lbs 160.17 dB, far from the cap."""
+    stub_itm(monkeypatch)
+    draw = DrawProfiles(ground=flat(), p1812=flat(clutter_m=0.0), dsm_filled_pixels=None)
+
+    quantities = all_models()(draw)
+
+    assert quantities.values["p1812_db"] == pytest.approx(149.48, abs=0.01)
+    assert quantities.flags == {"p1812_at_cap": False}
+
+
 def test_adapter_leaves_p1812_out_without_its_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     stub_itm(monkeypatch)
     draw = DrawProfiles(ground=flat(), p1812=None, dsm_filled_pixels=None)
@@ -447,7 +460,16 @@ def test_sample_link_through_the_adapter_matches_direct_calls(
     models = all_models()
 
     with open_layers(paths["dem"], dsm=paths["dsm"], canopy=paths["canopy"]) as layers:
-        builder = FineProfileBuilder(layers=layers)
+        fine = FineProfileBuilder(layers=layers)
+
+        def builder(tx_xy_m: XY, rx_xy_m: XY) -> DrawProfiles:
+            """Clear the clutter on draws whose tx falls east of its box centre, off the cap."""
+            draw = fine(tx_xy_m, rx_xy_m)
+            if draw.p1812 is None or tx_xy_m[0] <= tx.centre_xy_m[0]:
+                return draw
+            bare = replace(draw.p1812, clutter_m=np.zeros_like(draw.p1812.distance_m))
+            return replace(draw, p1812=bare)
+
         summary = sample_link("adapter", tx, rx, builder, models, run_seed=RUN_SEED)
         pairs = draw_endpoints(tx, rx, 16, draw_seed(RUN_SEED, "adapter"))
         draws = [builder(tx_xy_m, rx_xy_m) for tx_xy_m, rx_xy_m in pairs]
@@ -475,7 +497,9 @@ def test_sample_link_through_the_adapter_matches_direct_calls(
         iqr = float(np.percentile(losses, 75) - np.percentile(losses, 25))
         assert summary.iqr(f"{model}_db") == pytest.approx(iqr, abs=1e-9)
     at_cap = [result.at_troposcatter_cap for result in direct["p1812"]]
-    assert summary.share("p1812_at_cap") == sum(bool(flag) for flag in at_cap) / 16
+    share = summary.share("p1812_at_cap")
+    assert share == sum(bool(flag) for flag in at_cap) / 16
+    assert share is not None and 0.0 < share < 1.0
 
 
 def test_a_refusal_by_one_model_drops_the_draw_for_every_model(
