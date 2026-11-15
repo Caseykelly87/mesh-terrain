@@ -3,12 +3,13 @@
 Usage: python -I spike_p1812.py <dir with N050.TXT and DN50.TXT> <data dir>
 
 Builds P1812.npz into the data dir, never into the installed package, then
-imports Py1812.P1812 three ways and repeats the 2026-11-08 flat-path call.
+imports Py1812.P1812 two ways (plain, then redirected) and repeats the 2026-11-08 flat-path call.
 """
 
 import hashlib
 import importlib
 import importlib.resources
+import importlib.util
 import sys
 import time
 from pathlib import Path
@@ -60,7 +61,7 @@ def flat_path(step_m: float):
 
 def call(P1812, step_m: float, **kwargs):
     d_km, h, r, zone = flat_path(step_m)
-    # St. Louis, path running east; 10 km is 0.11497 deg of longitude at 38.63 N.
+    # St. Louis, path running east: 10 km of longitude at 38.63 N on a sphere.
     lat, lon_t = 38.63, -90.25
     lon_r = lon_t + 10.0 / (111.32 * np.cos(np.radians(lat)))
     return P1812.bt_loss(0.915, 50, d_km, h, r, zone, 2.0, 2.0, 2,

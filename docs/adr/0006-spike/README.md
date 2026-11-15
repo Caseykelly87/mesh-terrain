@@ -19,7 +19,7 @@ Only the two public downloads the brief allowed, each into its own new, empty fo
 | `P1812.npz` built from the two files with numpy 2.5.4, 467 078 bytes | `748878ea23c1b45b51a2de0454f44fac02076c7eface668c15f4d3e0809a13f3` |
 | Py1812 archive `.../archive/6c9061dd022e93c84169059a016643926ce89964.tar.gz` | `03d7c5bd2bdb831d009266b4a17a2c721f63db4f817f60af47bb82fdc4268469` |
 
-The zip also holds `ReadMe.doc`, `LAT.TXT` and `LON.TXT`, which P.1812 does not read. Building the npz twice gave the same bytes, so the npz checksum can go in the map snapshot's manifest beside the source files.
+The zip also holds `ReadMe.doc`, `LAT.TXT` and `LON.TXT`, which P.1812 does not read. Building the npz twice gave the same bytes. Under the recommended option 2.2 no npz is built from the maps at all; the snapshot keeps the zip and the two text files.
 
 ## Commands
 
@@ -39,11 +39,14 @@ unzip -q $S/itu-zip/R-REC-P.1812-8-202509-I.zip N050.TXT DN50.TXT
 
 cd $S/scripts
 $S/p1812-env/.venv/Scripts/python.exe -I spike_p1812.py $S/itu-extracted $S/p1812-data
+$S/p1812-env/.venv/Scripts/python.exe -I spike_placeholder.py $S/itu-extracted $S/placeholder-run
 ```
 
-`spike_p1812.py` (this folder) builds `P1812.npz` into `$S/p1812-data` with the same `np.loadtxt` and `np.savez` calls as upstream's `initiate_digital_maps.py`, then imports `Py1812.P1812` with `importlib.resources.files` patched for the length of the import (ADR 0006, option 2.2), and repeats the flat-path call of `docs/measurements-2026-11-08.md`: 10 km, 150 m above sea level, 0.915 GHz, p 50, 2 m antennas, vertical, zone 4, from 38.63 N 90.25 W toward the east.
+## Run 1: maps in a data folder (`spike_p1812.py`)
 
-## Output
+`spike_p1812.py` (this folder) builds `P1812.npz` into `$S/p1812-data` with the same `np.loadtxt` and `np.savez` calls as upstream's `initiate_digital_maps.py`, then imports `Py1812.P1812` with `importlib.resources.files` patched for the length of the import, and repeats the flat-path call of `docs/measurements-2026-11-08.md`: 10 km, 150 m above sea level, 0.915 GHz, p 50, 2 m antennas, vertical, zone 4, from 38.63 N 90.25 W toward the east.
+
+Output of the second run, after the review fixes to the script's docstring and imports:
 
 ```
 package dir: <scratch>\p1812-env\.venv\Lib\site-packages\Py1812
@@ -57,8 +60,8 @@ maps loaded: ['DN50', 'N050'] shapes [(121, 241), (121, 241)]
 flat 10 km, 10 m step, maps:      Lb 149.48 dB  Ep 49.11 dBuV/m
 path centre DN 39.126 N-units/km, N0 324.511 N-units, k50 1.3319
 same call with DN, N0 passed:     Lb 149.48 dB
-timing 10.0 m step (1001 points): Lb 149.48 dB, 2.1 ms a call
-timing  1.0 m step (10001 points): Lb 149.48 dB, 15.7 ms a call
+timing 10.0 m step (1001 points): Lb 149.48 dB, 2.9 ms a call
+timing  1.0 m step (10001 points): Lb 149.48 dB, 18.3 ms a call
 npz in package after: False
 package files: ['P1812.py', '__init__.py', '__pycache__', 'initiate_digital_maps.py', 'maps']
 ```
@@ -69,12 +72,27 @@ What it shows:
 - With the redirect, the maps load from a folder outside site-packages and the package folder stays as installed.
 - 149.48 dB and 49.11 dBuV/m match the 2026-11-08 measurement. Passing the path-centre DN and N0 explicitly gives the same loss, so those two numbers are the only thing the maps contribute to a call.
 - DN 39.126 gives k50 = 157 / (157 - DN) = 1.332, P.1812's median effective earth radius factor at St. Louis.
+- The first run printed the same lines except the timings, 2.1 ms and 15.7 ms, so a call takes 2 to 3 ms at 1 001 points and 16 to 18 ms at 10 001 on this machine.
+
+## Run 2: placeholder import, DN and N0 passed (`spike_placeholder.py`)
+
+This is the import that option 2.2 recommends. The script writes a placeholder `P1812.npz` holding two 1 by 1 grids of NaN, no ITU data. It refuses to go on if `Py1812.P1812` is already imported or the installed package holds an npz, then imports Py1812 with the map load pointed at the placeholder. It reads the two ITU text files with `np.loadtxt`, takes the path centre from Py1812's `great_circle_path` and interpolates DN and N0 with Py1812's `interp2`. Finally it makes the flat-path call with them, and once more without them.
+
+```
+placeholder npz: 518 bytes
+import with placeholder: ok, DN50 shape (1, 1)
+path centre 38.63001 N -90.19244 E: DN 39.126, N0 324.511
+DN and N0 passed: Lb 149.48 dB  Ep 49.11 dBuV/m
+DN and N0 omitted: IndexError: index 34 is out of bounds for axis 0 with size 1
+```
+
+The placeholder satisfies the import. The real maps enter only through the two numbers passed on each call, and a call that forgets them fails instead of returning a number built on the placeholder. The installed package folder still held no npz afterwards.
 
 ## Install form checks
 
 - Git source without git: with `git` removed from `PATH` and an empty uv cache, the `git+https` install fails with `Git executable not found. Ensure that Git is installed and available.` The local `mesh-terrain-dagster-webserver` image has no `git` (`command -v git` empty), so option 1.1 needs git added to the image.
 - Archive source: `uv pip install "py1812 @ https://github.com/eeveetza/Py1812/archive/6c9061dd022e93c84169059a016643926ce89964.tar.gz"` installs the same `py1812==8.0`. In a scratch project, `uv lock` records it as `source = { url = "..." }` with `sdist = { hash = "sha256:03d7c5bd..." }`, the hash of a direct `curl` download of the same URL.
-- Py1812's `pyproject.toml` builds with `flit_core >=3.2,<4` and depends on numpy only. The archive also carries upstream's `tests/validateP1812.py` and ITU validation profiles under `tests/validation_profiles/`; they were not run here.
+- Py1812's `pyproject.toml` builds with `flit_core >=3.2,<4` and depends on numpy only. The archive also carries upstream's `tests/validateP1812.py` and ITU validation profiles under `tests/validation_profiles/`; they were not run here. `validateP1812.py` passes each profile's own DN and N0 to `bt_loss` (lines 247 to 248), so the profiles need no maps. They come from ITU-R Study Group 3's measurement database, and their licence is unchecked.
 
 ## Not done
 
