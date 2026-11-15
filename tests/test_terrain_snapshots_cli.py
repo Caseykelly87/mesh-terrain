@@ -21,6 +21,9 @@ def calls(
             return tmp_path / "done"
 
         monkeypatch.setattr(cli, name, fake)
+    # configure_logging caches loggers process-wide, which would hide later
+    # tests' log lines from structlog's capture_logs.
+    monkeypatch.setattr(cli, "configure_logging", lambda log_format: None)
     return seen
 
 
