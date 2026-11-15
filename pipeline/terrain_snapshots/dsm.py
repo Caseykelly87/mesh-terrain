@@ -7,7 +7,8 @@ the manifest), the EPT URL and the bounds. Recipe A1 is in dsm_recipe, the
 thin-output guard in dsm_guard.
 
 Before anything is written the command refuses when the OpenStreetMap
-snapshot it reads water from is missing or differs from its manifest, when the
+snapshot it reads water from is missing, differs from its manifest or has no
+raw.snapshot row with that manifest's sha256 (one database read), when the
 PDAL image reports another version than the one pinned, or when the scratch
 folder lies inside the snapshots folder. Window rasters go to
 `<scratch>/<snapshot id>/`, outside the snapshot; only the joined DSM, the
@@ -75,6 +76,7 @@ from pipeline.terrain_snapshots.dsm_recipe import (
     pipeline_stages,
     split,
 )
+from pipeline.terrain_snapshots.registry import lookup_registered
 
 PDAL_VERSION = "2.8.4 (git-version: 156082)"
 PDAL_IMAGE = (
@@ -89,6 +91,8 @@ RECIPE = {
     "where": WHERE,
 }
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
+Registered = Callable[[str], str | None]
+"""The manifest_sha256 raw.snapshot holds for a snapshot id, or None without a row."""
 
 
 class OsmSnapshotMissingError(SnapshotError):
@@ -120,11 +124,21 @@ def make_runner(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
-def osm_water(root: Path, osm_snapshot_id: str) -> tuple[gpd.GeoDataFrame, dict[str, str]]:
-    """The water polygons of a finished, verified OSM snapshot, in EPSG:26915.
+def osm_water(
+    root: Path, osm_snapshot_id: str, registered: Registered
+) -> tuple[gpd.GeoDataFrame, dict[str, str]]:
+    """The water polygons of a finished, verified and registered OSM snapshot, in EPSG:26915.
+
+    Args:
+        root: The snapshots folder.
+        osm_snapshot_id: The OSM snapshot's id.
+        registered: Gives the manifest_sha256 raw.snapshot holds for an id,
+            or None; registry.lookup_registered in production.
 
     Raises:
-        OsmSnapshotMissingError: naming the command that writes the snapshot.
+        OsmSnapshotMissingError: when the folder is missing, unfinished or
+            changed, or raw.snapshot has no row for it with the folder's
+            manifest sha256; the message names the command that fixes it.
     """
     try:
         folder = snapshot_folder(root, osm_snapshot_id)
@@ -135,8 +149,20 @@ def osm_water(root: Path, osm_snapshot_id: str) -> tuple[gpd.GeoDataFrame, dict[
             f"matching its manifest ({err}); write it first with "
             "`python -m pipeline.terrain_snapshots osm`"
         ) from err
+    manifest_sha256 = sha256_file(folder / MANIFEST_NAME)
+    row = registered(osm_snapshot_id)
+    if row is None:
+        raise OsmSnapshotMissingError(
+            f"the OSM snapshot {osm_snapshot_id} is not registered in raw.snapshot; run "
+            f"`python -m pipeline.terrain_snapshots register {osm_snapshot_id}` first"
+        )
+    if row != manifest_sha256:
+        raise OsmSnapshotMissingError(
+            f"raw.snapshot holds manifest_sha256 {row} for {osm_snapshot_id}, but {folder} "
+            f"has {manifest_sha256}"
+        )
     water = gpd.read_parquet(folder / "water.parquet").to_crs(CRS)
-    return water, {"id": osm_snapshot_id, "manifest_sha256": sha256_file(folder / MANIFEST_NAME)}
+    return water, {"id": osm_snapshot_id, "manifest_sha256": manifest_sha256}
 
 
 def check_pdal_version(runner: Runner) -> str:
@@ -331,6 +357,7 @@ def build_dsm(
     source: DsmSource = X72Y429_DSM,
     runner: Runner = make_runner,
     today: date | None = None,
+    registered: Registered = lookup_registered,
 ) -> Path:
     """Build the first-return DSM over a grid with PDAL and write it as a finished snapshot.
 
@@ -341,16 +368,19 @@ def build_dsm(
         source: The EPT, grid and windows; x72y429 by default.
         runner: Runs a make target; make_runner in production.
         today: The build date, the snapshot's capture_date; the UTC date by default.
+        registered: Reads the OSM snapshot's raw.snapshot row; one database
+            read through the pipeline settings by default.
 
     Raises:
-        OsmSnapshotMissingError: before anything runs.
+        OsmSnapshotMissingError: before anything runs, when the OSM snapshot
+            is missing, changed or not registered.
         ThinOutputError: when a window or the build holds too few points over land.
         SnapshotError: for another PDAL version, an existing snapshot or a
             failed PDAL run.
     """
     with timed("dsm_snapshot", snapshot_id=source.snapshot_id) as details:
         refuse_existing(root, source.snapshot_id)
-        water, osm = osm_water(root, osm_snapshot_id)
+        water, osm = osm_water(root, osm_snapshot_id, registered)
         version = check_pdal_version(runner)
         workdir = scratch_folder(root, scratch, source.snapshot_id)
 
