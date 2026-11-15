@@ -1,5 +1,6 @@
 """The command line: each subcommand reaches its builder with the parsed arguments."""
 
+from contextlib import nullcontext
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -51,3 +52,14 @@ def test_a_missing_argument_is_a_usage_error(calls: list[Any]) -> None:
         cli.main(["dsm", "--root", "x"])
     assert exit_info.value.code == 2
     assert calls == []
+
+
+def test_register_opens_the_warehouse_and_registers_one_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(cli, "configure_logging", lambda log_format: None)
+    monkeypatch.setattr(cli, "connect", lambda: nullcontext("conn"))
+    monkeypatch.setattr(cli, "register_snapshot", lambda *args: seen.append(args) or 1)
+    assert cli.main(["register", "canopy-v2-0231113110", "--root", str(tmp_path)]) == 0
+    assert seen == [("conn", tmp_path, "canopy-v2-0231113110")]
