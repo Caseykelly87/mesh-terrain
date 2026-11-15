@@ -239,7 +239,7 @@ for model in ("itm", "p1812"):
     except RuntimeError:
         continue
     raise SystemExit(f"{model} without its library or maps raised no RuntimeError")
-models =DrawModels(models=("fspl", "knife_edge"), frequency_mhz=906.875, tx=node, rx=node)
+models = DrawModels(models=("fspl", "knife_edge"), frequency_mhz=906.875, tx=node, rx=node)
 models(DrawProfiles(ground=profile, p1812=profile, dsm_filled_pixels=None))
 assert not p1812_loaded(), f"a call without p1812 loaded {p1812_loaded()}"
 grid = np.full((121, 241), 40.0)
