@@ -176,7 +176,7 @@ def logged_call(request: pytest.FixtureRequest) -> tuple[BtLossInputs, float, st
     return inputs, loss_db, log_text
 
 
-def test_lbs_is_pythons_troposcatter_loss(logged_call: tuple[BtLossInputs, float, str]) -> None:
+def test_lbs_is_py1812s_troposcatter_loss(logged_call: tuple[BtLossInputs, float, str]) -> None:
     inputs, _, log_text = logged_call
     lbs_db = troposcatter_loss_from_log(log_text)
     assert abs(lbs_db - direct_tl_tropo_db(inputs)) <= TOLERANCE_DB
