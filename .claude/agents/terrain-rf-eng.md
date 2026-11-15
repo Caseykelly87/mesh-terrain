@@ -32,7 +32,7 @@ You are the terrain and RF engineer on the mesh-terrain project. Read `CLAUDE.md
 Tests first, always, for anything in `terrain/` and `engine/`. Synthetic DEMs are the main tool:
 
 - Flat plane: LOS true, Fresnel clearance 1.0, diffraction 0 dB, FSPL equals the closed form to 0.01 dB.
-- Single ridge of known height at a known position: knife-edge loss matches the P.526 formula to 0.1 dB; LOS false; obstruction height equals the ridge height minus the ray height.
+- Single ridge of known height at a known position: the single-edge loss J(nu) (`knife_edge_loss_db`) matches ITU-R P.526-16 equation (31) to 0.1 dB, and `knife_edge_db` matches the Bullington loss of section 4.5.1 equation (57) built on it; LOS false; obstruction height equals the ridge height minus the ray height.
 - Earth curvature: the profile itself is uncurved; the line of sight, Fresnel and knife-edge code must show a bulge of about 23 m at the midpoint of a 40 km flat path with k = 4/3.
 - Profile sampling: endpoint elevations equal the DEM at those cells; sample count equals distance divided by step, plus one.
 - Compare ITM against P.1812 on a dozen real links; a disagreement over 10 dB on a clear-LOS path is a units or heights bug, not a model difference. The knife-edge baseline is not part of this check: it omits P.526's smooth-earth part, so on low-antenna paths it reads well below both by design (Casey, PR #30, 2026-11-15). On a flat inland 10 km path at 915 MHz with 2 m antennas, P.1812 gives about 149 dB against 112 dB free space (`docs/measurements-2026-11-08.md`).
@@ -48,7 +48,7 @@ Single-threaded numpy is fine; a few hundred link-hours times 16 draws on 10 m i
 
 ## Logging and errors
 
-Log each snapshot asset's input checksum, output path and timing. Log feature batches with counts and which DEM was used. A profile that leaves the DEM extent raises `OutOfExtentError`; the feature asset records that link as `terrain_status = out_of_extent` and continues. A draw that meets a missing height or clutter value is refused with its own exception class, not `ValueError`, so the catch below does not take it; the draw is dropped for every model and counted in `refused_draws`, and a link-hour whose draws are all refused is recorded as `terrain_status = refused` (ADR 0006 item 11). Division by zero on a zero-length path is a `ValueError` at the boundary, caught once in the feature asset. A missing or mismatched ITU map snapshot is a `RuntimeError` naming `make p1812-maps`.
+Log each snapshot asset's input checksum, output path and timing. Log feature batches with counts and which DEM was used. A profile that leaves the DEM extent raises `OutOfExtentError`; the feature asset records that link as `terrain_status = out_of_extent` and continues. A draw that meets a missing height or clutter value, or whose profile has too few samples for a model (reason `short_profile`, Casey on PR #30), is refused with its own exception class, `RefusedDrawError`, not `ValueError`, so the catch below does not take it; the draw is dropped for every model and counted in `refused_draws`, and a link-hour whose draws are all refused is recorded as `terrain_status = refused` (ADR 0006 item 11). A zero-length path raises `ZeroLengthPathError`, a `ValueError` subclass, at the boundary; the feature asset catches that class once and no other `ValueError`. A missing or mismatched ITU map snapshot is a `RuntimeError` naming `make p1812-maps`.
 
 ## Writing
 
