@@ -3,15 +3,25 @@
 The DSM is the first-return lidar surface: roof tops and tree tops. Recipe A1:
 
 - First returns only, `ReturnNumber == 1`, which includes single returns.
-- Classes 7 (low noise) and 18 (high noise) and withheld points dropped;
-  ground, water, ignored ground and bridge decks kept, since a bridge deck is
-  a real obstacle.
+- Noise classes 7 and 18 dropped; ground, water, ignored ground and bridge
+  decks kept, since a bridge deck is a real obstacle.
 - The highest kept point in each 1 m cell (writers.gdal `binmode`, so a cell
   sees only the points inside it), on the 1 m DEM tile's grid.
-- One-cell gaps between scan lines filled from the neighbouring cells
-  (`window_size` 1); larger gaps such as water stay empty. Casey approved the
-  reading that "clutter 0 where the DSM has no value" (ADR 0006 decision 6) is
-  for water, so filled scan-line gaps do not become 0 m holes in roofs.
+- Gaps between scan lines filled (writers.gdal `window_size` 1): a cell is
+  filled when one of the eight cells around it has a value.
+  Casey approved the reading that "clutter 0 where the DSM has no value"
+  (ADR 0006 decision 6) is for water, so filled scan-line gaps do not become
+  0 m holes in roofs (PR #34 comment 6901088171).
+
+Decided without Casey: the `Withheld == 0` term. The EPT schema has no
+`Withheld` dimension by name; it has `ClassFlags`, the LAS 1.4 flag byte. PDAL
+2.8.4 replaces `ClassFlags` with Synthetic, KeyPoint, Withheld and Overlap
+(io/private/ept/EptInfo.cpp, addFlags), reads each laszip tile with LasReader
+(io/private/ept/TileContents.cpp, readLaszip), and LasReader sets Withheld
+from the withheld bit, `(flags >> 2) & 0x01` (io/LasReader.cpp). No point in
+three 200 m probe boxes of x72y429 was withheld, and a 200 by 100 m box gave
+the same 101 626 first returns with and without the term, so it changes
+nothing here and drops any point the vendor flagged withheld.
 
 Every number is EPSG:26915 metres. The EPT is stored in EPSG:3857 and
 reprojected to EPSG:26915 with PROJ's network off (Casey, PR #34, decision A),
@@ -35,21 +45,34 @@ CRS = "EPSG:26915"
 
 @dataclass(frozen=True)
 class Grid:
-    """A north-up grid in EPSG:26915: south-west corner, size in cells, cell size in metres."""
+    """A north-up EPSG:26915 grid: south-west corner and cell size in metres, size in cells."""
 
-    west: float
-    south: float
+    west_m: float
+    south_m: float
     width: int
     height: int
-    resolution: float = 1.0
+    resolution_m: float = 1.0
 
     @property
-    def north(self) -> float:
-        return self.south + self.height * self.resolution
+    def north_m(self) -> float:
+        return self.south_m + self.height * self.resolution_m
 
     @property
-    def east(self) -> float:
-        return self.west + self.width * self.resolution
+    def east_m(self) -> float:
+        return self.west_m + self.width * self.resolution_m
+
+
+def grid_from_bounds(bounds: tuple[float, float, float, float], resolution_m: float) -> Grid:
+    """The grid whose cells tile west, south, east, north exactly, EPSG:26915 metres.
+
+    Raises:
+        ValueError: when the extent is not a whole number of cells.
+    """
+    west, south, east, north = bounds
+    width, height = (east - west) / resolution_m, (north - south) / resolution_m
+    if not (width.is_integer() and height.is_integer()):
+        raise ValueError(f"{bounds} is not a whole number of {resolution_m} m cells")
+    return Grid(west, south, int(width), int(height), resolution_m)
 
 
 @dataclass(frozen=True)
@@ -64,12 +87,12 @@ class Window:
 
     def bounds(self, grid: Grid) -> tuple[float, float, float, float]:
         """West, south, east, north of the window, EPSG:26915 metres."""
-        west = grid.west + self.col_off * grid.resolution
-        north = grid.north - self.row_off * grid.resolution
+        west = grid.west_m + self.col_off * grid.resolution_m
+        north = grid.north_m - self.row_off * grid.resolution_m
         return (
             west,
-            north - self.height * grid.resolution,
-            west + self.width * grid.resolution,
+            north - self.height * grid.resolution_m,
+            west + self.width * grid.resolution_m,
             north,
         )
 
@@ -98,7 +121,7 @@ def pipeline_stages(grid: Grid, window: Window, ept_url: str) -> list[dict[str, 
     `bounds` of writers.gdal (a 100 m box at 1 m gives 101 cells).
     """
     west, south, east, north = window.bounds(grid)
-    halo = HALO_CELLS * grid.resolution
+    halo = HALO_CELLS * grid.resolution_m
     x0, y0, x1, y1 = west - halo, south - halo, east + halo, north + halo
     return [
         {
@@ -113,7 +136,7 @@ def pipeline_stages(grid: Grid, window: Window, ept_url: str) -> list[dict[str, 
             "where": WHERE,
             "binmode": True,
             "output_type": "max,count",
-            "resolution": grid.resolution,
+            "resolution": grid.resolution_m,
             "origin_x": x0,
             "origin_y": y0,
             "width": window.width + 2 * HALO_CELLS,

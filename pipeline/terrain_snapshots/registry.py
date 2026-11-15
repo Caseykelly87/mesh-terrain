@@ -84,5 +84,7 @@ def registered_manifest_sha256(conn: psycopg.Connection, snapshot_id: str) -> st
 
 def lookup_registered(snapshot_id: str) -> str | None:
     """registered_manifest_sha256 over a connection of its own, from the pipeline settings."""
-    with connect() as conn:
-        return registered_manifest_sha256(conn, snapshot_id)
+    with timed("registry_lookup", snapshot_id=snapshot_id) as details, connect() as conn:
+        found = registered_manifest_sha256(conn, snapshot_id)
+        details["registered"] = found is not None
+    return found

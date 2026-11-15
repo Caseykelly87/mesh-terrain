@@ -54,6 +54,7 @@ from pipeline.common.snapshot import (
 )
 from pipeline.terrain_snapshots.common import build_snapshot, timed, today_utc, write_readme
 from pipeline.terrain_snapshots.dem import HORIZONTAL_DATUM, LICENCE, VERTICAL_DATUM
+from pipeline.terrain_snapshots.dem import X72Y429 as DEM_X72Y429
 from pipeline.terrain_snapshots.dsm_guard import (
     BASIS,
     NOMINAL_FIRST_RETURNS_PER_M2,
@@ -73,6 +74,7 @@ from pipeline.terrain_snapshots.dsm_recipe import (
     WHERE,
     Grid,
     Window,
+    grid_from_bounds,
     pipeline_stages,
     split,
 )
@@ -85,9 +87,12 @@ PDAL_IMAGE = (
 RECIPE = {
     "name": "A1 (Casey, PR #34, unit 5b)",
     "returns": "first returns only, ReturnNumber 1, single returns included",
-    "dropped": "classes 7 (low noise) and 18 (high noise), withheld points",
+    "dropped": "noise classes 7 and 18",
     "statistic": "highest point per 1 m cell, writers.gdal binmode, on the DEM tile's grid",
-    "gap_fill": "one-cell gaps filled from neighbouring cells, writers.gdal window_size 1",
+    "gap_fill": "a cell is filled when one of the eight cells around it has a value "
+    "(writers.gdal window_size 1)",
+    "withheld": "Withheld == 0, decided without Casey: PDAL's Withheld is the ClassFlags "
+    "withheld bit; no probed point was withheld",
     "where": WHERE,
 }
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
@@ -112,7 +117,7 @@ class DsmSource:
 X72Y429_DSM = DsmSource(
     snapshot_id="ept-mo-stlouis-2017-x72y429",
     ept_url=EPT_URL,
-    grid=Grid(west=719_994.0, south=4_279_994.0, width=10_012, height=10_012),
+    grid=grid_from_bounds(DEM_X72Y429.bounds, DEM_X72Y429.resolution_m),
     windows_per_side=4,
 )
 
@@ -171,9 +176,11 @@ def check_pdal_version(runner: Runner) -> str:
     Raises:
         SnapshotError: naming the version found.
     """
-    done = runner(["check-pdal"])
-    found = re.search(r"pdal (\d+\.\d+\.\d+ \(git-version: \w+\))", done.stdout)
-    reported = found.group(1) if found else done.stdout.strip()[:200]
+    with timed("check_pdal") as details:
+        done = runner(["check-pdal"])
+        found = re.search(r"pdal (\d+\.\d+\.\d+ \(git-version: \w+\))", done.stdout)
+        reported = found.group(1) if found else done.stdout.strip()[:200]
+        details.update(exit_status=done.returncode, reported=reported)
     if done.returncode != 0 or reported != PDAL_VERSION:
         raise SnapshotError(f"make check-pdal reports {reported!r}, not {PDAL_VERSION!r}")
     return reported
@@ -197,16 +204,20 @@ def refuse_existing(root: Path, snapshot_id: str) -> None:
         )
 
 
-def scratch_folder(root: Path, scratch: Path, snapshot_id: str) -> Path:
+def scratch_folder(
+    root: Path, scratch: Path, snapshot_id: str, *, checkout: Path = REPO_ROOT
+) -> Path:
     """Create `<scratch>/<snapshot id>/` for the window rasters.
 
     Raises:
-        SnapshotError: when scratch is or lies inside the snapshots folder, or
-            the run folder exists from an earlier run.
+        SnapshotError: when scratch overlaps the snapshots folder, lies in the
+            checkout, or the run folder exists from an earlier run.
     """
-    snapshots, work = root.resolve(), scratch.resolve()
+    snapshots, work, repo = root.resolve(), scratch.resolve(), checkout.resolve()
     if work == snapshots or snapshots in work.parents or work in snapshots.parents:
         raise SnapshotError(f"scratch {scratch} overlaps the snapshots folder {root}")
+    if work == repo or repo in work.parents or work in repo.parents:
+        raise SnapshotError(f"scratch {scratch} overlaps the checkout {checkout}")
     run = scratch / snapshot_id
     if run.exists():
         raise SnapshotError(f"scratch {run} exists from an earlier run; Casey decides what to do")
@@ -257,7 +268,7 @@ def read_window_output(path: Path, window: Window) -> tuple[FloatGrid, FloatGrid
 
 
 @dataclass(frozen=True)
-class _Context:
+class _Build:
     source: DsmSource
     partial: Path
     workdir: Path
@@ -265,7 +276,7 @@ class _Context:
     runner: Runner
 
 
-def build_window(ctx: _Context, window: Window) -> tuple[dict[str, Any], FloatGrid]:
+def build_window(build: _Build, window: Window) -> tuple[dict[str, Any], FloatGrid]:
     """Build and guard one window.
 
     Returns:
@@ -276,24 +287,26 @@ def build_window(ctx: _Context, window: Window) -> tuple[dict[str, Any], FloatGr
         ThinOutputError: from the guard.
         SnapshotError: when make pdal fails or its output is malformed.
     """
-    grid = ctx.source.grid
+    grid = build.source.grid
     west, south, east, north = window.bounds(grid)
-    transform = from_origin(west, north, grid.resolution, grid.resolution)
-    nearby = ctx.water.cx[west:east, south:north]
-    wet = water_mask(nearby, transform, (window.height, window.width))
-    cell_m2 = grid.resolution * grid.resolution
-    land_m2, water_m2 = float((~wet).sum()) * cell_m2, float(wet.sum()) * cell_m2
+    transform = from_origin(west, north, grid.resolution_m, grid.resolution_m)
+    nearby = build.water.cx[west:east, south:north]
+    is_water = water_mask(nearby, transform, (window.height, window.width))
+    cell_m2 = grid.resolution_m * grid.resolution_m
+    land_m2, water_m2 = float((~is_water).sum()) * cell_m2, float(is_water.sum()) * cell_m2
     record: dict[str, Any] = {"name": window.name, "bounds": [west, south, east, north]}
     if land_m2 == 0.0:
         counted = check_window(window.name, land_m2, water_m2, 0)
         heights = np.full((window.height, window.width), NODATA, dtype=np.float32)
         record |= {"pipeline": None, "pipeline_sha256": None}
     else:
-        pipeline = _write_pipeline(ctx.partial, ctx.source, window)
-        _run_pdal(ctx.runner, pipeline, ctx.workdir)
-        heights, counts = read_window_output(ctx.workdir / f"{window.name}.tif", window)
-        counted = check_window(window.name, land_m2, water_m2, land_points(counts, wet, NODATA))
-        relative = pipeline.relative_to(ctx.partial).as_posix()
+        pipeline = _write_pipeline(build.partial, build.source, window)
+        _run_pdal(build.runner, pipeline, build.workdir)
+        heights, counts = read_window_output(build.workdir / f"{window.name}.tif", window)
+        counted = check_window(
+            window.name, land_m2, water_m2, land_points(counts, is_water, NODATA)
+        )
+        relative = pipeline.relative_to(build.partial).as_posix()
         record |= {"pipeline": relative, "pipeline_sha256": sha256_file(pipeline)}
     record |= {k: v for k, v in asdict(counted).items() if k != "name"}
     record["nodata_cells"] = int((heights == NODATA).sum())
@@ -316,31 +329,31 @@ def _mosaic(path: Path, grid: Grid) -> Iterator[Any]:
         tiled=True,
         blockxsize=256,
         blockysize=256,
-        transform=from_origin(grid.west, grid.north, grid.resolution, grid.resolution),
+        transform=from_origin(grid.west_m, grid.north_m, grid.resolution_m, grid.resolution_m),
         compress="DEFLATE",
-    ) as dst:
-        yield dst
+    ) as writer:
+        yield writer
 
 
-def build_windows(ctx: _Context) -> list[dict[str, Any]]:
+def build_windows(build: _Build) -> list[dict[str, Any]]:
     """Build every window into a scratch mosaic, then copy it as the snapshot's COG."""
-    mosaic = ctx.workdir / "dsm_full.tif"
+    mosaic = build.workdir / "dsm_full.tif"
     records = []
-    with _mosaic(mosaic, ctx.source.grid) as dst:
-        for window in split(ctx.source.grid, ctx.source.windows_per_side):
+    with _mosaic(mosaic, build.source.grid) as mosaic_file:
+        for window in split(build.source.grid, build.source.windows_per_side):
             with timed("dsm_window", window=window.name) as details:
-                record, heights = build_window(ctx, window)
+                record, heights = build_window(build, window)
                 details.update(
                     status=record["status"],
                     points=record["points"],
                     land_area_m2=record["land_area_m2"],
                 )
             target = rio_windows.Window(window.col_off, window.row_off, window.width, window.height)
-            dst.write(heights, 1, window=target)
+            mosaic_file.write(heights, 1, window=target)
             records.append(record)
     rasterio.shutil.copy(
         mosaic,
-        ctx.partial / "dsm.tif",
+        build.partial / "dsm.tif",
         driver="COG",
         COMPRESS="DEFLATE",
         PREDICTOR="YES",
@@ -385,7 +398,7 @@ def build_dsm(
         workdir = scratch_folder(root, scratch, source.snapshot_id)
 
         def fill(partial: Path) -> dict[str, object]:
-            records = build_windows(_Context(source, partial, workdir, water, runner))
+            records = build_windows(_Build(source, partial, workdir, water, runner))
             totals = check_build([_count(record) for record in records])
             totals["nodata_cells"] = sum(record["nodata_cells"] for record in records)
             details.update(totals)
@@ -423,7 +436,7 @@ def _manifest_fields(
     grid = source.grid
     return {
         "ept_url": source.ept_url,
-        "bounds_epsg26915": [grid.west, grid.south, grid.east, grid.north],
+        "bounds_epsg26915": [grid.west_m, grid.south_m, grid.east_m, grid.north_m],
         "grid": asdict(grid),
         "crs": CRS,
         "horizontal_datum": HORIZONTAL_DATUM,
@@ -453,8 +466,9 @@ def _write_dsm_readme(partial: Path, source: DsmSource, osm_id: str) -> None:
         f"""
 First-return digital surface model (roof and tree tops, leaf-off lidar) at 1 m on the DEM
 tile's grid, EPSG:26915, built with PDAL {PDAL_VERSION} from {source.ept_url} over the bounds in
-the manifest. Recipe A1: first returns, classes 7 and 18 and withheld points dropped, highest
-point per cell, one-cell gaps filled. No point cloud is kept. `pipelines/` holds each window's
+the manifest. Recipe A1: first returns, noise classes 7 and 18 dropped, highest point per
+cell, and a cell is filled when one of the eight cells around it has a value. Withheld points
+are also dropped (decided without Casey). No point cloud is kept. `pipelines/` holds each window's
 PDAL pipeline. Water from {osm_id} sets each window's land area for the thin-output guard;
 all-water windows are nodata. Public domain (USGS 3DEP).
 
