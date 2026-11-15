@@ -220,7 +220,7 @@ Full detail in `docs/STYLE.md`.
 
 - `make up` / `make down`: Compose stack.
 - `make check`: ruff, mypy, pytest, dbt build against the local stack.
-- `make reproduce`: rebuild every asset from the registered snapshots; run twice, it gives identical content hashes for every artifact (`snp_01`).
+- `make reproduce`: a stub today, which prints that there is nothing to rebuild yet. A unit queued after the engine run makes it rebuild raw and run dbt build from the registered snapshots alone, with a test that a rebuild gives the same row counts and content hashes (`snp_01`, `ing_02`).
 - `make capture` and `make engine`: start one capture run or one engine run from parameters; neither is ever scheduled.
 - `make fmt`: ruff format.
 
