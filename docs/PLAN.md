@@ -94,7 +94,7 @@ Exit: `docker compose up` brings up PostGIS, MinIO, Dagster; CI green; ITM spike
 
 ### Phase 1: Snapshot and reduction
 
-Exit: the decoder passes its fixture tests; snapshot `meshtastic-capture-2026-10-22` exists with README and manifest; the reproduction gate passes (every ADR 0003 link figure, including 560 against 177 per broker, reproduces from the pseudonymised Parquet) and Casey has confirmed it; the real-id archive is deleted after his yes; `raw.mqtt_message` and the count tables are loaded; the on-demand capture command is documented with the 2026-10-22 run as the worked example.
+Exit: the decoder passes its fixture tests; snapshot `meshtastic-capture-2026-10-22` exists with README and manifest; the reproduction gate passes (every ADR 0003 link figure reproduces from the pseudonymised Parquet, including 469 against 177 under the design rules of PR #15; the spike's 560 is kept in ADR 0003 as the figure before those rules) and Casey has confirmed it; the real-id archive is deleted after his yes; `raw.mqtt_message` and the count tables are loaded; the on-demand capture command is documented with the 2026-10-22 run as the worked example.
 
 Tasks (ingest-eng): `raw` tables and loader (`COPY`, `ON CONFLICT DO NOTHING` on the three keys); decoder test-first on synthetic fixtures under `tests/fixtures/mqtt/` (none exist; built, never recorded); batch reduction of the gzipped public archive and the in-window MeshSTL capture into the snapshot folder, Parquet by hour; the gate; `docs/adr/0003-spike/capture.py` brought to the ADR 0005 design in place, not moved, as the capture command (broker, topic list, END_AT, MAX_RAW_BYTES, snapshot id; allowlist and pseudonymisation in memory; manifest at exit; no restart, no marker, no schedule); README.
 
