@@ -130,7 +130,7 @@ When a deviation is resolved or a known issue closed, its line is removed, not s
 7. When a brief or message to an agent carries Casey's decisions, paste them verbatim with his numbers, keep the lead's own instructions separate below them, and list which numbers were passed to which agent on one line after the five-line summary.
 8. Before asking Casey to approve wording that describes code behaviour, have the reviewer check it against the code and tests. Casey sees only wording that has passed that check.
 9. Every brief that ends in an irreversible step (a snapshot write, a deletion, a merge) lists its preconditions as a checklist, and the agent posts each one as met on the PR before it runs that step.
-10. After a PR merges, remove its worktree and local branch without asking Casey when all of these hold: GitHub shows the PR merged, nothing is uncommitted or unpushed, no agent is using it, and its `.env` holds no `NODE_ID_HMAC_KEY` line or the key also remains in the main checkout's `.env`. Report the removal in the merge summary. Every other deletion still needs a listed set and Casey's yes.
+10. After a PR merges, remove its worktree and local branch without asking Casey when all of these hold: GitHub shows the PR merged, nothing is uncommitted or unpushed, no agent is using it, the running stack was not started from it, and its `.env` holds no `NODE_ID_HMAC_KEY` line or the key also remains in the main checkout's `.env`. Before removing it, post the conditions as met on the merged PR, as in item 9. Report the removal in the message that tells Casey the PR merged, and post it on that PR. Every other deletion outside a commit (files, branches, worktrees, volumes, data) still needs a listed set (each path or branch written out) and Casey's yes, whoever runs it.
 
 ## Commits, pull requests and merging
 
@@ -160,7 +160,7 @@ Casey decides these. Prepare the options, state the trade-offs in two or three s
 - Anything that publishes data externally (GitHub Pages, ArcGIS Online, tiles on S3). Precise MeshSTL positions are never published.
 - Any capture from the MeshSTL broker, each run.
 - Adding a dependency outside the stack listed in `docs/PLAN.md`.
-- Deleting data or dropping a table.
+- Deleting data or dropping a table. Lead duty 10 is the one exception: a merged PR's worktree and local branch.
 
 ## Testing policy
 
