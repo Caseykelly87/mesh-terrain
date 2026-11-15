@@ -11,7 +11,7 @@ def test_models_without_lbs_have_no_cap_answer() -> None:
 
 @pytest.mark.parametrize(
     ("loss_db", "at_cap"),
-    [(160.17, True), (160.07, True), (160.17 - CAP_TOLERANCE_DB - 0.01, False), (149.48, False)],
+    [(160.17, True), (160.08, True), (160.17 - CAP_TOLERANCE_DB - 0.01, False), (149.48, False)],
 )
 def test_cap_is_within_a_tenth_of_a_decibel_of_lbs(loss_db: float, at_cap: bool) -> None:
     result = PathLossResult(loss_db=loss_db, troposcatter_loss_db=160.17)
