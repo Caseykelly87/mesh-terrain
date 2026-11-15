@@ -111,8 +111,9 @@ def load_snapshot(conn: psycopg.Connection, folder: Path) -> dict[str, int]:
 
     Raises:
         SnapshotError: if the folder has no manifest or a file differs from it;
-            from register, if the folder is `.partial`, the manifest lacks an
-            snp_01 field, names another snapshot or changed since it was read.
+            from register, if the folder is `.partial`, the manifest lacks one
+            of snapshot_id, capture_date, source_url, licence and seeds, names
+            another snapshot or changed since it was read.
         SchemaDriftError: if a raw table's columns differ from the allowlist.
     """
     manifest = verified_manifest(folder)
