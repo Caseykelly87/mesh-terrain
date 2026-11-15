@@ -40,11 +40,15 @@ def test_fspl_rejects_malformed_inputs_as_plain_value_errors(
 
 # Okumura-Hata worked by hand from the published formula.
 #
-# Source: M. Hata, "Empirical formula for propagation loss in land mobile radio
-# services", IEEE Trans. Veh. Technol., vol. VT-29, no. 3, pp. 317-325, Aug.
-# 1980, doi:10.1109/T-VT.1980.23859. The paper itself was not read (the unit
-# downloads nothing), so no equation number is cited. The form below is as the
-# Wikipedia article "Hata model" (read 2026-11-15) gives it, citing that paper:
+# Sources (terrain/baselines.py gives the full citations):
+# - urban terms: ITU-R P.529-3 (10/99, withdrawn 2001), section 2.2, equation (1),
+#   PDF sha256 ecd17cf4e899809f2cd999f9376a9a81829a7bbdae3da2c7d18a53ed9c88c6e5.
+#   It gives field strength for 1 kW e.r.p.; converted with P.525-5 equation (10)
+#   its constant is 69.53 against the 69.55 below, so these values sit 0.02 dB
+#   above the converted P.529-3 values (137.028 and 149.913 dB for the two cases).
+# - suburban term: M. Hata, IEEE Trans. Veh. Technol. VT-29(3), pp. 317-325,
+#   1980, doi:10.1109/T-VT.1980.23859; original not read by us, quoted as widely
+#   reproduced.
 #
 #   urban     LU  = 69.55 + 26.16 log f - 13.82 log hB - CH + (44.9 - 6.55 log hB) log d
 #   small or medium city
