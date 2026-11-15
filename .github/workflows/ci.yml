@@ -75,6 +75,35 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: make check-pdal
+      # On Linux a container that runs as root leaves root-owned files the
+      # snapshot command cannot rename or hash, so the owner is checked.
+      - name: run a synthetic pipeline through make pdal
+        run: |
+          work="$RUNNER_TEMP/pdal-work"
+          mkdir -p "$work"
+          make pdal PIPELINE=docker/pdal/smoke-pipeline.json WORKDIR="$work"
+          test -s "$work/smoke.tif"
+          owner=$(stat -c %u "$work/smoke.tif")
+          test "$owner" = "$(id -u)" && test "$owner" != 0
+      # No code path writes into a finished snapshot (ing_02): inside the
+      # snapshots folder only a <id>.partial folder directly below it is
+      # accepted, and a WORKDIR holding the snapshots or the checkout's .env
+      # is refused. A refusal is told apart from a failed run by its message,
+      # since make exits 2 for both.
+      - name: check that make pdal refuses unsafe work folders
+        run: |
+          snapshots="$RUNNER_TEMP/snapshots"
+          mkdir -p "$snapshots/finished-1/x.partial" "$snapshots/next-1.partial"
+          run_in() {
+            make pdal PIPELINE=docker/pdal/smoke-pipeline.json WORKDIR="$1" \
+              SNAPSHOTS_DIR="$snapshots" SNAPSHOTS_HOST_DIR="$snapshots" 2>&1
+          }
+          for workdir in "$snapshots" "$snapshots/finished-1" "$snapshots/finished-1/x.partial" "$RUNNER_TEMP" "$PWD"; do
+            if output=$(run_in "$workdir"); then echo "accepted $workdir"; exit 1; fi
+            echo "$output" | grep -q "make pdal: refused" || { echo "$output"; exit 1; }
+          done
+          run_in "$snapshots/next-1.partial"
+          test -s "$snapshots/next-1.partial/smoke.tif"
 
   compose-smoke:
     runs-on: ubuntu-24.04
