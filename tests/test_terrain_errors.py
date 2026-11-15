@@ -2,7 +2,7 @@
 
 import pytest
 
-from terrain.errors import OutOfExtentError, RefusedDrawError, TerrainError
+from terrain.errors import OutOfExtentError, RefusedDrawError, TerrainError, ZeroLengthPathError
 
 
 def test_neither_terrain_error_is_a_value_error() -> None:
@@ -30,3 +30,15 @@ def test_refusal_carries_its_reason() -> None:
 def test_refusal_rejects_an_unknown_reason() -> None:
     with pytest.raises(ValueError):
         RefusedDrawError("tired", "no")  # type: ignore[arg-type]
+
+
+def test_zero_length_path_is_the_one_value_error() -> None:
+    # The feature asset catches ZeroLengthPathError only, so other ValueErrors
+    # still fail the run.
+    assert issubclass(ZeroLengthPathError, ValueError)
+    assert not issubclass(ZeroLengthPathError, TerrainError)
+    with pytest.raises(ZeroLengthPathError):
+        try:
+            raise ZeroLengthPathError("zero-length path")
+        except (OutOfExtentError, RefusedDrawError):
+            pytest.fail("a terrain error handler caught a zero-length path")

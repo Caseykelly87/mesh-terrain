@@ -8,8 +8,8 @@ import pytest
 import rasterio.io
 from terrain_dem import centre_xy_m, sample_at, write_dem
 
-from terrain.errors import OutOfExtentError
-from terrain.profile import PathProfile
+from terrain.errors import OutOfExtentError, ZeroLengthPathError
+from terrain.profile import PathProfile, profile_distances_m
 
 
 def flat_dem(tmp_path: Path, height_m: float = 100.0, rows: int = 50, cols: int = 1200) -> Path:
@@ -164,12 +164,18 @@ def test_long_path_is_read_in_bounded_windows(
     assert np.array_equal(segmented.ground_m, whole.ground_m)
 
 
-def test_zero_length_path_is_a_value_error(tmp_path: Path) -> None:
+def test_zero_length_path_raises_its_own_value_error(tmp_path: Path) -> None:
     dem = flat_dem(tmp_path)
     point = centre_xy_m(25, 10)
 
-    with pytest.raises(ValueError, match="zero-length"):
+    with pytest.raises(ZeroLengthPathError, match="zero-length"):
         sample_at(dem, point, point, step_m=1.0)
+
+
+def test_a_bad_step_is_not_a_zero_length_path() -> None:
+    with pytest.raises(ValueError) as raised:
+        profile_distances_m(100.0, -1.0)
+    assert not isinstance(raised.value, ZeroLengthPathError)
 
 
 def test_step_must_be_positive(tmp_path: Path) -> None:
