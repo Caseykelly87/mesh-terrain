@@ -118,11 +118,11 @@ hilly, R 10: Lb 190.228103 dB; NaN at point 999: 190.224333 dB; 0 at point 999: 
 What it shows:
 
 - The in-memory placeholder gives the same import, the same 149.48 dB with DN and N0, and the same `IndexError` without them as run 2's file. The installed package holds no npz after the import. `P1812.files` keeps the replacement after the import, which is harmless because line 19 is its only use.
-- A NaN in R never makes Lb NaN, and no warning is raised. The NaN enters `g = h + R` (`P1812.py` line 330). At most points the comparisons after it skip that point, as though it had no clutter: on the flat path with R = 10 m a NaN at index 300 or 999 leaves 160.17 dB. Where the skipped point is the one obstacle that sets the loss, the obstacle vanishes: the single 30 m clutter point gives 159.74 dB, and the same point marked NaN gives 149.48 dB, the bare-ground figure. At index 1, the first interior point next to the transmitter, a NaN does worse. `dl_bull` (lines 1819 to 1846) takes its largest slope with Python's built-in `max`, which returns NaN when the first element is NaN; every test after that is false, and the knife-edge loss of the whole path is 0. The flat path then gives 137.36 dB, below the bare-ground 149.48 dB, and the hilly path (a 40 m sinusoidal relief: 190.23 dB with R = 10 m, 176.55 dB bare) also gives 137.36 dB, 52.87 dB too low. So a NaN is skipped, except at the first interior point, where it removes the path's diffraction loss, and the wrapper has to fill or refuse every NaN in R before it calls `bt_loss`.
+- A NaN in R never makes Lb NaN, and no warning is raised. The NaN enters `g = h + R` (`P1812.py` line 330). At most points the comparisons after it skip that point, as though it had no clutter: on the flat path with R = 10 m a NaN at index 300 or 999 leaves 160.17 dB. Where the skipped point is the one obstacle that sets the loss, the obstacle vanishes: the single 30 m clutter point gives 159.74 dB, and the same point marked NaN gives 149.48 dB, the bare-ground figure. At index 1, the first interior point next to the transmitter, a NaN does worse. `dl_bull` (lines 1819 to 1846) takes its largest slope with Python's built-in `max`, which returns NaN when the first element is NaN; every test after that is false, and the knife-edge loss of the whole path is 0. The flat path then gives 137.36 dB, below the bare-ground 149.48 dB, and the hilly path (hills rising 0 to 40 m above 150 m: 190.23 dB with R = 10 m, 176.55 dB bare) also gives 137.36 dB, 52.87 dB too low. So a NaN is skipped, except at the first interior point, where it removes the path's diffraction loss, and the wrapper has to fill or refuse every NaN in R before it calls `bt_loss`.
 
 ## Run 4: clutter at the terminals and the troposcatter cap (`spike_terminal.py`, `spike_floor.py`)
 
-For Casey's addition C, after his decision of 2026-11-14. Same in-memory import, flat ground at 150 m unless a case gives relief, St. Louis DN 39.126 and N0 324.511, 915 MHz, p 50, 2 m antennas unless stated. Both ran with `-W error::RuntimeWarning`.
+For Casey's addition C, after his decision of 2026-11-14. Same in-memory import, flat ground at 150 m unless a case gives hills, St. Louis DN 39.126 and N0 324.511, 915 MHz, p 50, 2 m antennas unless stated. Both ran with `-W error::RuntimeWarning`.
 
 The text of P.1812-8 was read from the ITU's public PDF, `https://www.itu.int/dms_pubrec/itu-r/rec/p/R-REC-P.1812-8-202509-I!!PDF-E.pdf` (1 137 557 bytes, 36 pages, sha256 `0c106ef6d2dfe1b287fd88756350a26719d922be8b88520da3203c65b80d4a7e`), fetched into its own folder in the scratch directory and not committed.
 
@@ -146,7 +146,7 @@ step  1.0 m: 10 m everywhere 160.17 dB
 step  1.0 m: 10 m blocks, 15 m of every 40 m 160.17 dB
 ```
 
-`spike_floor.py`, rewritten after the review of 69bcc3b so each line also prints three terms from Py1812's debug log, read from an in-memory buffer: Lbs (troposcatter, equation 44), Ld50 (median diffraction, equation 39) and Lbam (diffraction with ducting, equation 62). The relief cases use ground at 150 m plus 20 m times sin(2 pi x / 2.5 km).
+`spike_floor.py`, rewritten after the review of 69bcc3b so each line also prints three terms from Py1812's debug log, read from an in-memory buffer: Lbs (troposcatter, equation 44), Ld50 (median diffraction, equation 39) and Lbam (diffraction with ducting, equation 62). The hills cases use ground at 150 m plus 20 m times sin(2 pi x / 2.5 km), hills of plus or minus 20 m.
 
 ```
 10 km, R 0, 2 m / 2 m: Lb 149.48 dB (Lbs 160.17, Ld50 37.87, Lbam 149.50)
@@ -162,18 +162,68 @@ step  1.0 m: 10 m blocks, 15 m of every 40 m 160.17 dB
 3 km, R 10, 2 m / 2 m: Lb 149.71 dB (Lbs 149.71, Ld50 77.92, Lbam 179.08)
 10 km, R 10, 2 m / 10 m gateway: Lb 160.02 dB (Lbs 160.17, Ld50 54.20, Lbam 165.83)
 10 km, R 0, 2 m / 10 m gateway: Lb 134.65 dB (Lbs 160.17, Ld50 23.02, Lbam 134.65)
-10 km, 20 m relief, R 0, 2 m / 2 m: Lb 151.10 dB (Lbs 188.78, Ld50 39.47, Lbam 151.10)
-10 km, 20 m relief, R 10, 2 m / 2 m: Lb 183.08 dB (Lbs 188.78, Ld50 71.61, Lbam 183.24)
+10 km, hills of plus or minus 20 m, R 0, 2 m / 2 m: Lb 151.10 dB (Lbs 188.78, Ld50 39.47, Lbam 151.10)
+10 km, hills of plus or minus 20 m, R 10, 2 m / 2 m: Lb 183.08 dB (Lbs 188.78, Ld50 71.61, Lbam 183.24)
 ```
 
 What it shows:
 
 - Clutter at the terminal point itself changes nothing (149.48 dB with 8 m at index 0). This matches P.1812-8 section 3.2 and `g[0] = h[0]` in Py1812.
-- Equation (63) combines Lbs with Lbam as a soft minimum, so Lbs caps Lb from above. With 2 m antennas, once clutter taller than the antenna sits near an end, or along most of the path, Lbam rises past Lbs and Lb sits at the cap. Examples: 3 m along the whole 10 km path, and 4 m or 8 m over the first 15 m at either step, all give 160.17 dB. A 10 m gateway antenna gives 160.02 dB with 10 m clutter.
-- Clutter away from the ends still counts: 4 m over 15 m at mid-path gives 152.12 dB, 2 m along the whole path 151.79 dB, 1 m 150.20 dB.
-- On a line-of-sight path over bare terrain, Lbs depends only on distance, frequency, N0 and p: 160.17 dB at 10 km and 149.71 dB at 3 km in every flat case here.
-- Where terrain blocks the path, the cap is higher and clutter still counts. Over the 20 m relief, Lbs is 188.78 dB, because the horizon angles behind it come from terrain heights (P.1812-8 equations 74 and 75), and 10 m of clutter moves Lb from 151.10 to 183.08 dB.
+- Equation (63) combines Lbs with Lbam as a soft minimum, so Lbs caps Lb from above. Clutter well above a 2 m antenna drives Lbam past Lbs: 10 m along the path, and 4 m or 8 m over the first 15 m at either step, all give 160.17 dB, and a 10 m gateway antenna gives 160.02 dB with 10 m clutter. Run 5 shows where clutter must stand for that to happen.
+- Clutter 1 m or less above the antennas, or in a narrow band away from the ends, still counts: 4 m over 15 m at mid-path gives 152.12 dB, 2 m along the whole path 151.79 dB, 1 m 150.20 dB.
+- On a path whose terrain alone is line of sight, Lbs depends only on distance, frequency, N0 and p: 160.17 dB at 10 km and 149.71 dB at 3 km in every flat case here.
+- Where terrain blocks the path, the cap is higher and clutter still counts. Over the hills, Lbs is 188.78 dB and 10 m of clutter moves Lb from 151.10 to 183.08 dB. Lbs follows the angular distance (P.1812-8 equation 82), built from the path classification and horizon angles of equations 73 to 81, all from terrain heights; Py1812's comments cite these steps by older equation numbers.
 - At 1 m and 10 m steps the results are identical in these cases, but only because the cap hides the difference: for 8 m over the first 15 m, Ld50 is 72.21 dB at 1 m and 62.07 dB at 10 m.
+
+## Run 5: where clutter has to stand to reach the cap (`spike_cap_position.py`)
+
+Added after the review of df1038b. Flat 10 km path at 150 m, 2 m antennas, 10 m step, the same import and constants as run 4; Lbs on this path is 160.17 dB.
+
+```
+$S/p1812-env/.venv/Scripts/python.exe -I -W error::RuntimeWarning spike_cap_position.py
+```
+
+```
+Bands of clutter, start and end in metres from the transmitter:
+  3 m over 1000 to 9000 m: Lb 154.51 dB
+  3 m over 2500 to 7500 m: Lb 152.57 dB
+  3 m over 100 to 9900 m: Lb 160.12 dB
+  3 m over 0 to 200 m: Lb 158.11 dB
+  3 m over 0 to 10000 m: Lb 160.17 dB
+Clutter everywhere except the first and last gap_m metres:
+  3 m, gap 0 m: Lb 160.17 dB
+  3 m, gap 50 m: Lb 160.17 dB
+  3 m, gap 100 m: Lb 160.12 dB
+  3 m, gap 200 m: Lb 159.65 dB
+  3 m, gap 300 m: Lb 158.64 dB
+  3 m, gap 500 m: Lb 156.82 dB
+  3 m, gap 1000 m: Lb 154.51 dB
+  10 m, gap 0 m: Lb 160.17 dB
+  10 m, gap 50 m: Lb 160.17 dB
+  10 m, gap 100 m: Lb 160.17 dB
+  10 m, gap 200 m: Lb 160.17 dB
+  10 m, gap 300 m: Lb 160.17 dB
+  10 m, gap 500 m: Lb 160.16 dB
+  10 m, gap 1000 m: Lb 160.06 dB
+Clutter only within reach_m metres of the transmitter:
+  3 m, first 20 m: Lb 157.86 dB
+  3 m, first 50 m: Lb 157.91 dB
+  3 m, first 100 m: Lb 157.98 dB
+  3 m, first 200 m: Lb 158.11 dB
+  3 m, first 500 m: Lb 158.46 dB
+  10 m, first 20 m: Lb 160.17 dB
+  10 m, first 50 m: Lb 160.17 dB
+  10 m, first 100 m: Lb 160.17 dB
+  10 m, first 200 m: Lb 160.17 dB
+  10 m, first 500 m: Lb 160.17 dB
+```
+
+What it shows:
+
+- How close Lb comes to the cap depends on how far the clutter rises above the antennas and where it stands.
+- Clutter 1 m above the antennas (3 m) reaches the cap only when it runs to within about 100 m of both ends: 160.12 dB with 100 m clear at each end, 159.65 dB with 200 m, 156.82 dB with 500 m and 154.51 dB with 1 km. Over 2.5 to 7.5 km it gives 152.57 dB; confined to the first 200 m it gives 158.11 dB.
+- Clutter 8 m above the antennas (10 m) reaches the cap from anywhere tested: 160.06 dB with 1 km clear at both ends, and 160.17 dB with only the first 20 m cluttered.
+- So removing clutter within some distance of each end does not avoid the cap for tall clutter.
 
 ## Install form checks
 
