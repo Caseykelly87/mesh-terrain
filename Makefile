@@ -131,15 +131,18 @@ check: env lint test dbt-build
 # matches the measured flat-path loss as a fixed string, so a changed compiler
 # or source fails here.
 #
-# The third run is the library tests of terrain/itm.py and terrain/path_loss.py,
-# which skip on any host without libitm.so; in the image a skip means the
-# library went missing, so it fails the check. The image has no dev group and
+# The third run is the library tests of terrain/itm.py and terrain/path_loss.py
+# and the engine's itm run, which skip on any host without libitm.so; in the
+# image a skip means the library went missing, so it fails the check. Only that
+# one engine test runs here: the others read docs/ and need a git checkout,
+# which the image lacks, and they run on the host in the tests job. The image has no dev group and
 # no tests folder: the throwaway container installs the dev group from uv.lock,
 # hash-checked, which needs PyPI, and gets tests/ as a read-only mount. The two
 # MSYS variables stop Git Bash rewriting the container paths and do nothing
 # elsewhere. With CA_BUNDLE_PATH set the bundle is mounted for uv, as the build
 # secret is at build time.
-ITM_TESTS := tests/test_itm.py tests/test_path_loss.py
+ITM_TESTS := tests/test_itm.py tests/test_path_loss.py \
+    tests/test_engine_run.py::test_the_itm_fixture_runs_in_the_image
 ITM_TESTS_IN_IMAGE := uv sync --frozen --inexact --no-install-project --group dev --quiet \
     && { python -m pytest -p no:cacheprovider -rs $(ITM_TESTS) > /tmp/pytest.log; status=$$?; } \
     && cat /tmp/pytest.log \

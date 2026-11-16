@@ -171,6 +171,20 @@ jobs:
       # fails the step. This also catches a broken ITM build stage.
       - name: check the ITM library in the Dagster image
         run: make check-itm
+      # The committed fixture with itm, through make engine as a real run goes:
+      # the synthetic snapshots stand in for SNAPSHOTS_HOST_DIR and a runner
+      # folder for RUNS_HOST_DIR. A finished run renames its folder after the
+      # manifest, so the manifest's presence is the pass.
+      - name: run the engine fixture in the Dagster image
+        run: |
+          runs="$RUNNER_TEMP/runs"
+          mkdir -p "$runs"
+          make engine CONFIG=engine/fixtures/fixture-run-itm.yaml \
+            SNAPSHOTS_HOST_DIR="$PWD/tests/fixtures/snapshots" RUNS_HOST_DIR="$runs"
+          test -f "$runs/fixture-itm/manifest.json"
+          test ! -e "$runs/fixture-itm.partial"
+          jq -e '.itm_source_commit | test("^[0-9a-f]{40}$")' "$runs/fixture-itm/manifest.json"
+          jq -e '.engine_git_commit == env.GITHUB_SHA' "$runs/fixture-itm/manifest.json"
       - run: make check
       - if: always()
         run: docker compose logs --no-color dagster-migrate dagster-webserver dagster-daemon minio-bootstrap
