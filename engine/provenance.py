@@ -14,9 +14,10 @@ Six manifest fields (manifest_version 1.1.0) trace a run to exact code:
   list itm.
 - `py1812_commit`, `py1812_archive_sha256`: the commit in Py1812's archive URL
   and the archive's sha256, both from `uv.lock`, after checking the installed
-  package came from that URL and, when its `direct_url.json` records a hash
-  (uv records none), that the hash matches; null when the run does not list
-  p1812.
+  package came from that URL and, when its `direct_url.json` records a hash,
+  that the hash matches; null when the run does not list p1812. uv records
+  none, which is logged at info, since `uv sync --frozen` checked the archive
+  against `uv.lock` when it installed it.
 
 A run that would need a value it cannot find is refused before it starts.
 """
@@ -191,9 +192,14 @@ def _check_installed_hash(installed: dict[str, Any], lock_sha256: str) -> None:
     if recorded is None and legacy.startswith("sha256="):
         recorded = legacy.removeprefix("sha256=")
     if recorded is None:
-        # Safe to continue: uv checked the archive against uv.lock when it
-        # installed it (`uv sync --frozen`) and records no hash itself.
-        log.warning("py1812_installed_hash_unrecorded", lock_sha256=lock_sha256)
+        # Info, not a warning (Casey, PR #43): uv never records a hash here,
+        # so this is every uv install, and the lock check already covered it.
+        log.info(
+            "py1812_installed_hash_unrecorded",
+            reason="uv records no hash in direct_url.json",
+            checked_by="uv sync --frozen checked the archive against uv.lock at install",
+            lock_sha256=lock_sha256,
+        )
         return
     if recorded != lock_sha256:
         raise ConfigError(
