@@ -4,10 +4,11 @@ The terrain-aware path-loss engine of `docs/INTERFACE.md`: one command reads one
 
 ## Run it
 
-Inside the Docker image, where `RUNS_HOST_DIR` is mounted at `/runs` (once platform-eng adds `make engine CONFIG=...`):
+`make engine CONFIG=<file>` runs one config in the engine image, with no network (`docker/engine-run.sh`). It needs `RUNS_HOST_DIR` and `SNAPSHOTS_HOST_DIR`, from `.env` or the command line: the container reads the snapshots read-only at `/snapshots` and the config's folder read-only at `/config`, and writes under `/runs`, so the point layers a config names sit in its folder and its `output_dir` is `/runs` or a folder below it. Before it builds, the script refuses (exit 2) a checkout with uncommitted changes, untracked files included, and the folder and `output_dir` cases listed at its top. CI runs the committed fixture this way:
 
 ```
-SNAPSHOTS_DIR=/snapshots python -m engine run engine/fixtures/fixture-run.yaml
+make engine CONFIG=engine/fixtures/fixture-run-itm.yaml \
+    SNAPSHOTS_HOST_DIR="$PWD/tests/fixtures/snapshots" RUNS_HOST_DIR=<empty folder outside the checkout>
 ```
 
 The committed fixture configs write to `/runs`, the container path; on Windows that path is `C:\runs`. On the host, run a copy of the config with another `output_dir`, as `tests/engine_fixture.py` writes one:
