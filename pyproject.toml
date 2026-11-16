@@ -6,6 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "MIT" }
 dependencies = [
+    # terrain.draws imports affine itself. It arrives through rasterio today,
+    # and a rasterio release that dropped it would break the import unseen.
+    "affine==3.0.1",
     "cryptography==50.0.2",
     "dagster==1.13.26",
     "dagster-dbt==0.29.26",
