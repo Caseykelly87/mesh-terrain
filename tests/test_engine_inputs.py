@@ -19,12 +19,20 @@ from engine.grid import run_grid
 from engine.points import Endpoint
 from ingester import engine_inputs
 from ingester.engine_inputs import (
-    SelectionRefused,
+    SelectionError,
     busiest_two,
     inside_dem,
     parse_tile,
+    select_nodes,
 )
-from ingester.link_pairs import Box, PairActivity, capture_links, read_capture_rows
+from ingester.link_pairs import (
+    Box,
+    CaptureLinks,
+    NodePositions,
+    PairActivity,
+    capture_links,
+    read_capture_rows,
+)
 from terrain.draws import EndpointBox
 
 # The import above activates the autouse fixture for this module.
@@ -72,7 +80,7 @@ def test_tile_bounds_follow_the_usgs_naming() -> None:
 
 @pytest.mark.parametrize("name", ["x72", "X72Y429", "x72y429 ", "y429x72"])
 def test_tile_refuses_other_names(name: str) -> None:
-    with pytest.raises(SelectionRefused):
+    with pytest.raises(SelectionError):
         parse_tile(name)
 
 
@@ -149,14 +157,34 @@ def test_busiest_two_when_every_measure_agrees() -> None:
 
 def test_busiest_two_refuses_when_measures_disagree() -> None:
     pairs = [activity("a", 3, 3, 30), activity("b", 5, 6, 18), activity("c", 4, 4, 12)]
-    with pytest.raises(SelectionRefused, match="measure"):
+    with pytest.raises(SelectionError, match="measure"):
         busiest_two(pairs)
 
 
 def test_busiest_two_refuses_a_tie_for_second() -> None:
     pairs = [activity("a", 4, 4, 12), activity("b", 5, 6, 18), activity("c", 4, 4, 12)]
-    with pytest.raises(SelectionRefused, match="tie"):
+    with pytest.raises(SelectionError, match="tie"):
         busiest_two(pairs)
+
+
+def test_a_gateway_in_two_selected_pairs_is_one_site_with_the_both_ends_role() -> None:
+    def pair(relayer: str, gateway: str, link_hours: int) -> PairActivity:
+        return PairActivity(
+            pseudonym(relayer), pseudonym(gateway), link_hours, 0, link_hours, 3 * link_hours
+        )
+
+    pairs = (pair("A", "G1", 2), pair("B", "G1", 5), pair("C", "G3", 4), pair("D", "E", 1))
+    nodes = {
+        node.pseudonym: NodePositions(frozenset({Box(*node.box())}), False)
+        for node in NODES.values()
+    }
+    links = CaptureLinks(pairs, {}, nodes, 0, 0)
+    sites, receiver = select_nodes(links, parse_tile("x72y429"), expect_pairs=4)
+    assert [(site.pseudonym, site.role) for site in sites] == [
+        (pseudonym("G1"), "both_ends_gateway"),
+        (pseudonym("G3"), "busy_pair_gateway"),
+    ]
+    assert receiver.pseudonym == pseudonym("A")
 
 
 def test_extent_check_is_the_engines() -> None:
