@@ -59,6 +59,7 @@ PREDICTION_COLUMNS = [
     "hata_variant",
     "endpoint_draws",
     "refused_draws",
+    "seed",
     "tx_building_draws",
     "rx_building_draws",
     "p1812_at_cap_share",
@@ -204,7 +205,7 @@ def test_the_manifest_records_versions_seed_snapshots_inputs_and_code(
 ) -> None:
     manifest = manifest_of(two_runs[0])
     assert manifest["manifest_version"] == MANIFEST_VERSION == "1.1.0"
-    assert manifest["schema_version"] == SCHEMA_VERSION == "1.1.0"
+    assert manifest["schema_version"] == SCHEMA_VERSION == "1.2.0"
     assert manifest["run_id"] == "fixture"
     assert manifest["seed"] == 20261108
     assert set(manifest["models"]) == {"fspl", "knife_edge", "hata", "p1812"}
@@ -836,6 +837,21 @@ def test_the_engine_commit_fallback_logs_a_warning(monkeypatch: pytest.MonkeyPat
     assert any(
         e["event"] == "engine_commit_from_environment" and e["log_level"] == "warning" for e in logs
     )
+
+
+def test_the_seed_column_holds_each_pairs_draw_seed(two_runs: tuple[Path, Path]) -> None:
+    """Casey on PR #42: predictions.parquet gets the per-pair seed, as link_terrain does."""
+    import pyarrow.parquet as pq
+
+    from engine.predict import link_id
+    from terrain.draws import draw_seed
+
+    table = pq.read_table(two_runs[0] / "predictions.parquet")
+    assert str(table.schema.field("seed").type) == "int64"
+    rows = gpd.read_parquet(two_runs[0] / "predictions.parquet")
+    assert rows["seed"].notna().all()
+    for _, row in rows.iloc[[0, 1, 517, 999]].iterrows():
+        assert row["seed"] == draw_seed(20261108, link_id(row["site_id"], row["rx_id"]))
 
 
 # The import above activates the autouse fixture for this module.
