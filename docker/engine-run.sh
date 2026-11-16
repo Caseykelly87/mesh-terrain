@@ -102,9 +102,12 @@ shopt -u globstar dotglob nullglob
 output_lines=$(grep -cE "^[\"']?output_dir[\"']?[[:space:]]*:" "$config" || true)
 [ "$output_lines" = 1 ] ||
     refuse "$config: give output_dir once, as a plain line such as 'output_dir: /runs' (found $output_lines)"
-grep -Eq "^output_dir:[[:space:]]*[\"']?/runs(/[^\"'[:space:]]*)?[\"']?[[:space:]]*(#.*)?$" "$config" ||
+# YAML keeps a # with no space before it in the value, and a double-quoted
+# value turns \x2e into a dot, so the value may hold neither # nor \, and a
+# comment needs a space before it.
+grep -Eq "^output_dir:[[:space:]]*[\"']?/runs(/[^\"'[:space:]#\\]*)?[\"']?([[:space:]]+#.*)?[[:space:]]*$" "$config" ||
     refuse "$config: output_dir must be /runs or a folder under it, where RUNS_HOST_DIR is mounted"
-output_dir=$(sed -nE "s/^output_dir:[[:space:]]*[\"']?([^\"'[:space:]#]*).*/\1/p" "$config")
+output_dir=$(sed -nE "s/^output_dir:[[:space:]]*[\"']?([^\"'[:space:]#\\]*).*/\1/p" "$config")
 case "/$output_dir/" in
     */../*) refuse "$config: output_dir $output_dir has a .. segment, which leaves /runs" ;;
 esac
