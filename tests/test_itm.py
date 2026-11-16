@@ -3,9 +3,9 @@
 The profile builder, the input checks and the status codes run everywhere.
 The tests marked `needs_itm_library` call libitm.so, which exists only in the
 Dagster image (ITM_LIBRARY_PATH, default /usr/local/lib/libitm.so); they skip
-where it is missing, which today includes CI: `make check-itm` still runs only
-the ADR 0002 spike script, so these skip in CI until platform-eng changes it to
-run this file inside the image (docs/STATUS.md, Known issues, the ITM tests line).
+where it is missing, as on the host and in CI's tests job. `make check-itm`
+runs this file inside the image, where a skip fails the check, and CI runs it
+in the compose-smoke job.
 """
 
 import inspect

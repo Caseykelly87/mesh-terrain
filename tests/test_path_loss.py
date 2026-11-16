@@ -6,9 +6,10 @@ space loss, the README's knife-edge figure, the hand-worked Hata cases, ITM's
 EPSG:26915 near St. Louis, so P.1812 reads a real latitude and longitude.
 
 ITM needs libitm.so, which exists only in the Dagster image. Tests marked by
-the `itm_library` fixture skip without it, which includes CI until
-`make check-itm` runs the ITM tests inside the image (docs/STATUS.md); the
-others replace `itm_loss` with a stub. P.1812 runs for real on constant maps
+the `itm_library` fixture skip without it, as on the host and in CI's tests
+job; `make check-itm` runs this file inside the image, where a skip fails the
+check, and CI runs it in the compose-smoke job. The others replace `itm_loss`
+with a stub. P.1812 runs for real on constant maps
 or the committed synthetic map snapshot.
 """
 

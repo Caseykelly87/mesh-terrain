@@ -12,7 +12,7 @@ Commands that write the terrain inputs as snapshots (contract rule `snp_01`): da
 
 `register <id>` records a finished snapshot in `raw.snapshot` (`snp_01`): it checks every file against the manifest, creates the raw tables only when `raw.snapshot` is missing, and inserts nothing for an id already registered. Each snapshot is written, then registered.
 
-Run one with `python -m pipeline.terrain_snapshots <command>`; `--root <dir>` writes under another folder instead of `SNAPSHOTS_DIR`. The make targets that wrap them are listed in the PR that added this package. Writing a real snapshot is permanent: it runs only after Casey's yes on a checklist.
+Run one with `python -m pipeline.terrain_snapshots <command>`; `--root <dir>` writes under another folder instead of `SNAPSHOTS_DIR`. The make targets that wrap them are listed in `make help` and in the root README. Writing a real snapshot is permanent: it runs only after Casey's yes on a checklist.
 
 ## The DSM, worked through
 
