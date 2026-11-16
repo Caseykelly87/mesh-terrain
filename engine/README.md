@@ -15,7 +15,7 @@ The committed fixture configs write to `/runs`, the container path; on Windows t
 ```
 SNAPSHOTS_DIR=tests/fixtures/snapshots uv run --frozen python -m engine run <copy of the config>
 ```
- The environment says where things are; the config says what to compute:
+The environment says where things are; the config says what to compute:
 
 | Variable | Meaning |
 | --- | --- |
