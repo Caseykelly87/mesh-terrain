@@ -56,6 +56,15 @@ jobs:
             echo "accepted: $output"; exit 1
           fi
           echo "$output" | grep -q "EXPECT_DB needs FIXTURE"
+      # Without --fixture the map files must match the ITU pins, so the
+      # synthetic maps must fail with exit 1 before any loss is computed.
+      - name: check that check_p1812.py refuses maps that are not the pinned ITU ones
+        run: |
+          status=0
+          output=$(uv run --frozen python -I docker/check_p1812.py tests/fixtures/snapshots/p1812-maps-synthetic 2>&1) || status=$?
+          echo "$output"
+          test "$status" -eq 1
+          echo "$output" | grep -q "not the pinned ITU maps"
 
   dbt-build:
     runs-on: ubuntu-24.04

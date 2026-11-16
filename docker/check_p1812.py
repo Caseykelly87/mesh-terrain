@@ -8,7 +8,8 @@ maps there, P.1812 gives 149.48 dB (`tests/test_p1812.py`). The map files
 must first match the sha256 pins of `pipeline.terrain_snapshots.itu_maps`, so
 only the ITU maps can pass. A different figure means the maps, Py1812 or the
 wrapper changed. `--fixture` checks another map folder against a figure given
-with it and skips the pins. It reads the folder and writes nothing.
+with it and skips the pins; it refuses a folder named as the ITU snapshot, so
+that name always gets the pinned check. It reads the folder and writes nothing.
 """
 
 import argparse
@@ -85,12 +86,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     Returns:
         0 when the loss is within 0.01 dB of the figure, 1 otherwise or when
-        the maps fail to load or to match their pins, 2 for bad arguments.
+        the maps fail to load or to match their pins, 2 for bad arguments,
+        including `--fixture` on a folder named as the ITU snapshot.
     """
     parser = _parser()
     args = parser.parse_args(argv)
     if args.fixture != (args.expect_db is not None):
         parser.error("--fixture and --expect-db go together; the ITU maps must give 149.48 dB")
+    if args.fixture and args.maps.resolve().name == P1812_8_MAPS.snapshot_id:
+        parser.error(f"{P1812_8_MAPS.snapshot_id} is the ITU snapshot; check it without --fixture")
     configure_logging("console")
     try:
         maps = load_maps(args.maps)
