@@ -40,8 +40,9 @@ help:
 	@echo "make check-itm  load the ITM library in the Dagster image, reproduce the ADR 0002 figure"
 	@echo "                and run tests/test_itm.py and tests/test_path_loss.py there, failing on a skip"
 	@echo "make check-p1812 [FIXTURE=<folder> EXPECT_DB=<dB>]"
-	@echo "                P.1812 on the ADR 0006 flat 10 km path from the map snapshot in SNAPSHOTS_DIR,"
-	@echo "                expecting 149.48 dB; FIXTURE names another map folder and EXPECT_DB its figure"
+	@echo "                P.1812 on a flat 10 km path from the ITU map snapshot in SNAPSHOTS_DIR, whose"
+	@echo "                files must match their pins, expecting 149.48 dB; FIXTURE names another map"
+	@echo "                folder, unpinned, and EXPECT_DB its figure (both on the command line only)"
 	@echo "make check-definitions"
 	@echo "                load the Dagster code location in the running webserver container"
 	@echo "make fmt        ruff format and autofix"
@@ -58,6 +59,7 @@ help:
 	@echo ""
 	@echo "Terrain snapshots: each target writes one snapshot under SNAPSHOTS_DIR (ROOT=<dir> instead)"
 	@echo "and refuses an id that exists. A write is permanent; run one only after Casey's yes."
+	@echo "DATE, OSM_SNAPSHOT, SCRATCH, ID and ROOT count only on the make command line."
 	@echo "make p1812-maps the ITU-R P.1812 maps, itu-r-p1812-8-202509"
 	@echo "make dem-1m     the USGS 1 m DEM tile, 3dep-1m-mo-saintlouis-2017-x72y429"
 	@echo "make osm-snapshot DATE=YYYY-MM-01"
@@ -66,6 +68,8 @@ help:
 	@echo "make dsm OSM_SNAPSHOT=<id> SCRATCH=<dir>"
 	@echo "                the lidar DSM, ept-mo-stlouis-2017-x72y429, through make pdal; needs the OSM"
 	@echo "                snapshot written and registered; window rasters go to SCRATCH, outside the snapshots"
+	@echo ""
+	@echo "Registering a snapshot: the one target here that writes to the warehouse."
 	@echo "make register-snapshot ID=<id>"
 	@echo "                check a finished snapshot against its manifest and record it in raw.snapshot"
 
@@ -186,11 +190,17 @@ capture:
 load:
 	$(UV) python -m ingester.load $(SNAPSHOT)
 
-# Stops make before anything runs when a variable is empty, so make -n shows
-# the refusal as well. Usage: $(call require,NAME,<what it holds>). Unexported
-# because the bare export above would expand it, and so raise the error, for
-# every recipe's environment.
-require = $(if $($(1)),,$(error make $@ needs $(1)=$(2)))
+# A variable's value only when it was typed on the make command line, as
+# NUKE_CONFIRM reads CONFIRM: the bare export above would otherwise let a stray
+# variable in the shell or .env start or redirect a snapshot write.
+# Usage: $(call typed,NAME).
+typed = $(if $(filter command line,$(origin $(1))),$($(1)))
+
+# Stops make before anything runs when a variable was not typed on the command
+# line, so make -n shows the refusal as well. Usage: $(call require,NAME,<what
+# it holds>). Unexported because the bare export would expand it, and so raise
+# the error, for every recipe's environment.
+require = $(if $(call typed,$(1)),,$(error make $@ needs $(1)=$(2) on the command line))
 unexport require
 
 # The terrain snapshot commands (pipeline/terrain_snapshots/README.md). They
@@ -200,7 +210,7 @@ unexport require
 # both from .env. Each writes a snapshot, which is permanent, so none runs
 # without Casey's yes on its checklist; make -n prints the command instead.
 TERRAIN_SNAPSHOT := $(UV) python -m pipeline.terrain_snapshots
-SNAPSHOT_ROOT = $(if $(ROOT),--root '$(ROOT)')
+SNAPSHOT_ROOT = $(if $(call typed,ROOT),--root '$(call typed,ROOT)')
 
 p1812-maps:
 	$(TERRAIN_SNAPSHOT) itu-maps $(SNAPSHOT_ROOT)
@@ -209,29 +219,40 @@ dem-1m:
 	$(TERRAIN_SNAPSHOT) dem $(SNAPSHOT_ROOT)
 
 osm-snapshot:
-	$(call require,DATE,YYYY-MM-01)$(TERRAIN_SNAPSHOT) osm --date '$(DATE)' $(SNAPSHOT_ROOT)
+	$(call require,DATE,YYYY-MM-01)$(TERRAIN_SNAPSHOT) osm --date '$(call typed,DATE)' \
+	    $(SNAPSHOT_ROOT)
 
 canopy:
 	$(TERRAIN_SNAPSHOT) canopy $(SNAPSHOT_ROOT)
 
 dsm:
 	$(call require,OSM_SNAPSHOT,<id>)$(call require,SCRATCH,<dir>)$(TERRAIN_SNAPSHOT) dsm \
-	    --osm-snapshot '$(OSM_SNAPSHOT)' --scratch '$(SCRATCH)' $(SNAPSHOT_ROOT)
+	    --osm-snapshot '$(call typed,OSM_SNAPSHOT)' --scratch '$(call typed,SCRATCH)' $(SNAPSHOT_ROOT)
 
 register-snapshot:
-	$(call require,ID,<snapshot id>)$(TERRAIN_SNAPSHOT) register '$(ID)' $(SNAPSHOT_ROOT)
+	$(call require,ID,<snapshot id>)$(TERRAIN_SNAPSHOT) register '$(call typed,ID)' $(SNAPSHOT_ROOT)
 
-# P.1812 from a map snapshot on the ADR 0006 spike's flat path
-# (docker/check_p1812.py); it reads the snapshot and writes nothing. FIXTURE
-# checks another map folder, such as tests/fixtures/snapshots/p1812-maps-synthetic,
-# and then needs that folder's figure in EXPECT_DB, since 149.48 dB holds only
-# for the ITU maps.
+# P.1812 on a flat 10 km path (docker/check_p1812.py); it reads the map folder
+# and writes nothing. Without FIXTURE it checks the ITU snapshot in
+# SNAPSHOTS_DIR, whose files must match the pins in
+# pipeline/terrain_snapshots/itu_maps.py, against 149.48 dB. FIXTURE checks
+# another map folder, such as tests/fixtures/snapshots/p1812-maps-synthetic,
+# skips the pins and needs that folder's figure in EXPECT_DB. EXPECT_DB without
+# FIXTURE is refused, and both count only on the command line, so no value
+# from the shell or .env can let a stand-in pass as the ITU maps.
 P1812_MAPS_ID := itu-r-p1812-8-202509
+P1812_FIXTURE = $(call typed,FIXTURE)
+P1812_EXPECT_DB = $(call typed,EXPECT_DB)
+P1812_GUARD = $(if $(P1812_FIXTURE),$(call require,EXPECT_DB,<dB>), \
+    $(if $(P1812_EXPECT_DB),$(error make check-p1812: EXPECT_DB needs FIXTURE=<folder>; \
+    the ITU snapshot must give 149.48 dB)) \
+    $(if $(SNAPSHOTS_DIR),,$(error make check-p1812 needs SNAPSHOTS_DIR)))
+unexport P1812_GUARD
 
 check-p1812:
-	$(if $(FIXTURE),$(call require,EXPECT_DB,<dB>),$(call require,SNAPSHOTS_DIR,<folder>))$(UV) \
-	    python -I docker/check_p1812.py '$(or $(FIXTURE),$(SNAPSHOTS_DIR)/$(P1812_MAPS_ID))' \
-	    $(if $(EXPECT_DB),--expect-db '$(EXPECT_DB)')
+	$(strip $(P1812_GUARD))$(UV) python -I docker/check_p1812.py \
+	    '$(or $(P1812_FIXTURE),$(SNAPSHOTS_DIR)/$(P1812_MAPS_ID))' \
+	    $(if $(P1812_FIXTURE),--fixture --expect-db '$(P1812_EXPECT_DB)')
 
 fmt:
 	$(UV) ruff check --fix .

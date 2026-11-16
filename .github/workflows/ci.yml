@@ -48,6 +48,14 @@ jobs:
       # committed synthetic maps, whose DN 40 and N0 325 give 149.45 dB on the
       # flat path; this keeps the target's command line working.
       - run: make check-p1812 FIXTURE=tests/fixtures/snapshots/p1812-maps-synthetic EXPECT_DB=149.45
+      # An EXPECT_DB without FIXTURE would let a stand-in folder pass as the
+      # ITU maps, so make must refuse it before running anything.
+      - name: check that check-p1812 refuses EXPECT_DB without FIXTURE
+        run: |
+          if output=$(make -n check-p1812 SNAPSHOTS_DIR=x EXPECT_DB=1 2>&1); then
+            echo "accepted: $output"; exit 1
+          fi
+          echo "$output" | grep -q "EXPECT_DB needs FIXTURE"
 
   dbt-build:
     runs-on: ubuntu-24.04
