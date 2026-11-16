@@ -12,10 +12,6 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# The same folder as pipeline.common.settings.DEFAULT_SNAPSHOTS_DIR: snapshot
-# folders on the host, outside every Docker volume (ADR 0005 item 1).
-DEFAULT_SNAPSHOTS_DIR = Path("C:/Users/Casey/mesh-terrain-data/snapshots")
-
 
 class EngineSettings(BaseSettings):
     """Where the engine finds snapshots, the ITM library and its own commit.
@@ -23,6 +19,8 @@ class EngineSettings(BaseSettings):
     Attributes:
         snapshots_dir: Folder whose subfolders are the snapshot ids a config
             names (`SNAPSHOTS_DIR`); `tests/fixtures/snapshots` for the fixture.
+            Required: no default hides in code (`docs/INTERFACE.md`), so the
+            command refuses to start without it.
         itm_library_path: NTIA's libitm.so (`ITM_LIBRARY_PATH`, ADR 0002).
         itm_source_commit: The NTIA ITM commit the library was built from
             (`ITM_SOURCE_COMMIT`), which the Dagster image records; required
@@ -35,7 +33,7 @@ class EngineSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=None, extra="ignore")
 
-    snapshots_dir: Path = DEFAULT_SNAPSHOTS_DIR
+    snapshots_dir: Path
     itm_library_path: Path = Path("/usr/local/lib/libitm.so")
     itm_source_commit: str | None = None
     engine_git_commit: str | None = None

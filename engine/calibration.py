@@ -53,10 +53,13 @@ def read_observations(path: Path) -> pd.DataFrame:
     """Read and check the observations layer.
 
     Raises:
-        ConfigError: if a column is missing, an id is not text, or a loss is
-            not a finite number.
+        ConfigError: if the file is not Parquet, a column is missing, an id
+            is not text, or a loss is not a finite number.
     """
-    observations = pd.read_parquet(path)
+    try:
+        observations = pd.read_parquet(path)
+    except (OSError, ValueError) as err:
+        raise ConfigError(f"{path.name} is not a readable Parquet layer: {err}") from err
     missing = [c for c in OBSERVATION_COLUMNS if c not in observations.columns]
     if missing:
         raise ConfigError(f"{path.name} misses {', '.join(missing)}")

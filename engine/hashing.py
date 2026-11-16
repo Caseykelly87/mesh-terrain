@@ -3,10 +3,12 @@
 Parquet and COG writers embed library versions and layout choices in their
 files, so `docs/INTERFACE.md` hashes content instead:
 
-- A table (Parquet, GeoParquet): sha256 over, for each column in order, its
-  name, its Arrow type, its validity bitmap and its non-null values, as
-  little-endian bytes for numbers and booleans and as Python's repr of each
-  value for text and binary (WKB geometry included). Row order counts.
+- A table (Parquet, GeoParquet): sha256 over its GeoParquet `geo` metadata
+  (the CRS and geometry encoding, as canonical JSON, empty for plain
+  Parquet), then, for each column in order, its name, its Arrow type, its
+  validity bitmap and its non-null values, as little-endian bytes for numbers
+  and booleans and as Python's repr of each value for text and binary (WKB
+  geometry included). Row order counts.
 - A raster: sha256 over its band count, data type, shape, transform, CRS
   (EPSG code) and nodata, then every band's cells in row order as
   little-endian bytes, read in windows of rows so no raster is read whole.
@@ -16,6 +18,7 @@ The manifest is not hashed this way; it holds the time of the run.
 """
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -41,10 +44,19 @@ def table_content_sha256(path: Path) -> str:
     """
     table = pq.read_table(path)
     digest = hashlib.sha256()
+    digest.update(_geo_metadata(table) + b"\n")
     for name, column in zip(table.column_names, table.columns, strict=True):
         digest.update(f"{name}:{column.type}\n".encode())
         _update_column(digest, column.combine_chunks())
     return digest.hexdigest()
+
+
+def _geo_metadata(table: Any) -> bytes:
+    """The `geo` metadata as canonical JSON, so key order and spacing do not count."""
+    raw = (table.schema.metadata or {}).get(b"geo")
+    if raw is None:
+        return b""
+    return json.dumps(json.loads(raw), sort_keys=True, separators=(",", ":")).encode()
 
 
 def _update_column(digest: Any, column: Any) -> None:

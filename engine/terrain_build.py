@@ -19,6 +19,7 @@ is a window; no source or layer is read whole. This module checks the sources
 before anything is written, so a run that cannot be built is refused first.
 """
 
+import time
 from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ import numpy as np
 import rasterio
 import structlog
 from rasterio.enums import Resampling
+from rasterio.errors import RasterioIOError, WindowError
 from rasterio.io import DatasetReader
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
@@ -45,6 +47,8 @@ LAYER_CRS_EPSG = 26915
 FINE_RESOLUTION_M = 1.0
 MOSAIC_ROLES = ("dem", "dsm", "canopy")
 _FILL = {"uint8": 255, "int16": -32768, "float32": -9999.0, "float64": -9999.0}
+NO_NODATA = "no nodata value declared"
+OUTSIDE = "outside the run extent"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -59,7 +63,8 @@ class TerrainBuild:
         resolution_m: The DEM's pixel size in metres.
         canopy_nodata_by_tile: Canopy tile file name to its pixels without a
             value inside the run extent's bounding box, in the tile's own
-            pixels; None for a tile that declares no nodata value.
+            pixels, or `NO_NODATA` for a tile that declares no nodata value,
+            or `OUTSIDE` for a tile that does not reach the run extent.
         canopy_nodata_cells: Cells of `canopy.tif` without a value, counted as
             canopy 0 in clutter; None without a canopy snapshot.
     """
@@ -69,7 +74,7 @@ class TerrainBuild:
     canopy: Path | None
     clutter: Path | None
     resolution_m: float
-    canopy_nodata_by_tile: dict[str, int | None]
+    canopy_nodata_by_tile: dict[str, int | str]
     canopy_nodata_cells: int | None
 
 
@@ -82,7 +87,7 @@ def dem_resolution_m(dem: NamedSnapshot) -> float:
     """
     sizes = set()
     for path in dem.rasters():
-        with rasterio.open(path) as tile:
+        with _open_source(path, dem.snapshot_id) as tile:
             _check_projected(tile, dem.snapshot_id)
             sizes.add(float(tile.transform.a))
     if len(sizes) != 1:
@@ -140,6 +145,14 @@ def build_terrain(snapshots: dict[str, NamedSnapshot], grid: RunGrid, folder: Pa
     )
 
 
+def _open_source(path: Path, snapshot_id: str) -> DatasetReader:
+    """Open a snapshot raster, refusing one GDAL cannot read before anything is written."""
+    try:
+        return rasterio.open(path)
+    except RasterioIOError as err:
+        raise ConfigError(f"snapshot {snapshot_id}: {path.name} does not open: {err}") from err
+
+
 def _check_projected(tile: DatasetReader, snapshot_id: str) -> None:
     transform = tile.transform
     if tile.crs is None or tile.crs.to_epsg() != LAYER_CRS_EPSG:
@@ -156,7 +169,7 @@ def _check_projected(tile: DatasetReader, snapshot_id: str) -> None:
 def _check_covers(dem: NamedSnapshot, grid: RunGrid) -> None:
     bounds = []
     for path in dem.rasters():
-        with rasterio.open(path) as tile:
+        with _open_source(path, dem.snapshot_id) as tile:
             bounds.append(tile.bounds)
     west, south = min(b.left for b in bounds), min(b.bottom for b in bounds)
     east, north = max(b.right for b in bounds), max(b.top for b in bounds)
@@ -169,7 +182,7 @@ def _check_covers(dem: NamedSnapshot, grid: RunGrid) -> None:
 
 
 def _check_lattice(path: Path, snapshot_id: str, grid: RunGrid) -> None:
-    with rasterio.open(path) as tile:
+    with _open_source(path, snapshot_id) as tile:
         _check_projected(tile, snapshot_id)
         transform = tile.transform
     offsets = (
@@ -182,7 +195,13 @@ def _check_lattice(path: Path, snapshot_id: str, grid: RunGrid) -> None:
 
 def _warped(source: DatasetReader, grid: RunGrid) -> WarpedVRT:
     """The source on the run grid by nearest neighbour: a copy on the lattice, B1 otherwise."""
-    options = {} if source.nodata is not None else {"nodata": _FILL[source.dtypes[0]]}
+    options = {}
+    if source.nodata is None:
+        # Safe to continue: cells outside the source still come out empty
+        # through a stand-in nodata value; a source cell equal to it would be
+        # read as empty, which is why it is logged.
+        log.warning("source_without_nodata", path=str(source.name), fill=_FILL[source.dtypes[0]])
+        options["nodata"] = _FILL[source.dtypes[0]]
     return WarpedVRT(
         source,
         crs=f"EPSG:{LAYER_CRS_EPSG}",
@@ -196,11 +215,17 @@ def _warped(source: DatasetReader, grid: RunGrid) -> WarpedVRT:
 
 def _mosaic_layer(snapshot: NamedSnapshot, grid: RunGrid, path: Path) -> None:
     log.info("terrain_layer_begin", snapshot_id=snapshot.snapshot_id, path=str(path))
+    started = time.monotonic()
     with ExitStack() as stack:
         sources = [stack.enter_context(rasterio.open(p)) for p in snapshot.rasters()]
         vrts = [stack.enter_context(_warped(s, grid)) for s in sources]
         write_cog(path, grid, _first_valid(vrts))
-    log.info("terrain_layer_end", snapshot_id=snapshot.snapshot_id, path=str(path))
+    log.info(
+        "terrain_layer_end",
+        snapshot_id=snapshot.snapshot_id,
+        path=str(path),
+        duration_s=round(time.monotonic() - started, 3),
+    )
 
 
 def _first_valid(vrts: list[WarpedVRT]) -> Callable[[Window], FloatArray]:
@@ -228,25 +253,29 @@ def _clutter_layer(layers: dict[str, Path], grid: RunGrid, path: Path) -> None:
         write_cog(path, grid, cells)
 
 
-def canopy_nodata_by_tile(canopy: NamedSnapshot, grid: RunGrid) -> dict[str, int | None]:
+def canopy_nodata_by_tile(canopy: NamedSnapshot, grid: RunGrid) -> dict[str, int | str]:
     """Pixels without a value in each canopy tile, inside the run extent's bounding box.
 
     Counted in the tile's own pixels and CRS, over the bounding box of the run
-    grid transformed into it; None for a tile that declares no nodata value.
+    grid transformed into it. A tile that declares no nodata value is
+    `NO_NODATA`, and one that does not reach the run extent is `OUTSIDE`.
     """
-    counts: dict[str, int | None] = {}
+    counts: dict[str, int | str] = {}
     for path in canopy.rasters():
         with rasterio.open(path) as tile:
-            counts[path.name] = None if tile.nodata is None else _tile_gaps(tile, grid)
+            counts[path.name] = NO_NODATA if tile.nodata is None else _tile_gaps(tile, grid)
     return counts
 
 
-def _tile_gaps(tile: DatasetReader, grid: RunGrid) -> int:
+def _tile_gaps(tile: DatasetReader, grid: RunGrid) -> int | str:
     bounds = transform_bounds(
         f"EPSG:{LAYER_CRS_EPSG}", tile.crs, grid.west_m, grid.south_m, grid.east_m, grid.north_m
     )
     window = from_bounds(*bounds, transform=tile.transform).round_offsets().round_lengths()
-    window = window.intersection(Window(0, 0, tile.width, tile.height))
+    try:
+        window = window.intersection(Window(0, 0, tile.width, tile.height))
+    except WindowError:
+        return OUTSIDE
     gaps = 0
     for block in windows(int(window.height), int(window.width)):
         shifted = Window(

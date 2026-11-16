@@ -4,21 +4,24 @@ The order is the contract of `docs/INTERFACE.md`:
 
 1. Check, writing nothing: the config and profiles, every named snapshot
    against its manifest, the point layers, the observations, the run grid
-   against the DEM, the code provenance, and that neither `<run_id>/` nor
-   `<run_id>.partial/` exists. Any refusal is a ConfigError.
+   against the DEM, the code provenance, that neither `<run_id>/` nor
+   `<run_id>.partial/` exists, and the ITM library and P.1812 maps when the
+   run lists them. Any refusal is a ConfigError, so the command exits 2.
 2. Create `<output_dir>/<run_id>.partial/` and write the artifacts: the
    terrain build, `predictions.parquet`, the coverage files derived from it,
    the calibration files when the config names observations, and
    `run_report.md`.
 3. Write `manifest.json`, then rename the folder to `<run_id>/`.
 
-A failure in step 2 or 3 propagates: the folder stays `.partial` without a
+A failure in step 2 or 3 is logged as `engine_run_failed` with the run id and
+the `.partial` path, then propagates: the folder stays `.partial` without a
 manifest, and nothing deletes it. The engine never deletes a run folder.
 """
 
 import re
 import time
-from contextlib import ExitStack
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +30,7 @@ import rasterio
 import structlog
 from rasterio.io import DatasetReader
 
-from engine.buildings import Footprints
+from engine.buildings import SHARE_RADIUS_M, Footprints
 from engine.calibration import read_observations, write_calibration
 from engine.config import RunConfig, load_config
 from engine.coverage import write_coverage
@@ -36,12 +39,18 @@ from engine.grid import RunGrid, run_grid
 from engine.manifest import write_run_manifest
 from engine.points import Endpoint, read_points
 from engine.predict import PairPrediction, RunModels, predict_pairs
-from engine.predictions import write_predictions
+from engine.predictions import P1812_QUANTITIES, write_predictions
 from engine.provenance import Provenance, collect_provenance
 from engine.report import report_markdown
 from engine.settings import EngineSettings
 from engine.snapshots import BUILDINGS_FILE, NamedSnapshot, resolve_snapshots
-from engine.terrain_build import TerrainBuild, build_terrain, check_sources, dem_resolution_m
+from engine.terrain_build import (
+    FINE_RESOLUTION_M,
+    TerrainBuild,
+    build_terrain,
+    check_sources,
+    dem_resolution_m,
+)
 from terrain.cells import FineLayers
 from terrain.draws import FineProfileBuilder, MetroProfileBuilder, ProfileBuilder
 from terrain.itm import load_itm_library
@@ -64,6 +73,7 @@ class RunInputs:
     receivers: list[Endpoint]
     observations: pd.DataFrame | None
     grid: RunGrid
+    models: DrawModels
 
 
 def run_engine(config_path: Path, settings: EngineSettings) -> Path:
@@ -82,16 +92,23 @@ def run_engine(config_path: Path, settings: EngineSettings) -> Path:
     """
     started = time.monotonic()
     inputs = prepare_run(config_path, settings)
-    log.info(
-        "engine_run_begin", run_id=inputs.config.run_id, config_sha256=inputs.config.config_sha256
-    )
+    run_id = inputs.config.run_id
+    log.info("engine_run_begin", run_id=run_id, config_sha256=inputs.config.config_sha256)
     partial = start_run(inputs.config)
-    artifacts = write_artifacts(inputs, partial, settings)
-    write_run_manifest(partial, inputs.config, inputs.snapshots, inputs.provenance, artifacts)
-    final = finish_run(partial)
+    try:
+        artifacts = write_artifacts(inputs, partial)
+        with _step("manifest_write", run_id):
+            write_run_manifest(
+                partial, inputs.config, inputs.snapshots, inputs.provenance, artifacts
+            )
+        final = finish_run(partial)
+    except Exception:
+        # Not swallowed: logged with where the unfinished run is, then re-raised.
+        log.error("engine_run_failed", run_id=run_id, partial=str(partial))
+        raise
     log.info(
         "engine_run_end",
-        run_id=inputs.config.run_id,
+        run_id=run_id,
         path=str(final),
         artifacts=len(artifacts),
         duration_s=round(time.monotonic() - started, 3),
@@ -100,7 +117,7 @@ def run_engine(config_path: Path, settings: EngineSettings) -> Path:
 
 
 def prepare_run(config_path: Path, settings: EngineSettings) -> RunInputs:
-    """Check the config and everything it names; write nothing.
+    """Check the config and everything it names, and load the models; write nothing.
 
     Raises:
         ConfigError: for any refusal; see the module docstring.
@@ -111,9 +128,9 @@ def prepare_run(config_path: Path, settings: EngineSettings) -> RunInputs:
     _check_site_ids(sites)
     receivers = read_points(config.rx_points, "rx_id")
     observations = None if config.calibration is None else read_observations(config.calibration)
-    grid = run_grid(sites + receivers, dem_resolution_m(snapshots["dem"]))
+    grid = _grid(sites + receivers, snapshots)
     check_sources(snapshots, grid)
-    provenance = collect_provenance(config.models, settings)
+    provenance = collect_provenance(config.models, settings, config.output_dir)
     _check_output(config)
     return RunInputs(
         config=config,
@@ -123,7 +140,15 @@ def prepare_run(config_path: Path, settings: EngineSettings) -> RunInputs:
         receivers=receivers,
         observations=observations,
         grid=grid,
+        models=load_models(config, snapshots, settings),
     )
+
+
+def _grid(endpoints: list[Endpoint], snapshots: dict[str, NamedSnapshot]) -> RunGrid:
+    try:
+        return run_grid(endpoints, dem_resolution_m(snapshots["dem"]))
+    except ValueError as err:
+        raise ConfigError(f"snapshot {snapshots['dem'].snapshot_id}: {err}") from err
 
 
 def _check_site_ids(sites: list[Endpoint]) -> None:
@@ -144,6 +169,38 @@ def _check_output(config: RunConfig) -> None:
             )
 
 
+def load_models(
+    config: RunConfig, snapshots: dict[str, NamedSnapshot], settings: EngineSettings
+) -> DrawModels:
+    """The run's models with the ITM library and the P.1812 maps loaded.
+
+    Raises:
+        ConfigError: when the library does not load or the maps fail their
+            checks, before anything is written.
+    """
+    try:
+        itm_library = (
+            load_itm_library(settings.itm_library_path) if "itm" in config.models else None
+        )
+        p1812_maps = None
+        if "p1812" in config.models:
+            # Imported only when the run lists p1812: importing it runs Py1812's
+            # map load against the in-memory placeholder (ADR 0006 decision 2).
+            from terrain.p1812 import load_maps
+
+            p1812_maps = load_maps(snapshots["p1812_maps"].folder)
+    except RuntimeError as err:
+        raise ConfigError(str(err)) from err
+    return DrawModels(
+        models=config.models,
+        frequency_mhz=config.frequency_mhz,
+        tx=config.tx_profile,
+        rx=config.rx_profile,
+        itm_library=itm_library,
+        p1812_maps=p1812_maps,
+    )
+
+
 def start_run(config: RunConfig) -> Path:
     """Create the run's `.partial` folder."""
     config.output_dir.mkdir(parents=True, exist_ok=True)
@@ -160,45 +217,64 @@ def finish_run(partial: Path) -> Path:
     return partial.rename(final)
 
 
-def write_artifacts(inputs: RunInputs, partial: Path, settings: EngineSettings) -> list[Path]:
+@contextmanager
+def _step(name: str, run_id: str) -> Iterator[None]:
+    """Log a write step's begin and end with its duration."""
+    started = time.monotonic()
+    log.info(f"{name}_begin", run_id=run_id)
+    yield
+    log.info(f"{name}_end", run_id=run_id, duration_s=round(time.monotonic() - started, 3))
+
+
+def write_artifacts(inputs: RunInputs, partial: Path) -> list[Path]:
     """Write every artifact into the `.partial` folder; returns them in the order written."""
-    config = inputs.config
-    terrain = build_terrain(inputs.snapshots, inputs.grid, partial / "terrain")
-    pairs = predict(inputs, terrain, settings)
+    config, run_id = inputs.config, inputs.config.run_id
+    with _step("terrain_build", run_id):
+        terrain = build_terrain(inputs.snapshots, inputs.grid, partial / "terrain")
+    pairs, absent = predict(inputs, terrain)
     predictions = partial / "predictions.parquet"
-    write_predictions(predictions, pairs, config.models)
-    coverage = write_coverage(partial, config.models, inputs.grid)
+    with _step("predictions_write", run_id):
+        write_predictions(predictions, pairs, config.models, absent)
+    with _step("coverage_write", run_id):
+        coverage = write_coverage(partial, config.models, inputs.grid)
     calibration = []
     if inputs.observations is not None:
-        calibration = write_calibration(partial, inputs.observations, config.models, config.run_id)
+        with _step("calibration_write", run_id):
+            calibration = write_calibration(partial, inputs.observations, config.models, run_id)
     report = partial / "run_report.md"
-    report.write_text(
-        report_markdown(config.run_id, pairs, terrain), encoding="utf-8", newline="\n"
-    )
+    with _step("run_report_write", run_id):
+        report.write_text(report_markdown(run_id, pairs, terrain), encoding="utf-8", newline="\n")
     layers = [terrain.dem, terrain.dsm, terrain.canopy, terrain.clutter]
     return [*(p for p in layers if p is not None), predictions, *coverage, *calibration, report]
 
 
 def predict(
-    inputs: RunInputs, terrain: TerrainBuild, settings: EngineSettings
-) -> list[PairPrediction]:
-    """Open the terrain build and predict every pair."""
+    inputs: RunInputs, terrain: TerrainBuild
+) -> tuple[list[PairPrediction], frozenset[str]]:
+    """Open the terrain build and predict every pair.
+
+    Returns:
+        Every pair's prediction, and the quantities the run's draws cannot
+        report: P.1812's without its 10 m profile or without p1812.
+    """
     with ExitStack() as stack:
         dem = stack.enter_context(rasterio.open(terrain.dem))
         builder = _builder(stack, dem, terrain)
-        footprints = _footprints(inputs.snapshots)
+        footprints = _footprints(inputs.snapshots, inputs.grid)
         pixels = None
-        if footprints is not None and isinstance(builder, FineProfileBuilder):
+        if footprints is not None and terrain.resolution_m == FINE_RESOLUTION_M:
             pixels = footprints.pixels(dem)
         run = RunModels(
             builder=builder,
-            models=_models(inputs, settings),
+            models=inputs.models,
             run_seed=inputs.config.seed,
             endpoint_draws=inputs.config.endpoint_draws,
             footprints=footprints,
             building_pixels=pixels,
         )
-        return predict_pairs(inputs.sites, inputs.receivers, run)
+        cells = isinstance(builder, FineProfileBuilder) and "p1812" in inputs.config.models
+        absent = frozenset() if cells else P1812_QUANTITIES
+        return predict_pairs(inputs.sites, inputs.receivers, run), absent
 
 
 def _builder(stack: ExitStack, dem: DatasetReader, terrain: TerrainBuild) -> ProfileBuilder:
@@ -212,26 +288,16 @@ def _builder(stack: ExitStack, dem: DatasetReader, terrain: TerrainBuild) -> Pro
     return FineProfileBuilder(layers=FineLayers(dem=dem, dsm=dsm, canopy=canopy))
 
 
-def _footprints(snapshots: dict[str, NamedSnapshot]) -> Footprints | None:
+def _footprints(snapshots: dict[str, NamedSnapshot], grid: RunGrid) -> Footprints | None:
+    """The buildings snapshot's footprints that reach within 100 m of the run grid."""
     buildings = snapshots.get("buildings")
-    return None if buildings is None else Footprints.from_parquet(buildings.folder / BUILDINGS_FILE)
-
-
-def _models(inputs: RunInputs, settings: EngineSettings) -> DrawModels:
-    config = inputs.config
-    itm_library = load_itm_library(settings.itm_library_path) if "itm" in config.models else None
-    p1812_maps = None
-    if "p1812" in config.models:
-        # Imported only when the run lists p1812: importing it runs Py1812's
-        # map load against the in-memory placeholder (ADR 0006 decision 2).
-        from terrain.p1812 import load_maps
-
-        p1812_maps = load_maps(inputs.snapshots["p1812_maps"].folder)
-    return DrawModels(
-        models=config.models,
-        frequency_mhz=config.frequency_mhz,
-        tx=config.tx_profile,
-        rx=config.rx_profile,
-        itm_library=itm_library,
-        p1812_maps=p1812_maps,
+    if buildings is None:
+        return None
+    reach_m = SHARE_RADIUS_M
+    window_m = (
+        grid.west_m - reach_m,
+        grid.south_m - reach_m,
+        grid.east_m + reach_m,
+        grid.north_m + reach_m,
     )
+    return Footprints.from_parquet(buildings.folder / BUILDINGS_FILE, window_m=window_m)
