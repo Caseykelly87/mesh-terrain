@@ -175,7 +175,7 @@ jobs:
       # the synthetic snapshots stand in for SNAPSHOTS_HOST_DIR and a runner
       # folder for RUNS_HOST_DIR. A finished run renames its folder after the
       # manifest, so the manifest's presence is the pass.
-      - name: run the engine fixture in the Dagster image
+      - name: run the engine fixture in the engine image
         run: |
           runs="$RUNNER_TEMP/runs"
           mkdir -p "$runs"

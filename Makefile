@@ -62,7 +62,7 @@ help:
 	@echo "                inside SNAPSHOTS_DIR only <id>.partial; --stream unless STREAM=no"
 	@echo "make check-pdal print the PDAL version and fail without readers.ept or writers.gdal"
 	@echo "make engine CONFIG=<file>"
-	@echo "                one engine run in the engine service (the Dagster image, no network):"
+	@echo "                one engine run in the engine image (built from the Dagster Dockerfile, no network):"
 	@echo "                SNAPSHOTS_HOST_DIR read-only at /snapshots, RUNS_HOST_DIR read-write at /runs,"
 	@echo "                the config's folder read-only at /config; output_dir must be /runs or below;"
 	@echo "                checks run before the build; CONFIG counts only on the make command line;"

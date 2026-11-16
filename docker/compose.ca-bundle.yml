@@ -2,9 +2,9 @@
 # Dagster and engine image builds as the BuildKit secret ca_bundle (the two
 # Dockerfiles say which steps mount it and why), and to the pdal service at
 # run time. The Makefile adds this file to every compose command only when
-# CA_BUNDLE_PATH is set. Compose has no optional build secret: an empty path resolves to the
-# project folder and the build fails reading it, so a build without the
-# bundle, as in CI, must not see this file at all.
+# CA_BUNDLE_PATH is set. Compose has no optional build secret: an empty path
+# resolves to the project folder and the build fails reading it, so a build
+# without the bundle, as in CI, must not see this file at all.
 services:
   warehouse:
     build:
