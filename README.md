@@ -21,6 +21,8 @@ The stack's data lives in Docker volumes, storage that Docker keeps apart from a
 
 To run the pre-commit hooks on every commit: `uv run pre-commit install`.
 
+The terrain inputs are snapshots: dated folders under `SNAPSHOTS_DIR`, each with a sha256 manifest, never changed once written. One make target writes each, on the host: `make p1812-maps` (the ITU-R P.1812 maps), `make dem-1m` (the USGS 1 m elevation tile x72y429), `make osm-snapshot DATE=2026-11-01` (OpenStreetMap buildings and water), `make canopy` (the canopy height tile) and `make dsm OSM_SNAPSHOT=<id> SCRATCH=<dir>` (the lidar surface, built through the PDAL container). `make register-snapshot ID=<id>` records a finished one in the warehouse; the DSM needs its OpenStreetMap snapshot written and registered first. A write is permanent, so `make -n <target>` prints the command without running it. `make check-p1812` then runs P.1812 on a flat 10 km path from the map snapshot and expects 149.48 dB. `pipeline/terrain_snapshots/README.md` describes each command.
+
 ## Data credits
 
 Elevation and lidar: USGS 3DEP (public domain). Canopy height: High Resolution Canopy Height Maps by WRI and Meta, version 2, released under CC BY 4.0 on the AWS Open Data registry and under the DINOv3 licence by its authors; both apply and both are carried into every map that uses it. Buildings and roads: © OpenStreetMap contributors (ODbL). Boundary: US Census TIGER. Meshtastic packet data: a single capture from 2026-10-22 to 2026-10-25 from the public broker and the MeshSTL regional broker under their terms of use, held privately; only aggregated, pseudonymised derivatives are published.
@@ -33,14 +35,14 @@ Elevation and lidar: USGS 3DEP (public domain). Canopy height: High Resolution C
 | `pipeline/` | Dagster code location: settings, logging, dbt assets, later loaders and features |
 | `dbt/` | dbt project: staging, core and analytics models and tests |
 | `terrain/` | Pure terrain and propagation functions (Phase 3) |
-| `docker/` | Dockerfiles, database init SQL and the bucket bootstrap |
+| `docker/` | Dockerfiles, database init SQL, the bucket bootstrap and the scripts behind the make targets |
 | `infra/` | Terraform for the cloud phase (Phase 6) |
 | `web/`, `arcgis/` | MapLibre site and ArcGIS Pro deliverable (Phase 5) |
 | `docs/` | Plan, style guide, data-quality contract, ADRs, status |
 
 Orchestration is Dagster rather than Airflow; ADR 0001 records the trade-off (asset lineage and a light local footprint over the more common line on job postings).
 
-The Dagster image also carries the Irregular Terrain Model (ITM), the radio propagation model the project tests in Phase 3, as a shared library at `/usr/local/lib/libitm.so`. It is compiled in a build stage of `docker/dagster/Dockerfile` from the reference C++ sources published by NTIA (the National Telecommunications and Information Administration), which are public domain; NTIA asks to be acknowledged and for modifications to be recorded, and the two build-time edits are listed in that Dockerfile and in `docs/adr/0002-itm-spike/README.md`. `terrain/itm.py` (Phase 3) loads the library through `ctypes` from the path in the `ITM_LIBRARY_PATH` setting, and `make check-itm` proves the library in the built image still gives the figure the spike measured. ADR 0002 records why the library was chosen over SPLAT.
+The Dagster image also carries the Irregular Terrain Model (ITM), the radio propagation model the project tests in Phase 3, as a shared library at `/usr/local/lib/libitm.so`. It is compiled in a build stage of `docker/dagster/Dockerfile` from the reference C++ sources published by NTIA (the National Telecommunications and Information Administration), which are public domain; NTIA asks to be acknowledged and for modifications to be recorded, and the two build-time edits are listed in that Dockerfile and in `docs/adr/0002-itm-spike/README.md`. `terrain/itm.py` (Phase 3) loads the library through `ctypes` from the path in the `ITM_LIBRARY_PATH` setting, and `make check-itm` proves the library in the built image still gives the figure the spike measured, then runs `tests/test_itm.py` and `tests/test_path_loss.py` inside the image. Their tests that call the library skip on any machine without it; in the image a skip fails the check. ADR 0002 records why the library was chosen over SPLAT.
 
 ## Running on Windows
 
