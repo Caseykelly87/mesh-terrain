@@ -22,6 +22,8 @@
 # - a config folder that is or holds either checkout, or holds a file named
 #   .env or meshstl.env anywhere below it: the folder is mounted whole, and
 #   those files carry the HMAC key and the MeshSTL broker credentials.
+# - a checkout with uncommitted changes, or one git cannot read: the image is
+#   built from the working tree and records HEAD (Casey, PR #43, 1 (a)).
 set -euo pipefail
 
 config=$1
@@ -111,6 +113,17 @@ output_dir=$(sed -nE "s/^output_dir:[[:space:]]*[\"']?([^\"'[:space:]#\\]*).*/\1
 case "/$output_dir/" in
     */../*) refuse "$config: output_dir $output_dir has a .. segment, which leaves /runs" ;;
 esac
+
+# The image is built from the working tree but records HEAD as the engine's
+# commit, so a run from a tree with uncommitted changes would name code it did
+# not run (Casey, PR #43, 1 (a)). Untracked files count, as engine_git_dirty
+# counts them; ignored files such as .env do not. Last, so every other
+# refusal still shows in a tree that is being edited.
+changes=$(git status --porcelain 2> /dev/null) ||
+    refuse "cannot tell whether the checkout has uncommitted changes: git status failed (not a git checkout?)"
+[ -z "$changes" ] ||
+    refuse "the checkout has uncommitted changes, and the run would record HEAD for code it did not run; commit or stash them first:
+$changes"
 
 config_name=$(basename "$config")
 
