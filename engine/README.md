@@ -62,6 +62,10 @@ Each artifact's `content_sha256` hashes its rows or cells, not the file (`engine
 
 `engine/fixtures/` holds the fixture configs and point layers; `tests/fixtures/snapshots/` holds the synthetic 1 km sub-tile (DEM, DSM, two canopy tiles), the buildings layer and the synthetic P.1812 maps. All are made up by `tests/make_engine_fixtures.py`; none is real data, and P.1812 numbers from them are not predictions.
 
+## Preparing a tile run
+
+`python -m engine.prepare x72y429 --folder <configs folder>` writes a real run's inputs before `make engine`, with `SNAPSHOTS_DIR` set as for the engine. The folder already holds the real gateways (`tx_sites_real.parquet`: `site_id`, `geometry`, `box_half_width_m`, `role`) and the both-ends pair's relay end (`rx_real.parquet`: `rx_id`, `geometry`, `box_half_width_m`), in EPSG:26915, written by ingest-eng's command. It adds 400 made-up receivers every 500 m starting 250 m inside the tile edges (`grid-rRRcCC`, rows from the north, columns from the west, box 0). It checks each box plus 50 m against the DEM snapshot with the engine's own extent rule: a receiver that fails stops it, a site that fails is left out. It finds the DSM cells more than 60 m above the DEM and measures each site to receiver path's distance to them (Casey's Q2 (a), issue #44). Then it writes `rx_points.parquet`, `tx_sites.parquet`, `crossing.md` and `x72y429.yaml`, and prints `crossing.md`. Exit status 0 when written, 2 when refused, with nothing written; it never overwrites one of its outputs and refuses a folder inside a git checkout. Its messages, log lines and `crossing.md` name nodes by pseudonym and hold no coordinate. The folder holds real positions and stays outside git; coverage outputs built from real gateway positions are never published (Casey, issue #44).
+
 ## What it does not do
 
 No downloads, no database, no position improvement, no schedule and no publication. It writes only into the configured output folder. The metro DEM in EPSG:4269 is refused until its projection question is decided (`docs/STATUS.md`).
