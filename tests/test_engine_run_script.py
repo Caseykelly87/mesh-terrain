@@ -17,9 +17,30 @@ REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "docker" / "engine-run.sh"
 FIXTURE_CONFIG = REPO / "engine" / "fixtures" / "fixture-run-itm.yaml"
 SNAPSHOTS = REPO / "tests" / "fixtures" / "snapshots"
-BASH = shutil.which("bash")
 
-pytestmark = pytest.mark.skipif(BASH is None, reason="docker/engine-run.sh needs bash")
+
+def find_bash() -> str | None:
+    """Git Bash on Windows, any bash elsewhere, or None.
+
+    From PowerShell, `bash` on PATH can be the WSL launcher in System32, which
+    runs the script in another file system where these paths do not exist.
+    """
+    bash = shutil.which("bash")
+    if os.name != "nt":
+        return bash
+    if bash is not None and not Path(bash).parent.as_posix().lower().endswith(
+        ("/system32", "/windowsapps")
+    ):
+        return bash
+    git_bash = Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git" / "bin" / "bash.exe"
+    return str(git_bash) if git_bash.is_file() else None
+
+
+BASH = find_bash()
+
+pytestmark = pytest.mark.skipif(
+    BASH is None, reason="docker/engine-run.sh needs bash (Git Bash on Windows)"
+)
 
 
 def main_checkout() -> Path:
@@ -35,7 +56,7 @@ def main_checkout() -> Path:
 
 
 def run_script(
-    config: Path, runs: Path | str, env: dict[str, str]
+    config: Path, runs: Path | str, env: dict[str, str], cwd: Path = REPO
 ) -> subprocess.CompletedProcess[str]:
     assert BASH is not None
     environment = {
@@ -48,7 +69,7 @@ def run_script(
     runs_arg = runs.as_posix() if isinstance(runs, Path) else runs
     return subprocess.run(
         [BASH, SCRIPT.as_posix(), config.as_posix(), runs_arg],
-        cwd=REPO,
+        cwd=cwd,
         env=environment,
         capture_output=True,
         text=True,
@@ -118,6 +139,16 @@ REFUSALS: dict[str, tuple[Case, str]] = {
         lambda t: (config_with(t, 'output_dir: "/runs/a/.." # up'), t / "runs", {}),
         "..",
     ),
+    # YAML reads a # with no space before it as part of the value.
+    "output_dir with a # in the value": (
+        lambda t: (config_with(t, "output_dir: /runs#x"), t / "runs", {}),
+        "output_dir must be /runs",
+    ),
+    # A double-quoted YAML string turns \x2e into a dot, so this is /runs/../etc.
+    "output_dir with an escape": (
+        lambda t: (config_with(t, 'output_dir: "/runs/\\x2e\\x2e/etc"'), t / "runs", {}),
+        "output_dir must be /runs",
+    ),
     "second output_dir line": (
         lambda t: (config_with(t, "output_dir: /runs", "output_dir: /tmp/out\n"), t / "runs", {}),
         "once",
@@ -175,6 +206,18 @@ def test_refused_before_any_build(tmp_path: Path, name: str) -> None:
     assert result.stdout == "", "a refused run must not reach the build"
     assert result.stderr.startswith("make engine: refused: ")
     assert fragment in result.stderr
+
+
+def test_config_folder_holding_a_checkout_is_refused(tmp_path: Path) -> None:
+    folder = made(tmp_path / "configs")
+    checkout = made(folder / "checkout")
+    subprocess.run(["git", "init", "--quiet", checkout.as_posix()], check=True)
+    config = folder / "run.yaml"
+    config.write_text(FIXTURE_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
+    result = run_script(config, made(tmp_path / "runs"), {}, cwd=checkout)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert result.stdout == ""
+    assert "is or holds the checkout" in result.stderr
 
 
 def fold(text: str) -> str:
