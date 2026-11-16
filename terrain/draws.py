@@ -41,7 +41,7 @@ DEFAULT_ENDPOINT_DRAWS = 16
 METRO_STEP_M = 10.0
 FINE_STEP_M = 1.0
 
-log = structlog.get_logger(__name__).bind(component="terrain.draws")
+log = structlog.get_logger(component="terrain.draws")
 
 
 @dataclass(frozen=True, kw_only=True)

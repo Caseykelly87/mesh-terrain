@@ -44,7 +44,7 @@ ENDPOINT_TOLERANCE_M = 0.01
 """Largest gap between the last profile distance and the receiver; the samplers put
 the last sample on the receiver, so a larger gap is a bug."""
 
-log = structlog.get_logger(__name__).bind(component="terrain.profile")
+log = structlog.get_logger(component="terrain.profile")
 
 
 @dataclass(frozen=True, kw_only=True)
