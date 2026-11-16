@@ -43,6 +43,7 @@ log = structlog.get_logger(component="engine.terrain_build")
 
 LAYER_CRS_EPSG = 26915
 FINE_RESOLUTION_M = 1.0
+MOSAIC_ROLES = ("dem", "dsm", "canopy")
 _FILL = {"uint8": 255, "int16": -32768, "float32": -9999.0, "float64": -9999.0}
 
 
@@ -120,15 +121,9 @@ def build_terrain(snapshots: dict[str, NamedSnapshot], grid: RunGrid, folder: Pa
         The written layers and the canopy gap counts.
     """
     folder.mkdir()
-    layers: dict[str, Path] = {}
-    for role, resampling in (
-        ("dem", Resampling.nearest),
-        ("dsm", Resampling.nearest),
-        ("canopy", Resampling.nearest),
-    ):
-        if role in snapshots:
-            layers[role] = folder / f"{role}.tif"
-            _mosaic_layer(snapshots[role], grid, layers[role], resampling)
+    layers = {role: folder / f"{role}.tif" for role in MOSAIC_ROLES if role in snapshots}
+    for role, path in layers.items():
+        _mosaic_layer(snapshots[role], grid, path)
     clutter = None
     if "dsm" in layers or "canopy" in layers:
         clutter = folder / "clutter.tif"
@@ -185,7 +180,8 @@ def _check_lattice(path: Path, snapshot_id: str, grid: RunGrid) -> None:
         raise ConfigError(f"snapshot {snapshot_id}: {path.name} is off the run grid's lattice")
 
 
-def _warped(source: DatasetReader, grid: RunGrid, resampling: Resampling) -> WarpedVRT:
+def _warped(source: DatasetReader, grid: RunGrid) -> WarpedVRT:
+    """The source on the run grid by nearest neighbour: a copy on the lattice, B1 otherwise."""
     options = {} if source.nodata is not None else {"nodata": _FILL[source.dtypes[0]]}
     return WarpedVRT(
         source,
@@ -193,18 +189,16 @@ def _warped(source: DatasetReader, grid: RunGrid, resampling: Resampling) -> War
         transform=grid.transform,
         width=grid.width,
         height=grid.height,
-        resampling=resampling,
+        resampling=Resampling.nearest,
         **options,
     )
 
 
-def _mosaic_layer(
-    snapshot: NamedSnapshot, grid: RunGrid, path: Path, resampling: Resampling
-) -> None:
+def _mosaic_layer(snapshot: NamedSnapshot, grid: RunGrid, path: Path) -> None:
     log.info("terrain_layer_begin", snapshot_id=snapshot.snapshot_id, path=str(path))
     with ExitStack() as stack:
         sources = [stack.enter_context(rasterio.open(p)) for p in snapshot.rasters()]
-        vrts = [stack.enter_context(_warped(s, grid, resampling)) for s in sources]
+        vrts = [stack.enter_context(_warped(s, grid)) for s in sources]
         write_cog(path, grid, _first_valid(vrts))
     log.info("terrain_layer_end", snapshot_id=snapshot.snapshot_id, path=str(path))
 
