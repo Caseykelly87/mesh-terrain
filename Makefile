@@ -62,10 +62,11 @@ help:
 	@echo "                inside SNAPSHOTS_DIR only <id>.partial; --stream unless STREAM=no"
 	@echo "make check-pdal print the PDAL version and fail without readers.ept or writers.gdal"
 	@echo "make engine CONFIG=<file>"
-	@echo "                one engine run in the Dagster image: SNAPSHOTS_HOST_DIR read-only at /snapshots,"
-	@echo "                RUNS_HOST_DIR read-write at /runs, the config's folder read-only at /config;"
-	@echo "                the config's output_dir must be /runs or below it; CONFIG counts only on"
-	@echo "                the make command line; never scheduled"
+	@echo "                one engine run in the engine service (the Dagster image, no network):"
+	@echo "                SNAPSHOTS_HOST_DIR read-only at /snapshots, RUNS_HOST_DIR read-write at /runs,"
+	@echo "                the config's folder read-only at /config; output_dir must be /runs or below;"
+	@echo "                checks run before the build; CONFIG counts only on the make command line;"
+	@echo "                never scheduled"
 	@echo ""
 	@echo "Terrain snapshots: each target writes one snapshot under SNAPSHOTS_DIR (ROOT=<dir> instead)"
 	@echo "and refuses an id that exists. A write is permanent; run one only after Casey's yes."
@@ -139,10 +140,9 @@ check: env lint test dbt-build
 # which the image lacks, and they run on the host in the tests job. The image
 # has no dev group and no tests folder: the throwaway container installs the
 # dev group from uv.lock, hash-checked, which needs PyPI, and gets tests/ as a
-# read-only mount. The two
-# MSYS variables stop Git Bash rewriting the container paths and do nothing
-# elsewhere. With CA_BUNDLE_PATH set the bundle is mounted for uv, as the build
-# secret is at build time.
+# read-only mount. The two MSYS variables stop Git Bash rewriting the
+# container paths and do nothing elsewhere. With CA_BUNDLE_PATH set the bundle
+# is mounted for uv, as the build secret is at build time.
 ITM_TESTS := tests/test_itm.py tests/test_path_loss.py \
     tests/test_engine_run.py::test_the_itm_fixture_runs_in_the_image
 ITM_TESTS_IN_IMAGE := uv sync --frozen --inexact --no-install-project --group dev --quiet \
@@ -185,15 +185,15 @@ check-definitions:
 pdal: env
 	PDAL_COMPOSE='$(COMPOSE)' bash docker/pdal-run.sh '$(PIPELINE)' '$(WORKDIR)' '$(STREAM)' '$(METADATA)'
 
-# One engine run (docs/INTERFACE.md) in the Dagster image, the one place
-# libitm.so exists. Example: make engine CONFIG=engine/fixtures/fixture-run-itm.yaml
-# The build comes first, as in check-itm, so the run uses the checkout's code
-# and records its commit. The image reads SNAPSHOTS_DIR=/snapshots, the
-# read-only mount of SNAPSHOTS_HOST_DIR; docker/engine-run.sh says what it
-# mounts and refuses. Never scheduled.
+# One engine run (docs/INTERFACE.md) in the engine service, built from the
+# Dagster Dockerfile, the one place libitm.so exists. Example:
+# make engine CONFIG=engine/fixtures/fixture-run-itm.yaml
+# docker/engine-run.sh checks the config, RUNS_HOST_DIR and SNAPSHOTS_HOST_DIR,
+# and only then builds the image, so a refused run builds nothing, and a run
+# uses the checkout's code and records its commit (ENGINE_GIT_COMMIT above).
+# The script says what it mounts and refuses. Never scheduled.
 engine: env
-	$(call require,CONFIG,<engine config file>)$(COMPOSE) build dagster-webserver
-	ENGINE_COMPOSE='$(COMPOSE)' bash docker/engine-run.sh '$(call typed,CONFIG)' '$(RUNS_HOST_DIR)'
+	$(call require,CONFIG,<engine config file>)ENGINE_COMPOSE='$(COMPOSE)' bash docker/engine-run.sh '$(call typed,CONFIG)' '$(RUNS_HOST_DIR)'
 
 # The DSM pipeline needs the EPT reader and the GDAL writer; this fails when
 # the pinned image lacks either, and prints the version a manifest records.
