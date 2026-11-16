@@ -20,6 +20,8 @@ dependencies = [
     "meshtastic==2.7.11",
     "numpy==2.5.4",
     "paho-mqtt==2.2.0",
+    # engine/ imports pandas itself; until now it arrived only through geopandas.
+    "pandas==3.1.1",
     "psycopg[binary]==3.3.6",
     "pyarrow==26.0.1",
     # No PyPI release and no tags upstream, so the commit archive is the pin and
