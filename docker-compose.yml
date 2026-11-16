@@ -25,6 +25,16 @@ x-dagster-environment: &dagster-environment
 # host write one. The migrate service reads no snapshot and does not mount it.
 x-snapshots-volume: &snapshots-volume ${SNAPSHOTS_HOST_DIR:?set SNAPSHOTS_HOST_DIR in .env (see .env.example)}:/snapshots:ro
 
+# The image has no git, so an engine run takes its code's commit from the image
+# (engine/provenance.py). The Makefile exports ENGINE_GIT_COMMIT from the
+# checkout; a build without make leaves it empty and the engine refuses to run.
+# One block for the three services keeps their images identical.
+x-dagster-build: &dagster-build
+  context: .
+  dockerfile: docker/dagster/Dockerfile
+  args:
+    ENGINE_GIT_COMMIT: ${ENGINE_GIT_COMMIT:-}
+
 # Every service sets restart: "no", so nothing in this project starts unless
 # `make up` starts it. The Docker engine restarts always containers, and
 # unless-stopped containers not stopped by hand, whenever it starts;
@@ -103,9 +113,7 @@ services:
     # Creates or upgrades the Dagster storage tables once. Without this the
     # webserver and the daemon both run create_all against an empty database
     # at the same time and one of them dies on a duplicate table.
-    build:
-      context: .
-      dockerfile: docker/dagster/Dockerfile
+    build: *dagster-build
     command: ["dagster", "instance", "migrate"]
     environment: *dagster-environment
     depends_on:
@@ -114,9 +122,7 @@ services:
     restart: "no"
 
   dagster-webserver:
-    build:
-      context: .
-      dockerfile: docker/dagster/Dockerfile
+    build: *dagster-build
     command: ["dagster-webserver", "-h", "0.0.0.0", "-p", "3000", "-w", "/opt/dagster/home/workspace.yaml"]
     environment:
       <<: *dagster-environment
@@ -148,9 +154,7 @@ services:
       start_period: 30s
 
   dagster-daemon:
-    build:
-      context: .
-      dockerfile: docker/dagster/Dockerfile
+    build: *dagster-build
     command: ["dagster-daemon", "run", "-w", "/opt/dagster/home/workspace.yaml"]
     environment:
       <<: *dagster-environment

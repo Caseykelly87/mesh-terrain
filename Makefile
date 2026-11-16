@@ -23,11 +23,16 @@ export UV_SYSTEM_CERTS := true
 # The CA bundle reaches the image build only as a BuildKit secret, and only
 # when .env names it (docker/compose.ca-bundle.yml says why it is a second file).
 COMPOSE := docker compose$(if $(CA_BUNDLE_PATH), -f docker-compose.yml -f docker/compose.ca-bundle.yml)
+
+# Every image build records the checkout's commit for the engine's run
+# manifest (docker-compose.yml, x-dagster-build). Empty outside a checkout,
+# and then the engine in that image refuses to run.
+export ENGINE_GIT_COMMIT := $(shell git rev-parse HEAD 2> /dev/null)
 UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
-.PHONY: help env up down nuke check check-itm check-definitions check-pdal check-p1812 pdal fmt reproduce load capture dbt-deps dbt-build dbt-debug lint test
+.PHONY: help env up down nuke check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-debug lint test
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
 
 help:
@@ -56,6 +61,10 @@ help:
 	@echo "                /pipelines/<file>, WORKDIR is read-write at /work (write outputs there);"
 	@echo "                inside SNAPSHOTS_DIR only <id>.partial; --stream unless STREAM=no"
 	@echo "make check-pdal print the PDAL version and fail without readers.ept or writers.gdal"
+	@echo "make engine CONFIG=<file>"
+	@echo "                one engine run in the Dagster image: SNAPSHOTS_HOST_DIR read-only at /snapshots,"
+	@echo "                RUNS_HOST_DIR read-write at /runs, the config's folder read-only at /config;"
+	@echo "                the config's output_dir must be /runs or below it; never scheduled"
 	@echo ""
 	@echo "Terrain snapshots: each target writes one snapshot under SNAPSHOTS_DIR (ROOT=<dir> instead)"
 	@echo "and refuses an id that exists. A write is permanent; run one only after Casey's yes."
@@ -170,6 +179,16 @@ check-definitions:
 # snapshots folder and is not a <id>.partial folder directly below it (ing_02).
 pdal: env
 	PDAL_COMPOSE='$(COMPOSE)' bash docker/pdal-run.sh '$(PIPELINE)' '$(WORKDIR)' '$(STREAM)' '$(METADATA)'
+
+# One engine run (docs/INTERFACE.md) in the Dagster image, the one place
+# libitm.so exists. Example: make engine CONFIG=engine/fixtures/fixture-run-itm.yaml
+# The build comes first, as in check-itm, so the run uses the checkout's code
+# and records its commit. The image reads SNAPSHOTS_DIR=/snapshots, the
+# read-only mount of SNAPSHOTS_HOST_DIR; docker/engine-run.sh says what it
+# mounts and refuses. Never scheduled.
+engine: env
+	$(call require,CONFIG,<engine config file>)$(COMPOSE) build dagster-webserver
+	ENGINE_COMPOSE='$(COMPOSE)' bash docker/engine-run.sh '$(CONFIG)' '$(RUNS_HOST_DIR)'
 
 # The DSM pipeline needs the EPT reader and the GDAL writer; this fails when
 # the pinned image lacks either, and prints the version a manifest records.
