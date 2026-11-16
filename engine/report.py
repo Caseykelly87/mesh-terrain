@@ -30,6 +30,7 @@ CAUSE_NAMES: dict[RefusalReason, str] = {
     "clutter_nan": "missing clutter",
     "short_profile": "too-short profile",
 }
+ZERO_LENGTH = "zero-length pair"
 THRESHOLD_BAND = (0.15, 0.25)
 
 
@@ -55,27 +56,32 @@ def report_markdown(run_id: str, pairs: list[PairPrediction], terrain: TerrainBu
 
 
 def _summary(run_id: str, pairs: list[PairPrediction], terrain: TerrainBuild) -> str:
-    summaries = [p.summary for p in pairs if p.summary is not None]
-    all_refused = sum(s.refused_draws == s.endpoint_draws for s in summaries)
+    zero_length = sum(p.summary is None for p in pairs)
+    all_refused = sum(p.refused_draws == p.endpoint_draws for p in pairs)
     return (
         f"# Run report: {run_id}\n\n"
-        f"- Pairs: {len(pairs)}; draws made: {sum(s.endpoint_draws for s in summaries)}.\n"
-        f"- Zero-length pairs (no draw made, every value null): {len(pairs) - len(summaries)}.\n"
-        f"- Pairs with every draw refused: {all_refused}.\n"
+        f"- Pairs: {len(pairs)}; endpoint draws: {sum(p.endpoint_draws for p in pairs)}.\n"
+        "- Zero-length pairs (every draw counted as refused, every value null): "
+        f"{zero_length}.\n"
+        f"- Pairs with every draw refused, zero-length pairs included: {all_refused}.\n"
         f"- DEM resolution: {terrain.resolution_m:g} m.\n"
     )
 
 
 def _refusals(pairs: list[PairPrediction]) -> str:
-    totals = dict.fromkeys(get_args(RefusalReason), 0)
+    totals = {CAUSE_NAMES[reason]: 0 for reason in get_args(RefusalReason)}
+    totals[ZERO_LENGTH] = 0
     for pair in pairs:
-        if pair.summary is not None:
-            for reason, count in pair.summary.refusals.items():
-                totals[reason] += count
-    rows = [f"| {CAUSE_NAMES[reason]} | {count} |" for reason, count in totals.items()]
+        if pair.summary is None:
+            totals[ZERO_LENGTH] += pair.endpoint_draws
+            continue
+        for reason, count in pair.summary.refusals.items():
+            totals[CAUSE_NAMES[reason]] += count
+    rows = [f"| {cause} | {count} |" for cause, count in totals.items()]
     return (
         "## Refused draws by cause\n\n"
-        "A refused draw is dropped for every model (ADR 0006 item 11).\n\n"
+        "A refused draw is dropped for every model (ADR 0006 item 11). A zero-length pair "
+        "counts all its draws as refused, so the total equals the sum of `refused_draws`.\n\n"
         "| Cause | Draws |\n| --- | --- |\n" + "\n".join(rows) + "\n"
         f"| all causes | {sum(totals.values())} |\n"
     )
