@@ -6,11 +6,32 @@ layers by absolute path and writes under the test's own folder. Snapshot ids
 resolve under `tests/fixtures/snapshots`, the fixture run's SNAPSHOTS_DIR.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import pytest
+import structlog
 import yaml
+
 from engine.settings import EngineSettings
+
+
+@pytest.fixture(scope="module", autouse=True)
+def no_logger_caching() -> Iterator[None]:
+    """Keep the engine tests from caching structlog loggers.
+
+    `pipeline/definitions.py` configures logging at import with
+    `cache_logger_on_first_use=True`, so a lazy logger first used afterwards,
+    such as `pipeline.common.snapshot`'s through `verified_manifest`, is fixed
+    for the rest of the session and a later `capture_logs()` cannot see it.
+    Module scope, so the shared fixture runs are covered too.
+    """
+    saved = structlog.get_config()
+    structlog.configure(cache_logger_on_first_use=False)
+    yield
+    structlog.configure(**saved)
+
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "engine" / "fixtures"
