@@ -7,6 +7,11 @@
 # exact image and compiler; a silent base update could move it.
 ARG PYTHON_BASE=python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
 
+# master at 2024-09-24, after the last tagged release (v1.4, 2021), because
+# it carries the const-correctness fix. Declared before the first stage so the
+# runtime stage can record the same commit for the engine's run manifest.
+ARG ITM_COMMIT=183ad95bd813a8be11009df396e1c631356864b2
+
 # Stage itm-build compiles the NTIA Irregular Terrain Model (ITM) C++ sources
 # into a shared library that terrain/itm.py loads through ctypes (ADR 0002).
 # NTIA ships no Linux build system, so this is the whole build. The compiler
@@ -19,9 +24,7 @@ ARG PYTHON_BASE=python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b8
 # listed with their dates and repeated in docs/adr/0002-itm-spike/README.md.
 FROM ${PYTHON_BASE} AS itm-build
 
-# master at 2024-09-24, after the last tagged release (v1.4, 2021), because
-# it carries the const-correctness fix.
-ARG ITM_COMMIT=183ad95bd813a8be11009df396e1c631356864b2
+ARG ITM_COMMIT
 ARG ITM_SHA256=42db17607994811977b1aa2e6a7fd0f062e0b28bc7c14285c64073292814a093
 
 RUN apt-get update \
@@ -120,3 +123,12 @@ ENV PATH="/opt/mesh-terrain/.venv/bin:${PATH}"
 COPY --from=itm-build /usr/local/lib/libitm.so /usr/local/lib/libitm.so
 
 COPY docker/dagster/dagster.yaml docker/dagster/workspace.yaml ${DAGSTER_HOME}/
+
+# An engine run's manifest names the code it ran (engine/provenance.py). The
+# image has no git, so both commits are recorded here: the NTIA commit the
+# library above was built from, and the checkout's commit, which make passes
+# as a build argument. Last, so a new commit rebuilds only these layers.
+ARG ITM_COMMIT
+ARG ENGINE_GIT_COMMIT=
+ENV ITM_SOURCE_COMMIT=${ITM_COMMIT} \
+    ENGINE_GIT_COMMIT=${ENGINE_GIT_COMMIT}
