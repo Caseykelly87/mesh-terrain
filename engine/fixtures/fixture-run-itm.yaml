@@ -2,7 +2,8 @@
 # to 500 synthetic receivers on a synthetic 1 km sub-tile of x72y429, with a
 # synthetic observations layer. Nothing here is real data. Paths are relative
 # to this file; snapshot ids are folders under SNAPSHOTS_DIR, which for this
-# run is tests/fixtures/snapshots. CI and the tests replace output_dir.
+# run is tests/fixtures/snapshots. The tests replace output_dir; CI runs this
+# file unchanged through make engine, into /runs.
 # P.1812 runs on the synthetic map snapshot, so its numbers are not predictions.
 # The same run as fixture-run.yaml with itm added, for the Dagster image,
 # the one place libitm.so exists.
