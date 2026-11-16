@@ -64,7 +64,8 @@ help:
 	@echo "make engine CONFIG=<file>"
 	@echo "                one engine run in the Dagster image: SNAPSHOTS_HOST_DIR read-only at /snapshots,"
 	@echo "                RUNS_HOST_DIR read-write at /runs, the config's folder read-only at /config;"
-	@echo "                the config's output_dir must be /runs or below it; never scheduled"
+	@echo "                the config's output_dir must be /runs or below it; CONFIG counts only on"
+	@echo "                the make command line; never scheduled"
 	@echo ""
 	@echo "Terrain snapshots: each target writes one snapshot under SNAPSHOTS_DIR (ROOT=<dir> instead)"
 	@echo "and refuses an id that exists. A write is permanent; run one only after Casey's yes."
@@ -191,7 +192,7 @@ pdal: env
 # mounts and refuses. Never scheduled.
 engine: env
 	$(call require,CONFIG,<engine config file>)$(COMPOSE) build dagster-webserver
-	ENGINE_COMPOSE='$(COMPOSE)' bash docker/engine-run.sh '$(CONFIG)' '$(RUNS_HOST_DIR)'
+	ENGINE_COMPOSE='$(COMPOSE)' bash docker/engine-run.sh '$(call typed,CONFIG)' '$(RUNS_HOST_DIR)'
 
 # The DSM pipeline needs the EPT reader and the GDAL writer; this fails when
 # the pinned image lacks either, and prints the version a manifest records.
