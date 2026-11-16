@@ -66,13 +66,27 @@ PREDICTION_COLUMNS = [
 ]
 
 
+def engine_env() -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k != "NODE_ID_HMAC_KEY"}
+    env["SNAPSHOTS_DIR"] = str(SNAPSHOTS)
+    return env
+
+
 @pytest.fixture(scope="module")
 def two_runs(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
-    runs = [
-        run_engine(fixture_config(tmp_path_factory.mktemp(name)), fixture_settings())
-        for name in ("first", "second")
-    ]
-    return runs[0], runs[1]
+    """The fixture run in this process, then again in a fresh one through the command line."""
+    first = run_engine(fixture_config(tmp_path_factory.mktemp("first")), fixture_settings())
+    second_config = fixture_config(tmp_path_factory.mktemp("second"))
+    done = subprocess.run(
+        [sys.executable, "-m", "engine", "run", str(second_config)],
+        cwd=REPO,
+        env=engine_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    return first, second_config.parent / "out" / "fixture"
 
 
 def manifest_of(run: Path) -> dict[str, Any]:
@@ -334,7 +348,9 @@ def test_a_zero_length_pair_is_a_row_of_nulls(tmp_path: Path) -> None:
     same = rows[(rows["site_id"] == "site-east") & (rows["rx_id"] == "rx-2")].iloc[0]
     assert same["distance_m"] == 0.0
     assert pd.isna(same["bearing_deg"]) and pd.isna(same["fspl_db_median"])
-    assert pd.isna(same["refused_draws"]) and same["endpoint_draws"] == 1
+    assert same["endpoint_draws"] == 1
+    assert same["refused_draws"] == same["endpoint_draws"], "within 0 to endpoint_draws"
+    assert pd.isna(same["rx_building_draws"]) and pd.isna(same["clutter_height_m_median"])
     assert rows[rows["rx_id"] != "rx-2"]["fspl_db_median"].notna().all()
 
 
@@ -466,8 +482,7 @@ def test_a_metro_dem_run_writes_null_clutter_building_and_p1812_columns(tmp_path
 
 
 def test_the_command_line_exits_zero_on_a_run_and_two_on_a_refusal(tmp_path: Path) -> None:
-    env = {k: v for k, v in os.environ.items() if k != "NODE_ID_HMAC_KEY"}
-    env["SNAPSHOTS_DIR"] = str(SNAPSHOTS)
+    env = engine_env()
     good = small_config(tmp_path)
     command = [sys.executable, "-m", "engine", "run"]
     done = subprocess.run(
@@ -533,6 +548,294 @@ def test_clutter_follows_the_rule_cell_by_cell(two_runs: tuple[Path, Path]) -> N
     expected = clutter_height_m(layers["dem"], dsm_m=layers["dsm"], canopy_m=layers["canopy"])
     assert np.array_equal(layers["clutter"], expected.astype("float32"), equal_nan=True)
     assert np.isnan(layers["clutter"]).any(), "the DEM hole stays without a value"
+
+
+# Review of PR #40: decisions B2, B3, B5 and should-fix items S1 to S5.
+
+MODEL_COLUMNS = [
+    "fspl_db_median",
+    "knife_edge_db_median",
+    "hata_db_median",
+    "p1812_db_median",
+    "los_share",
+    "fresnel_clearance_pct_median",
+    "clutter_height_m_median",
+    "p1812_at_cap_share",
+]
+
+
+def test_columns_are_null_exactly_where_every_draw_was_refused(
+    two_runs: tuple[Path, Path],
+) -> None:
+    rows = gpd.read_parquet(two_runs[0] / "predictions.parquet")
+    kept = rows["refused_draws"] < rows["endpoint_draws"]
+    assert int(kept.sum()) == 965
+    for column in MODEL_COLUMNS:
+        assert (rows[column].notna() == kept).all(), column
+    assert rows["hata_variant"].notna().all()
+    assert rows["tx_building_draws"].notna().all() and rows["rx_building_draws"].notna().all()
+
+
+def endpoint_boxes() -> tuple[dict[str, Any], dict[str, Any]]:
+    from engine.points import read_points
+
+    sites = {e.endpoint_id: e.box for e in read_points(FIXTURES / "two_sites.parquet", "site_id")}
+    receivers = read_points(FIXTURES / "receivers_500.parquet", "rx_id")
+    return sites, {e.endpoint_id: e.box for e in receivers}
+
+
+def test_the_hata_variant_comes_from_the_samplers_own_draws(two_runs: tuple[Path, Path]) -> None:
+    from engine.buildings import Footprints
+    from engine.predict import link_id
+    from terrain.baselines import hata_variant
+    from terrain.draws import draw_endpoints, draw_seed
+
+    rows = gpd.read_parquet(two_runs[0] / "predictions.parquet")
+    footprints = Footprints.from_parquet(
+        SNAPSHOTS / "osm-buildings-synthetic" / "buildings.parquet"
+    )
+    sites, receivers = endpoint_boxes()
+    boxed = rows[rows["endpoint_draws"] == 16].head(12)
+    assert len(boxed) == 12
+    for _, row in boxed.iterrows():
+        seed = draw_seed(20261108, link_id(row["site_id"], row["rx_id"]))
+        pairs = draw_endpoints(sites[row["site_id"]], receivers[row["rx_id"]], 16, seed)
+        tx_share = float(np.median([footprints.share_within(t) for t, _ in pairs]))
+        rx_share = float(np.median([footprints.share_within(r) for _, r in pairs]))
+        assert row["hata_variant"] == hata_variant(tx_share, rx_share)
+
+
+def test_a_run_without_p1812_never_imports_it(tmp_path: Path) -> None:
+    config = small_config(tmp_path, models=["fspl", "knife_edge"])
+    script = (
+        "import sys; from pathlib import Path\n"
+        f"sys.path.insert(0, {str(REPO / 'tests')!r})\n"
+        "from engine_fixture import fixture_settings\n"
+        "from engine.run import run_engine\n"
+        f"run_engine(Path({str(config)!r}), fixture_settings())\n"
+        "print('terrain.p1812' in sys.modules, 'Py1812.P1812' in sys.modules)\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO,
+        env=engine_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip().splitlines()[-1] == "False False"
+
+
+def test_a_value_error_in_a_draw_fails_the_run_and_is_logged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from structlog.testing import capture_logs
+
+    def broken_builder(*args: Any) -> Any:
+        def build(tx_xy_m: Any, rx_xy_m: Any) -> Any:
+            raise ValueError("a sampler bug, not a refusal")
+
+        return build
+
+    monkeypatch.setattr(engine.run, "_builder", broken_builder)
+    with capture_logs() as logs, pytest.raises(ValueError, match="sampler bug"):
+        run_engine(small_config(tmp_path), fixture_settings())
+    partial = tmp_path / "out" / "fixture.partial"
+    assert partial.is_dir() and not (partial / "manifest.json").exists()
+    failed = [entry for entry in logs if entry["event"] == "engine_run_failed"]
+    assert failed and failed[0]["run_id"] == "fixture"
+    assert failed[0]["partial"] == str(partial)
+
+
+def test_canopy_matches_nearest_neighbour_over_a_whole_window(two_runs: tuple[Path, Path]) -> None:
+    from pyproj import Transformer
+
+    to_3857 = Transformer.from_crs("EPSG:26915", "EPSG:3857", always_xy=True)
+    with rasterio.open(two_runs[0] / "terrain" / "canopy.tif") as canopy:
+        window = ((640, 720), (100, 180))
+        built = canopy.read(1, window=window, masked=True).filled(np.nan)
+        rows, cols = np.mgrid[640:720, 100:180]
+        x_m, y_m = rasterio.transform.xy(canopy.transform, rows.ravel(), cols.ravel())
+    with rasterio.open(SNAPSHOTS / "canopy-synthetic-subtile" / "canopy_west.tif") as tile:
+        points = list(zip(*to_3857.transform(np.asarray(x_m), np.asarray(y_m)), strict=True))
+        source = np.array([value[0] for value in tile.sample(points)], dtype=float)
+    assert built.size == 6400 and np.unique(built).size > 3, "the window must cross crowns"
+    assert np.array_equal(built.ravel(), source)
+
+
+def near_site_receivers(folder: Path, offset_m: float) -> Path:
+    x_m, y_m = site_east_xy_m()
+    layer = gpd.GeoDataFrame(
+        {"rx_id": ["near", "far"]},
+        geometry=[Point(x_m - offset_m, y_m), Point(725_400.0, 4_285_300.0)],
+        crs="EPSG:26915",
+    )
+    path = folder / "near.parquet"
+    layer.to_parquet(path, index=False)
+    return path
+
+
+def test_a_draw_without_p1812_cell_interior_keeps_its_losses_without_p1812(tmp_path: Path) -> None:
+    config = small_config(tmp_path, rx_points=str(near_site_receivers(tmp_path, 5.0)))
+    rows = gpd.read_parquet(run_engine(config, fixture_settings()) / "predictions.parquet")
+    near = rows[(rows["site_id"] == "site-east") & (rows["rx_id"] == "near")].iloc[0]
+    assert near["refused_draws"] == 0
+    assert near["fspl_db_median"] == pytest.approx(fspl_db(5.0, 906.875), abs=0.01)
+    assert pd.isna(near["clutter_height_m_median"])
+    assert rows[rows["rx_id"] == "far"]["clutter_height_m_median"].notna().all()
+
+
+def test_a_draw_without_p1812_cell_interior_is_refused_with_p1812(tmp_path: Path) -> None:
+    config = small_config(
+        tmp_path, rx_points=str(near_site_receivers(tmp_path, 5.0)), models=["fspl", "p1812"]
+    )
+    rows = gpd.read_parquet(run_engine(config, fixture_settings()) / "predictions.parquet")
+    near = rows[(rows["site_id"] == "site-east") & (rows["rx_id"] == "near")].iloc[0]
+    assert near["refused_draws"] == near["endpoint_draws"] == 1
+    assert pd.isna(near["fspl_db_median"])
+    report = (tmp_path / "out" / "fixture" / "run_report.md").read_text(encoding="utf-8")
+    assert "| too-short profile | 1 |" in report
+
+
+def test_building_draws_are_counted_on_a_1_m_dem_without_clutter_layers(tmp_path: Path) -> None:
+    layer = gpd.GeoDataFrame(
+        {"rx_id": ["in-building", "in-street"]},
+        geometry=[Point(725_620.3, 4_285_670.3), Point(725_400.0, 4_285_300.0)],
+        crs="EPSG:26915",
+    )
+    path = tmp_path / "buildings_rx.parquet"
+    layer.to_parquet(path, index=False)
+    snapshots = dict(fixture_fields()["snapshots"], dsm=None, canopy=None, p1812_maps=None)
+    config = small_config(
+        tmp_path, rx_points=str(path), models=["fspl", "hata"], snapshots=snapshots
+    )
+    run = run_engine(config, fixture_settings())
+    rows = gpd.read_parquet(run / "predictions.parquet").set_index(["site_id", "rx_id"])
+    assert rows["rx_building_draws"].notna().all() and rows["tx_building_draws"].notna().all()
+    assert rows.loc[("site-east", "in-building"), "rx_building_draws"] == 1
+    assert rows.loc[("site-east", "in-street"), "rx_building_draws"] == 0
+    assert rows["clutter_height_m_median"].isna().all()
+
+
+def write_test_snapshot(root: Path, snapshot_id: str, files: dict[str, Any]) -> str:
+    from pipeline.common.snapshot import finish_snapshot, start_snapshot, write_manifest
+
+    partial = start_snapshot(root, snapshot_id)
+    for name, write in files.items():
+        write(partial / name)
+    metadata = {
+        "snapshot_id": snapshot_id,
+        "capture_date": "2026-11-15",
+        "source_url": "none: test",
+        "licence": "MIT",
+        "seeds": {},
+    }
+    write_manifest(partial, metadata)
+    finish_snapshot(partial)
+    return snapshot_id
+
+
+def shifted_copy(source: Path, shift_m: float) -> Any:
+    def write(path: Path) -> None:
+        with rasterio.open(source) as tile:
+            profile = tile.profile
+            profile["transform"] = rasterio.Affine.translation(shift_m, 0.0) @ tile.transform
+            with rasterio.open(path, "w", **profile) as dst:
+                dst.write(tile.read())
+
+    return write
+
+
+def copy_file(source: Path) -> Any:
+    return lambda path: shutil.copyfile(source, path)
+
+
+def test_a_canopy_tile_outside_the_run_extent_is_reported_as_outside(tmp_path: Path) -> None:
+    root = copy_snapshots(tmp_path / "snapshots")
+    tiles = SNAPSHOTS / "canopy-synthetic-subtile"
+    canopy = write_test_snapshot(
+        root,
+        "canopy-three-tiles",
+        {
+            "canopy_east.tif": copy_file(tiles / "canopy_east.tif"),
+            "canopy_west.tif": copy_file(tiles / "canopy_west.tif"),
+            "canopy_far.tif": shifted_copy(tiles / "canopy_west.tif", 200_000.0),
+        },
+    )
+    snapshots = dict(fixture_fields()["snapshots"], canopy=canopy)
+    run = run_engine(
+        small_config(tmp_path, snapshots=snapshots), fixture_settings(snapshots_dir=root)
+    )
+    report = (run / "run_report.md").read_text(encoding="utf-8")
+    assert "| canopy_far.tif | outside the run extent |" in report
+    assert "| canopy_east.tif | 900 |" in report
+
+
+def test_unreadable_inputs_are_refusals_before_any_write(tmp_path: Path) -> None:
+    not_parquet = tmp_path / "not.parquet"
+    not_parquet.write_text("site_id,rx_id\n", encoding="utf-8")
+    for field in ("rx_points", "calibration"):
+        with pytest.raises(ConfigError, match="not.parquet"):
+            run_engine(small_config(tmp_path, **{field: str(not_parquet)}), fixture_settings())
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_bad_p1812_map_snapshot_is_a_refusal_before_any_write(tmp_path: Path) -> None:
+    root = copy_snapshots(tmp_path / "snapshots")
+    maps = write_test_snapshot(
+        root,
+        "p1812-maps-wrong-grid",
+        {name: (lambda p: p.write_text("40 40\n40 40\n")) for name in ("DN50.TXT", "N050.TXT")},
+    )
+    snapshots = dict(fixture_fields()["snapshots"], p1812_maps=maps)
+    config = small_config(tmp_path, models=["fspl", "p1812"], snapshots=snapshots)
+    with pytest.raises(ConfigError, match="121 by 241"):
+        run_engine(config, fixture_settings(snapshots_dir=root))
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_dem_whose_pixels_do_not_divide_10_m_is_a_refusal(tmp_path: Path) -> None:
+    root = copy_snapshots(tmp_path / "snapshots")
+
+    def three_metre_dem(path: Path) -> None:
+        profile = {
+            "driver": "GTiff",
+            "height": 400,
+            "width": 400,
+            "count": 1,
+            "dtype": "float32",
+            "crs": "EPSG:26915",
+            "nodata": -9999.0,
+            "transform": rasterio.transform.from_origin(724_800.0, 4_286_200.0, 3.0, 3.0),
+        }
+        with rasterio.open(path, "w", **profile) as dst:
+            dst.write(np.full((1, 400, 400), 150.0, dtype="float32"))
+
+    dem = write_test_snapshot(root, "dem-3m", {"dem.tif": three_metre_dem})
+    snapshots = {"dem": dem, "dsm": None, "canopy": None, "buildings": None, "p1812_maps": None}
+    config = small_config(tmp_path, snapshots=snapshots)
+    with pytest.raises(ConfigError, match="10 m"):
+        run_engine(config, fixture_settings(snapshots_dir=root))
+
+
+def test_the_engine_commit_fallback_logs_a_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    from structlog.testing import capture_logs
+
+    import engine.provenance
+
+    def no_git(*arguments: str) -> str:
+        raise OSError("git is not installed")
+
+    monkeypatch.setattr(engine.provenance, "_git", no_git)
+    with capture_logs() as logs:
+        commit, dirty = engine.provenance.engine_commit(
+            fixture_settings(engine_git_commit="a" * 40)
+        )
+    assert (commit, dirty) == ("a" * 40, None)
+    assert any(
+        e["event"] == "engine_commit_from_environment" and e["log_level"] == "warning" for e in logs
+    )
 
 
 # The import above activates the autouse fixture for this module.
