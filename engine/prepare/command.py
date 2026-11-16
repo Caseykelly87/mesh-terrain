@@ -21,6 +21,7 @@ coordinate; refusals name endpoints by id.
 
 import argparse
 import sys
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -107,7 +108,7 @@ def prepare_folder(tile_name: str, folder: Path, snapshots_dir: Path) -> str:
     tile = _tile(tile_name)
     _check_folder(folder, tile)
     sites, roles = _read_sites(folder / REAL_SITES_FILE)
-    receivers = read_points(_with_columns(folder / REAL_RECEIVERS_FILE, RECEIVER_COLUMNS), "rx_id")
+    receivers = read_points(_agreed_layer(folder / REAL_RECEIVERS_FILE, RECEIVER_COLUMNS), "rx_id")
     grid = grid_receivers(tile)
     _check_unique([r.endpoint_id for r in receivers + grid])
     snapshots = _snapshots(tile, snapshots_dir)
@@ -151,7 +152,8 @@ def _check_folder(folder: Path, tile: Tile) -> None:
         )
 
 
-def _with_columns(path: Path, columns: Sequence[str]) -> Path:
+def _agreed_layer(path: Path, columns: Sequence[str]) -> Path:
+    """The path of a real layer that exists and has the columns agreed with ingest-eng."""
     if not path.is_file():
         raise ConfigError(f"no layer at {path}")
     names = pq.read_schema(path).names
@@ -163,7 +165,7 @@ def _with_columns(path: Path, columns: Sequence[str]) -> Path:
 
 def _read_sites(path: Path) -> tuple[list[Endpoint], dict[str, str]]:
     """The real sites and each one's role, refusing a role or id the run cannot take."""
-    sites = read_points(_with_columns(path, SITE_COLUMNS), "site_id")
+    sites = read_points(_agreed_layer(path, SITE_COLUMNS), "site_id")
     table = pq.read_table(path, columns=["site_id", "role"]).to_pydict()
     roles = dict(zip(table["site_id"], table["role"], strict=True))
     for site in sites:
@@ -180,7 +182,7 @@ def _read_sites(path: Path) -> tuple[list[Endpoint], dict[str, str]]:
 
 
 def _check_unique(rx_ids: list[str]) -> None:
-    repeated = sorted({rx_id for rx_id in rx_ids if rx_ids.count(rx_id) > 1})
+    repeated = sorted(rx_id for rx_id, count in Counter(rx_ids).items() if count > 1)
     if repeated:
         raise ConfigError(f"receiver ids repeat: {', '.join(repeated)}")
 
