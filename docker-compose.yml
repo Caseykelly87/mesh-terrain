@@ -28,7 +28,10 @@ x-snapshots-volume: &snapshots-volume ${SNAPSHOTS_HOST_DIR:?set SNAPSHOTS_HOST_D
 # The image has no git, so an engine run takes its code's commit from the image
 # (engine/provenance.py). The Makefile exports ENGINE_GIT_COMMIT from the
 # checkout; a build without make leaves it empty and the engine refuses to run.
-# One block for the three services keeps their images identical.
+# The three Dagster services and the engine share this block, so each builds
+# from the same Dockerfile and arguments; each image records the commit it was
+# built at, which differs when make builds only one of them (check-itm builds
+# dagster-webserver, make engine builds engine).
 x-dagster-build: &dagster-build
   context: .
   dockerfile: docker/dagster/Dockerfile
@@ -176,6 +179,25 @@ services:
       timeout: 10s
       retries: 18
       start_period: 40s
+
+  engine:
+    # One-shot runner for `make engine`; docker/engine-run.sh adds the config
+    # and runs folders as run-time mounts because only the caller knows them,
+    # and the profile keeps `make up` from starting it. A service of its own,
+    # not a run of dagster-webserver, so the engine gets no warehouse or
+    # object-store credential, and a run builds its own image instead of
+    # retagging one the stack runs on.
+    profiles: [engine]
+    build: *dagster-build
+    restart: "no"
+    # The engine reads only its mounts. Without a network it cannot reach the
+    # stack or the internet, so a run depends on nothing outside them.
+    network_mode: none
+    environment:
+      SNAPSHOTS_DIR: /snapshots
+      LOG_FORMAT: json
+    volumes:
+      - *snapshots-volume
 
   pdal:
     # One-shot runner for `make pdal`, which passes the work and pipeline
