@@ -27,7 +27,7 @@ UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
-.PHONY: help env up down nuke check check-itm check-definitions check-pdal pdal fmt reproduce load capture dbt-deps dbt-build dbt-debug lint test
+.PHONY: help env up down nuke check check-itm check-definitions check-pdal check-p1812 pdal fmt reproduce load capture dbt-deps dbt-build dbt-debug lint test
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
 
 help:
@@ -38,6 +38,9 @@ help:
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
 	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
 	@echo "make check-itm  load the ITM library in the Dagster image and reproduce the ADR 0002 figure"
+	@echo "make check-p1812 [FIXTURE=<folder> EXPECT_DB=<dB>]"
+	@echo "                P.1812 on the ADR 0006 flat 10 km path from the map snapshot in SNAPSHOTS_DIR,"
+	@echo "                expecting 149.48 dB; FIXTURE names another map folder and EXPECT_DB its figure"
 	@echo "make check-definitions"
 	@echo "                load the Dagster code location in the running webserver container"
 	@echo "make fmt        ruff format and autofix"
@@ -196,6 +199,18 @@ dsm:
 
 register-snapshot:
 	$(call require,ID,<snapshot id>)$(TERRAIN_SNAPSHOT) register '$(ID)' $(SNAPSHOT_ROOT)
+
+# P.1812 from a map snapshot on the ADR 0006 spike's flat path
+# (docker/check_p1812.py); it reads the snapshot and writes nothing. FIXTURE
+# checks another map folder, such as tests/fixtures/snapshots/p1812-maps-synthetic,
+# and then needs that folder's figure in EXPECT_DB, since 149.48 dB holds only
+# for the ITU maps.
+P1812_MAPS_ID := itu-r-p1812-8-202509
+
+check-p1812:
+	$(if $(FIXTURE),$(call require,EXPECT_DB,<dB>),$(call require,SNAPSHOTS_DIR,<folder>))$(UV) \
+	    python -I docker/check_p1812.py '$(or $(FIXTURE),$(SNAPSHOTS_DIR)/$(P1812_MAPS_ID))' \
+	    $(if $(EXPECT_DB),--expect-db '$(EXPECT_DB)')
 
 fmt:
 	$(UV) ruff check --fix .
