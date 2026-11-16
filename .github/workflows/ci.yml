@@ -44,6 +44,10 @@ jobs:
       # never connects.
       - run: cp .env.example .env
       - run: make test
+      # The real map snapshot is never in CI, so the target runs on the
+      # committed synthetic maps, whose DN 40 and N0 325 give 149.45 dB on the
+      # flat path; this keeps the target's command line working.
+      - run: make check-p1812 FIXTURE=tests/fixtures/snapshots/p1812-maps-synthetic EXPECT_DB=149.45
 
   dbt-build:
     runs-on: ubuntu-24.04

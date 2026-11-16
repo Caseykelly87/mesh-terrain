@@ -108,7 +108,9 @@ known-first-party = ["pipeline", "terrain", "ingester"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["pipeline", "terrain", "ingester"]
+# docker/check_p1812.py is the one Python script behind a make target outside
+# the packages; it calls terrain/ and is checked to the same standard.
+files = ["pipeline", "terrain", "ingester", "docker/check_p1812.py"]
 strict = true
 warn_unreachable = true
 plugins = ["pydantic.mypy"]
