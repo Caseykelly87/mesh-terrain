@@ -1,14 +1,18 @@
 """The pairs positioned at both ends in a capture snapshot, by the ADR 0003 spike's own rules.
 
-A pair is a (relayer, gateway) link with at least one link-hour at 500 m or
-more in the MSA under the stationarity rule, in the public broker's whole
-capture or the MeshSTL broker's 24 hours, exactly as the reproduction gate
-counts them (`docs/adr/0003-spike/reproduce_from_snapshot.py`,
-`stationary_pairs`): this module runs the spike's `analyze.py` on the
-snapshot rows rather than porting it, so the set is the spike's by
-construction. As in the spike, relayer candidates and the stationarity test
-see the whole run, not the trailing 24 hours and 7 days the warehouse applies
-(ADR 0003, Terms).
+A pair is a (relayer, gateway) link with at least one link-hour in the MSA
+under the stationarity rule, in the public broker's whole capture or the
+MeshSTL broker's 24 hours: relayer resolved (`lnk_01`), both ends positioned
+(`lnk_02`), different nodes (`lnk_03`), at least 3 receipts in the clock hour
+(`lnk_04`), 500 m to 60 km between box centres whose boxes do not overlap
+(`lnk_05`), signal in range (`lnk_06`, at the spike's limits; ADR 0003 records
+that the contract's wider ones change no link-hour). That is the set the
+reproduction gate counts (`docs/adr/0003-spike/reproduce_from_snapshot.py`,
+`stationary_pairs`, 8 on the real snapshot): this module runs the spike's
+`analyze.py` on the snapshot rows rather than porting it, so the set is the
+spike's by construction. As in the spike, relayer candidates and the
+stationarity test see the whole run, not the trailing 24 hours and 7 days the
+warehouse applies (ADR 0003, Terms).
 
 What a position is follows the contract, not the gate: a row needs both
 coordinates (`pos_01`), and one at 0, 0 is none (`pos_03`). The gate puts a
@@ -223,7 +227,10 @@ def spike_box_half_width_m(precision_bits: int, latitude_deg: float) -> float:
 
     analyze.box_half_width_m gives the box's north-south and east-west
     half-widths; a square of the larger one holds the whole box, so a layer
-    that carries one half-width never makes a position sharper than sent.
+    that carries one half-width does not make a position sharper than sent.
+    In EPSG:26915 the box is turned by the grid convergence, about 1.6 degrees
+    at tile x72y429, so its corners reach past the square by up to about 2
+    percent of the half-width.
 
     Args:
         precision_bits: Bits of the 32-bit integer degrees the node kept.
@@ -235,9 +242,16 @@ def spike_box_half_width_m(precision_bits: int, latitude_deg: float) -> float:
 
 def _spike() -> ModuleType:
     """The spike's figures module, which imports analyze.py as `az`."""
-    if str(SPIKE_DIR) not in sys.path:
+    # The spike folder holds a capture.py and other plain module names, so it
+    # is on the path only while figures and analyze are imported.
+    added = str(SPIKE_DIR) not in sys.path
+    if added:
         sys.path.insert(0, str(SPIKE_DIR))
-    return importlib.import_module("figures")
+    try:
+        return importlib.import_module("figures")
+    finally:
+        if added:
+            sys.path.remove(str(SPIKE_DIR))
 
 
 LinkHour = tuple[int, int, int]
