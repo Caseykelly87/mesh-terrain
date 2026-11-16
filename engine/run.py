@@ -25,6 +25,7 @@ from pathlib import Path
 import pandas as pd
 import rasterio
 import structlog
+from rasterio.io import DatasetReader
 
 from engine.buildings import Footprints
 from engine.calibration import read_observations, write_calibration
@@ -184,17 +185,7 @@ def predict(
     """Open the terrain build and predict every pair."""
     with ExitStack() as stack:
         dem = stack.enter_context(rasterio.open(terrain.dem))
-        builder: ProfileBuilder
-        if terrain.dsm is None and terrain.canopy is None:
-            builder = MetroProfileBuilder(dem=dem, step_m=terrain.resolution_m)
-        else:
-            dsm = None if terrain.dsm is None else stack.enter_context(rasterio.open(terrain.dsm))
-            canopy = (
-                None
-                if terrain.canopy is None
-                else stack.enter_context(rasterio.open(terrain.canopy))
-            )
-            builder = FineProfileBuilder(layers=FineLayers(dem=dem, dsm=dsm, canopy=canopy))
+        builder = _builder(stack, dem, terrain)
         footprints = _footprints(inputs.snapshots)
         pixels = None
         if footprints is not None and isinstance(builder, FineProfileBuilder):
@@ -208,6 +199,17 @@ def predict(
             building_pixels=pixels,
         )
         return predict_pairs(inputs.sites, inputs.receivers, run)
+
+
+def _builder(stack: ExitStack, dem: DatasetReader, terrain: TerrainBuild) -> ProfileBuilder:
+    """1 m ground and P.1812 cells with a DSM or canopy; ground alone at the DEM step otherwise."""
+    if terrain.dsm is None and terrain.canopy is None:
+        return MetroProfileBuilder(dem=dem, step_m=terrain.resolution_m)
+    dsm, canopy = (
+        None if path is None else stack.enter_context(rasterio.open(path))
+        for path in (terrain.dsm, terrain.canopy)
+    )
+    return FineProfileBuilder(layers=FineLayers(dem=dem, dsm=dsm, canopy=canopy))
 
 
 def _footprints(snapshots: dict[str, NamedSnapshot]) -> Footprints | None:
