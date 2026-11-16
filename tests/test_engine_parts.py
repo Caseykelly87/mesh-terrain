@@ -355,5 +355,16 @@ def test_py1812_archive_hash_is_checked_against_the_installed_metadata() -> None
     assert py1812_pin(lock, direct_url=right) == (commit, archive_sha256)
 
 
+def test_py1812_missing_from_the_environment_is_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    from importlib import metadata
+
+    def not_installed(name: str) -> None:
+        raise metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(metadata, "distribution", not_installed)
+    with pytest.raises(ConfigError, match="Py1812 is not installed"):
+        py1812_pin(Path(__file__).resolve().parents[1] / "uv.lock")
+
+
 # The import above activates the autouse fixture for this module.
 _ = no_logger_caching
