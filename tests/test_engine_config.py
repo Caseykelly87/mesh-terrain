@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from engine_fixture import FIXTURE_CONFIG, fixture_fields, no_logger_caching, write_config
+
 from engine.config import CONFIG_FIELDS, SNAPSHOT_ROLES, load_config
 from engine.errors import ConfigError
-from engine_fixture import FIXTURE_CONFIG, fixture_fields, write_config
-
 from engine.profiles import PROFILES_DIR, load_profile
 
 
@@ -196,3 +196,7 @@ def test_a_profile_without_transmit_power_receives_only(tmp_path: Path) -> None:
     text = "height_m: 2.0\ngain_dbi: 0.0\ntransmit_power_dbm: null\npolarisation: vertical\n"
     (tmp_path / "listener.yaml").write_text(text + "description: receive only\n", encoding="utf-8")
     assert load_profile("listener", tmp_path).transmit_power_dbm is None
+
+
+# The import above activates the autouse fixture for this module.
+_ = no_logger_caching

@@ -12,6 +12,10 @@ import numpy as np
 import pandas as pd
 import pytest
 import rasterio
+from engine_fixture import no_logger_caching
+from rasterio.transform import from_origin
+from shapely.geometry import Point, box
+
 from engine.buildings import Footprints
 from engine.calibration import calibration_table, model_fits
 from engine.coverage import coverage_values
@@ -19,9 +23,6 @@ from engine.grid import RunGrid, run_grid
 from engine.hashing import raster_content_sha256, table_content_sha256
 from engine.points import Endpoint
 from engine.predict import draws_for
-from rasterio.transform import from_origin
-from shapely.geometry import Point, box
-
 from pipeline.common.snapshot import sha256_file
 from terrain.draws import EndpointBox
 
@@ -194,3 +195,7 @@ def test_points_take_one_draw_and_boxes_take_the_configured_number(
     tx = EndpointBox(centre_xy_m=(725_000.0, 4_285_000.0), half_width_m=tx_half_m)
     rx = EndpointBox(centre_xy_m=(725_500.0, 4_285_000.0), half_width_m=rx_half_m)
     assert draws_for(tx, rx, 16) == expected
+
+
+# The import above activates the autouse fixture for this module.
+_ = no_logger_caching

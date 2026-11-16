@@ -18,18 +18,26 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import engine.run
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 import rasterio
-from engine.errors import ConfigError
-from engine.run import run_engine
-from engine_fixture import REPO, SNAPSHOTS, fixture_config, fixture_fields, fixture_settings
+from engine_fixture import (
+    FIXTURES,
+    REPO,
+    SNAPSHOTS,
+    fixture_config,
+    fixture_fields,
+    fixture_settings,
+    no_logger_caching,
+)
 from shapely.geometry import Point
 
+import engine.run
 from engine import MANIFEST_VERSION, SCHEMA_VERSION
+from engine.errors import ConfigError
+from engine.run import run_engine
 from terrain.baselines import fspl_db
 
 PREDICTION_COLUMNS = [
@@ -56,7 +64,6 @@ PREDICTION_COLUMNS = [
     "p1812_at_cap_share",
     "geometry",
 ]
-SITE_EAST_XY_M = (725_850.0, 4_285_500.0)
 
 
 @pytest.fixture(scope="module")
@@ -192,8 +199,10 @@ def test_the_manifest_records_versions_seed_snapshots_inputs_and_code(
     for snapshot in manifest["snapshots"]:
         manifest_bytes = (SNAPSHOTS / snapshot["id"] / "manifest.json").read_bytes()
         assert snapshot["manifest_sha256"] == hashlib.sha256(manifest_bytes).hexdigest()
+    # Inputs are recorded as the config names them; the test config names them in full.
     inputs = {i["path"] for i in manifest["inputs"]}
-    assert {"two_sites.parquet", "receivers_500.parquet", "observations.parquet"} <= inputs
+    names = {Path(path).name for path in inputs}
+    assert {"two_sites.parquet", "receivers_500.parquet", "observations.parquet"} <= names
     assert {"profiles/site_gateway.yaml", "profiles/mesh_node.yaml"} <= inputs
     assert re.fullmatch(r"[0-9a-f]{40}", manifest["engine_git_commit"])
     assert isinstance(manifest["engine_git_dirty"], bool)
@@ -239,17 +248,24 @@ def test_coverage_files_are_cogs_on_the_run_grid(two_runs: tuple[Path, Path]) ->
         assert coverage.res == (10.0, 10.0)
         assert coverage.nodata is not None
         assert coverage.transform.c % 10.0 == 0.0 and coverage.transform.f % 10.0 == 0.0
-        assert "LAYOUT=COG" in str(coverage.tags(ns="IMAGE_STRUCTURE")) or coverage.overviews(1)
+        assert coverage.tags(ns="IMAGE_STRUCTURE")["LAYOUT"] == "COG"
+
+
+def site_east_xy_m() -> tuple[float, float]:
+    """site-east as the engine sees it: converted from EPSG:4326, not exactly 725 850."""
+    sites = gpd.read_parquet(FIXTURES / "two_sites.parquet").to_crs(epsg=26915)
+    point = sites[sites["site_id"] == "site-east"].geometry.iloc[0]
+    return float(point.x), float(point.y)
 
 
 def small_receivers(folder: Path, *, at_site: bool = False) -> Path:
     points = [Point(725_400.0, 4_285_300.0), Point(725_700.0, 4_285_800.0)]
     if at_site:
-        points.append(Point(*SITE_EAST_XY_M))
+        points.append(Point(*site_east_xy_m()))
     layer = gpd.GeoDataFrame(
         {"rx_id": [f"rx-{i}" for i in range(len(points))]}, geometry=points, crs="EPSG:26915"
     )
-    path = folder / "receivers.parquet"
+    path = folder / ("receivers_at_site.parquet" if at_site else "receivers.parquet")
     layer.to_parquet(path, index=False)
     return path
 
@@ -406,7 +422,7 @@ def metro_snapshot(root: Path) -> str:
     with rasterio.open(SNAPSHOTS / "dem-1m-synthetic-subtile" / "dem.tif") as fine:
         heights = fine.read(1, masked=True).filled(np.nan).reshape(100, 10, 100, 10)
         profile = fine.profile | {"height": 100, "width": 100}
-        profile["transform"] = fine.transform * fine.transform.scale(10.0, 10.0)
+        profile["transform"] = fine.transform @ fine.transform.scale(10.0, 10.0)
     coarse = np.nan_to_num(np.nanmean(heights, axis=(1, 3)), nan=-999999.0).astype("float32")
     with rasterio.open(partial / "dem.tif", "w", **profile) as dst:
         dst.write(coarse, 1)
@@ -517,3 +533,7 @@ def test_clutter_follows_the_rule_cell_by_cell(two_runs: tuple[Path, Path]) -> N
     expected = clutter_height_m(layers["dem"], dsm_m=layers["dsm"], canopy_m=layers["canopy"])
     assert np.array_equal(layers["clutter"], expected.astype("float32"), equal_nan=True)
     assert np.isnan(layers["clutter"]).any(), "the DEM hole stays without a value"
+
+
+# The import above activates the autouse fixture for this module.
+_ = no_logger_caching
