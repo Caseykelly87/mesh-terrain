@@ -172,7 +172,13 @@ def py1812_pin(lock_path: Path, direct_url: dict[str, Any] | None = None) -> tup
 
 
 def _installed_direct_url() -> dict[str, Any]:
-    text = metadata.distribution("py1812").read_text("direct_url.json")
+    try:
+        distribution = metadata.distribution("py1812")
+    except metadata.PackageNotFoundError as err:
+        raise ConfigError(
+            "p1812 is listed but Py1812 is not installed; uv sync --frozen installs it"
+        ) from err
+    text = distribution.read_text("direct_url.json")
     installed: dict[str, Any] = json.loads(text or "{}")
     return installed
 

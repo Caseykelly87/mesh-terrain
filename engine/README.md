@@ -10,7 +10,7 @@ Inside the Docker image, where `RUNS_HOST_DIR` is mounted at `/runs` (once platf
 SNAPSHOTS_DIR=/snapshots python -m engine run engine/fixtures/fixture-run.yaml
 ```
 
-The committed fixture configs write to `/runs`, the container path; on Windows that path is `C:uns`. On the host, run a copy of the config with another `output_dir`, as `tests/engine_fixture.py` writes one:
+The committed fixture configs write to `/runs`, the container path; on Windows that path is `C:\runs`. On the host, run a copy of the config with another `output_dir`, as `tests/engine_fixture.py` writes one:
 
 ```
 SNAPSHOTS_DIR=tests/fixtures/snapshots uv run --frozen python -m engine run <copy of the config>
