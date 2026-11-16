@@ -208,6 +208,49 @@ def test_refused_before_any_build(tmp_path: Path, name: str) -> None:
     assert fragment in result.stderr
 
 
+def git(repo: Path, *arguments: str) -> None:
+    """Runs git in a throwaway repo with an empty global config, so no user setting applies."""
+    config = repo.parent / "empty.gitconfig"
+    config.touch()
+    environment = {**os.environ, "GIT_CONFIG_GLOBAL": config.as_posix(), "GIT_CONFIG_NOSYSTEM": "1"}
+    subprocess.run(
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", *arguments],
+        cwd=repo,
+        env=environment,
+        check=True,
+        capture_output=True,
+    )
+
+
+def clean_checkout(tmp_path: Path) -> Path:
+    """A throwaway git checkout with one committed file and an ignored .env."""
+    repo = made(tmp_path / "checkout")
+    git(repo, "init", "--quiet")
+    (repo / "tracked.txt").write_text("committed\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(".env\n", encoding="utf-8")
+    git(repo, "add", "tracked.txt", ".gitignore")
+    git(repo, "commit", "--quiet", "-m", "fixture")
+    (repo / ".env").write_text("IGNORED=1\n", encoding="utf-8")
+    return repo
+
+
+@pytest.mark.parametrize(
+    ("change", "path"),
+    [("an untracked file", "new.txt"), ("a changed tracked file", "tracked.txt")],
+)
+def test_a_checkout_with_uncommitted_changes_is_refused(
+    tmp_path: Path, change: str, path: str
+) -> None:
+    repo = clean_checkout(tmp_path)
+    (repo / path).write_text(f"{change}\n", encoding="utf-8")
+    config = config_with(tmp_path, "output_dir: /runs")
+    result = run_script(config, made(tmp_path / "runs"), {}, cwd=repo)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert result.stdout == "", "a refused run must not reach the build"
+    assert "uncommitted changes" in result.stderr
+    assert path in result.stderr
+
+
 def test_config_folder_holding_a_checkout_is_refused(tmp_path: Path) -> None:
     folder = made(tmp_path / "configs")
     checkout = made(folder / "checkout")
@@ -229,10 +272,12 @@ def fold(text: str) -> str:
     "output_line", ["output_dir: /runs", 'output_dir: "/runs/sub" # a run\'s own folder']
 )
 def test_accepted_run_builds_then_runs(tmp_path: Path, output_line: str) -> None:
-    runs = tmp_path / "runs"
-    runs.mkdir()
+    # A clean throwaway checkout, since a run from this one refuses while it
+    # has uncommitted changes; its ignored .env does not count.
+    repo = clean_checkout(tmp_path)
+    runs = made(tmp_path / "runs")
     config = config_with(tmp_path, output_line)
-    result = run_script(config, runs, {})
+    result = run_script(config, runs, {}, cwd=repo)
     assert result.returncode == 0, result.stderr
     build, run = result.stdout.splitlines()
     assert build == "--profile engine build engine"
