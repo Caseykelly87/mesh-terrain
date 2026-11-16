@@ -13,6 +13,8 @@ Modules:
 - `reduce.py`: the batch reduction of the 2026-10-22 archive into snapshot `meshtastic-capture-2026-10-22`. Its command is wired to that archive's folders, snapshot id and MeshSTL window. It ran once, on 2026-11-14, and cannot run again because its input was deleted the same day (ADR 0003, Consequences). `reduce_capture` takes any folders of capture JSON lines, and the tests run it on the synthetic fixtures. No future capture goes through it, since ADR 0005 limits the reduction to that one archive and capture runs pseudonymise in memory; `capture.py` imports only its `LICENCE` constant.
 - `capture.py`: the core of the on-demand capture command in `docs/adr/0003-spike/capture.py`.
 - `load.py` and `assets.py`: the insert-only loader and the hand-started Dagster asset `raw/mqtt_snapshot` with its `ing_07`, `ing_03` and `ing_04` checks.
+- `link_pairs.py`: the pairs positioned at both ends in a capture snapshot (the ADR 0003 spike's union, 8 on `meshtastic-capture-2026-10-22`), found by running the spike's `analyze.py` on the snapshot rows, as the reproduction gate does, with the contract's rule for what a position is (`pos_01`, `pos_03`); and every node's boxes over the capture, with the `pos_04` precise flag.
+- `engine_inputs.py`: the command that writes the real site and receiver layers for an engine run on one USGS 1 m tile (below).
 - `settings.py`: `NODE_ID_HMAC_KEY`, `SNAPSHOTS_DIR` and the MQTT credentials, read once. `SNAPSHOTS_DIR` is also in `pipeline/common/settings.py` with the same default; the ingester keeps its own field so the capture and reduction start without the warehouse variables.
 
 `NODE_ID_HMAC_KEY` is 32 random bytes written as 64 hex characters. Casey generates it with `python -c "import secrets; print(secrets.token_hex(32))"` and a copy is kept off this machine by Casey. It is read once, never logged, and the reduction and the capture command refuse to start without it.
@@ -23,7 +25,14 @@ Run:
 - Reduction: `uv run --frozen python -I -m ingester.reduce`. It ran once, on 2026-11-14, and cannot run again: its input archive was deleted that day.
 - Load: `uv run --frozen python -m ingester.load <snapshot id>`.
 - Capture and gate: `docs/adr/0003-spike/README.md`.
+- Engine inputs for a tile, from a checkout (it imports the spike scripts under `docs/adr/0003-spike/`):
+
+  ```
+  uv run --frozen python -I -m ingester.engine_inputs --snapshot meshtastic-capture-2026-10-22     --tile x72y429 --dem-extent 719994 4279994 730006 4290006 --expect-pairs 8     --out C:/Users/Casey/mesh-terrain-data/configs/x72y429
+  ```
+
+  It writes `tx_sites_real.parquet` (`site_id`, `geometry`, `box_half_width_m`, `role`: `both_ends_gateway` or `busy_pair_gateway`) and `rx_real.parquet` (`rx_id`, `geometry`, `box_half_width_m`) in EPSG:26915, at each node's stationary box centre, with `box_half_width_m` the larger half of the box (`analyze.box_half_width_m`). It prints the pair counts per broker, each pair's link-hours and receipts by pseudonym, the tile counts, and per selected node its role, box half-width, precise flag and whether its box plus 50 m lies inside `--dem-extent` by the engine's rule; never a coordinate. It exits 2 and writes nothing when the pair count differs from `--expect-pairs`, the tile does not hold exactly one pair with both ends and two busiest pairs by their gateway end (three pairs touched), the busiest two differ between the three measures (link-hours over both runs, link-hours public plus MeshSTL, receipts), a selected node sent more than one box, the output folder is inside a git checkout, or a layer exists. The layers hold real positions, precise MeshSTL ones among them: they and every output built from them are never published.
 
 Fixtures: `tests/fixtures/mqtt/deliveries.jsonl`, built by `tests/fixtures/mqtt/build.py` from invented ids (`f1c70000` to `f1c7ffff`), invented text and invented positions, re-encrypted with the default key. Rebuild with `uv run python tests/fixtures/mqtt/build.py`; a test fails if the committed file differs from a rebuild.
 
-Deliberately not here: any schedule, sensor or restart policy; any raw payload bytes, text, long or short name or public key in any output; any code that writes into a finished snapshot folder or deletes a `.partial` folder; any `update` or `delete` against `raw`.
+Deliberately not here: any grid of made-up receivers, run config or path check for the engine (terrain-rf-eng's); any schedule, sensor or restart policy; any raw payload bytes, text, long or short name or public key in any output; any code that writes into a finished snapshot folder or deletes a `.partial` folder; any `update` or `delete` against `raw`.
