@@ -149,9 +149,9 @@ jobs:
             docker compose exec -T "$service" sh -c \
               'test "$SNAPSHOTS_DIR" = /snapshots && test -d /snapshots && ! touch /snapshots/probe 2> /dev/null'
           done
-      # The ITM library is compiled in a build stage of the Dagster image
-      # (ADR 0002); loading it and reproducing the spike's flat-path figure
-      # here fails CI when that stage breaks, before terrain/itm.py exists.
+      # The ITM library exists only in the Dagster image (ADR 0002), so the
+      # tests that call it skip in the tests job and run here, where a skip
+      # fails the step. This also catches a broken ITM build stage.
       - name: check the ITM library in the Dagster image
         run: make check-itm
       - run: make check

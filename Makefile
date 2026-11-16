@@ -37,7 +37,8 @@ help:
 	@echo "make nuke       stop the stack and delete every project volume after a typed confirmation"
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
 	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
-	@echo "make check-itm  load the ITM library in the Dagster image and reproduce the ADR 0002 figure"
+	@echo "make check-itm  load the ITM library in the Dagster image, reproduce the ADR 0002 figure"
+	@echo "                and run tests/test_itm.py and tests/test_path_loss.py there, failing on a skip"
 	@echo "make check-p1812 [FIXTURE=<folder> EXPECT_DB=<dB>]"
 	@echo "                P.1812 on the ADR 0006 flat 10 km path from the map snapshot in SNAPSHOTS_DIR,"
 	@echo "                expecting 149.48 dB; FIXTURE names another map folder and EXPECT_DB its figure"
@@ -116,12 +117,32 @@ check: env lint test dbt-build
 # script on stdin (no bind mount, so MSYS path rewriting cannot break it) and
 # matches the measured flat-path loss as a fixed string, so a changed compiler
 # or source fails here.
+#
+# The third run is the library tests of terrain/itm.py and terrain/path_loss.py,
+# which skip on any host without libitm.so; in the image a skip means the
+# library went missing, so it fails the check. The image has no dev group and
+# no tests folder: the throwaway container installs the dev group from uv.lock,
+# hash-checked, which needs PyPI, and gets tests/ as a read-only mount. The two
+# MSYS variables stop Git Bash rewriting the container paths and do nothing
+# elsewhere. With CA_BUNDLE_PATH set the bundle is mounted for uv, as the build
+# secret is at build time.
+ITM_TESTS := tests/test_itm.py tests/test_path_loss.py
+ITM_TESTS_IN_IMAGE := uv sync --frozen --inexact --no-install-project --group dev --quiet \
+    && { python -m pytest -p no:cacheprovider -rs $(ITM_TESTS) > /tmp/pytest.log; status=$$?; } \
+    && cat /tmp/pytest.log \
+    && [ $$status -eq 0 ] \
+    && { ! grep -q skipped /tmp/pytest.log || { echo "check-itm: a libitm test skipped"; exit 1; }; }
+
 check-itm: env
 	$(COMPOSE) build dagster-webserver
 	$(COMPOSE) run --rm --no-deps -T dagster-webserver python -c "import ctypes; print(ctypes.CDLL('/usr/local/lib/libitm.so').ITM_P2P_CR_Ex)"
 	output=$$($(COMPOSE) run --rm --no-deps -T dagster-webserver python - < docs/adr/0002-itm-spike/check_itm.py); \
 	    echo "$$output"; \
 	    echo "$$output" | grep -qF "itm basic transmission loss: 151.76 dB"
+	MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' $(COMPOSE) run --rm --no-deps -T \
+	    --volume "$$(pwd -W 2> /dev/null || pwd -P)/tests:/opt/mesh-terrain/tests:ro" \
+	    $(if $(CA_BUNDLE_PATH),--volume '$(CA_BUNDLE_PATH):/run/secrets/ca_bundle:ro' --env SSL_CERT_FILE=/run/secrets/ca_bundle) \
+	    dagster-webserver sh -c '$(ITM_TESTS_IN_IMAGE)'
 
 # The webserver stays healthy when the code location fails to import: it serves
 # the error in the UI and /server_info still answers. This loads the workspace
