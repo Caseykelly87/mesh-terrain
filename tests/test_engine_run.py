@@ -353,6 +353,9 @@ def test_a_zero_length_pair_is_a_row_of_nulls(tmp_path: Path) -> None:
     assert same["refused_draws"] == same["endpoint_draws"], "within 0 to endpoint_draws"
     assert pd.isna(same["rx_building_draws"]) and pd.isna(same["clutter_height_m_median"])
     assert rows[rows["rx_id"] != "rx-2"]["fspl_db_median"].notna().all()
+    report = (tmp_path / "out" / "fixture" / "run_report.md").read_text(encoding="utf-8")
+    assert "| zero-length pair | 1 |" in report
+    assert f"| all causes | {int(rows['refused_draws'].sum())} |" in report
 
 
 def copy_snapshots(root: Path) -> Path:
@@ -869,6 +872,56 @@ def test_the_command_refuses_to_run_without_snapshots_dir(tmp_path: Path) -> Non
     assert done.returncode == 2
     assert "SNAPSHOTS_DIR" in done.stderr
     assert not (tmp_path / "out").exists()
+
+
+def test_building_draws_count_the_samplers_own_endpoint_pairs(two_runs: tuple[Path, Path]) -> None:
+    """The variant and the building draws read draw_endpoints with the pair's own seed."""
+    from engine.buildings import Footprints
+    from engine.predict import link_id
+    from terrain.draws import draw_endpoints, draw_seed
+
+    run = two_runs[0]
+    rows = gpd.read_parquet(run / "predictions.parquet")
+    footprints = Footprints.from_parquet(
+        SNAPSHOTS / "osm-buildings-synthetic" / "buildings.parquet"
+    )
+    sites, receivers = endpoint_boxes()
+    boxed = rows[rows["endpoint_draws"] == 16]
+    partial = 0
+    with rasterio.open(run / "terrain" / "dem.tif") as dem:
+        pixels = footprints.pixels(dem)
+    for _, row in boxed.iterrows():
+        seed = draw_seed(20261108, link_id(row["site_id"], row["rx_id"]))
+        assert row["seed"] == seed
+        pairs = draw_endpoints(sites[row["site_id"]], receivers[row["rx_id"]], 16, seed)
+        assert row["tx_building_draws"] == sum(pixels.contains(t) for t, _ in pairs)
+        assert row["rx_building_draws"] == sum(pixels.contains(r) for _, r in pairs)
+        partial += 0 < row["rx_building_draws"] < 16
+    assert partial > 0, "some boxes must straddle a footprint edge, or a wrong seed goes unseen"
+
+
+def test_a_coverage_cell_at_a_receiver_holds_that_receivers_median(tmp_path: Path) -> None:
+    centres = [
+        (725_405.0, 4_285_305.0),
+        (725_705.0, 4_285_805.0),
+        (725_255.0, 4_285_655.0),
+        (725_605.0, 4_285_205.0),
+        (725_455.0, 4_285_555.0),
+    ]
+    layer = gpd.GeoDataFrame(
+        {"rx_id": [f"c-{i}" for i in range(len(centres))]},
+        geometry=[Point(x_m, y_m) for x_m, y_m in centres],
+        crs="EPSG:26915",
+    )
+    path = tmp_path / "centres.parquet"
+    layer.to_parquet(path, index=False)
+    run = run_engine(small_config(tmp_path, rx_points=str(path)), fixture_settings())
+    rows = gpd.read_parquet(run / "predictions.parquet").set_index(["site_id", "rx_id"])
+    with rasterio.open(run / "coverage_site-east_fspl.tif") as coverage:
+        row, col = coverage.index(725_455.0, 4_285_555.0)
+        cell = coverage.read(1, window=((row, row + 1), (col, col + 1)))[0, 0]
+        assert coverage.xy(row, col) == (725_455.0, 4_285_555.0)
+    assert cell == pytest.approx(rows.loc[("site-east", "c-4"), "fspl_db_median"], abs=1e-4)
 
 
 # The import above activates the autouse fixture for this module.
