@@ -96,10 +96,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY pipeline/ pipeline/
 COPY terrain/ terrain/
 COPY ingester/ ingester/
-# engine/ does not exist until terrain-rf-eng adds it. A wildcard that matches
-# nothing copies nothing, where a plain path would fail the build, so the line
-# can stand now and picks the package up when it lands.
-COPY engin[e]/ engine/
+COPY engine/ engine/
 COPY dbt/ dbt/
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=ca_bundle,required=false \
