@@ -16,6 +16,7 @@ import rasterio
 from engine_fixture import no_logger_caching
 from rasterio.transform import from_origin
 from shapely.geometry import Point, box
+from structlog.testing import capture_logs
 
 from engine.buildings import Footprints
 from engine.calibration import calibration_table, model_fits
@@ -353,6 +354,23 @@ def test_py1812_archive_hash_is_checked_against_the_installed_metadata() -> None
         py1812_pin(lock, direct_url=wrong)
     right = {"url": url, "archive_info": {"hashes": {"sha256": archive_sha256}}}
     assert py1812_pin(lock, direct_url=right) == (commit, archive_sha256)
+
+
+def test_py1812_with_no_installed_hash_logs_at_info() -> None:
+    """uv records no hash in direct_url.json; the lock check covers it (Casey, PR #43)."""
+    lock = Path(__file__).resolve().parents[1] / "uv.lock"
+    commit, archive_sha256 = py1812_pin(lock)
+    url = f"https://github.com/eeveetza/Py1812/archive/{commit}.tar.gz"
+    with capture_logs() as logs:
+        assert py1812_pin(lock, direct_url={"url": url, "archive_info": {}}) == (
+            commit,
+            archive_sha256,
+        )
+    events = [entry for entry in logs if entry["event"] == "py1812_installed_hash_unrecorded"]
+    assert len(events) == 1
+    assert events[0]["log_level"] == "info"
+    assert events[0]["lock_sha256"] == archive_sha256
+    assert {"reason", "checked_by"} <= events[0].keys()
 
 
 def test_py1812_missing_from_the_environment_is_a_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
