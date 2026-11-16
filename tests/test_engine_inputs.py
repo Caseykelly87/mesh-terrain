@@ -16,7 +16,7 @@ from pyproj import Transformer
 from structlog.testing import capture_logs
 
 from engine.grid import run_grid
-from engine.points import Endpoint
+from engine.points import Endpoint, read_points
 from ingester import engine_inputs
 from ingester.engine_inputs import (
     SelectionError,
@@ -225,6 +225,8 @@ def test_command_writes_the_layers(
     assert str(sites["box_half_width_m"].dtype) == "float64"
     assert list(sites["box_half_width_m"].round(1)) == [22.8, 91.2, 91.2]
     assert list(receivers["box_half_width_m"].round(1)) == [364.8]
+    assert len(read_points(out / "tx_sites_real.parquet", "site_id")) == 3
+    assert len(read_points(out / "rx_real.parquet", "rx_id")) == 1
     printed = capsys.readouterr().out
     assert f"{pseudonym('G3')} busy_pair_gateway" in printed
     assert re.search(rf"{pseudonym('G3')} .*extent fail", printed)
