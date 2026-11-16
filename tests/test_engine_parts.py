@@ -6,6 +6,7 @@ by hand in each test.
 
 import math
 from pathlib import Path
+from typing import get_args
 
 import geopandas as gpd
 import numpy as np
@@ -19,12 +20,20 @@ from shapely.geometry import Point, box
 from engine.buildings import Footprints
 from engine.calibration import calibration_table, model_fits
 from engine.coverage import coverage_values
+from engine.errors import ConfigError
 from engine.grid import RunGrid, run_grid
 from engine.hashing import raster_content_sha256, table_content_sha256
 from engine.points import Endpoint
-from engine.predict import draws_for
+from engine.predict import PairPrediction, draws_for
+from engine.predictions import summary_value
+from engine.profiles import load_profile
+from engine.provenance import py1812_pin
+from engine.quantities import LinkQuantities
 from pipeline.common.snapshot import sha256_file
-from terrain.draws import EndpointBox
+from terrain.draws import DrawProfiles, DrawSummary, EndpointBox
+from terrain.errors import RefusalReason, RefusedDrawError
+from terrain.path_loss import DrawModels
+from terrain.profile import PathProfile
 
 
 def endpoint(name: str, x_m: float, y_m: float, half_width_m: float = 0.0) -> Endpoint:
@@ -195,6 +204,154 @@ def test_points_take_one_draw_and_boxes_take_the_configured_number(
     tx = EndpointBox(centre_xy_m=(725_000.0, 4_285_000.0), half_width_m=tx_half_m)
     rx = EndpointBox(centre_xy_m=(725_500.0, 4_285_000.0), half_width_m=rx_half_m)
     assert draws_for(tx, rx, 16) == expected
+
+
+# Review of PR #40: S1, S2 (coverage, bearing, clutter), S4 and the hashing and Py1812 nits.
+
+
+def test_coverage_at_a_receiver_on_a_cell_centre_is_that_receivers_value() -> None:
+    grid = RunGrid(
+        west_m=725_000.0,
+        south_m=4_285_000.0,
+        east_m=725_100.0,
+        north_m=4_285_100.0,
+        resolution_m=10.0,
+    )
+    xy = np.array(
+        [
+            [725_005.0, 4_285_095.0],
+            [725_095.0, 4_285_095.0],
+            [725_005.0, 4_285_005.0],
+            [725_095.0, 4_285_005.0],
+            [725_055.0, 4_285_045.0],
+        ]
+    )
+    values = np.array([101.0, 140.0, 97.0, 123.0, 160.0])
+    cells = coverage_values(xy, values, grid)
+    assert cells[0, 0] == pytest.approx(101.0)
+    assert cells[0, 9] == pytest.approx(140.0)
+    assert cells[9, 0] == pytest.approx(97.0)
+    assert cells[9, 9] == pytest.approx(123.0)
+    assert cells[5, 5] == pytest.approx(160.0)
+
+
+def pair(tx_xy_m: tuple[float, float], rx_xy_m: tuple[float, float]) -> PairPrediction:
+    return PairPrediction(
+        site_id="s",
+        rx_id="r",
+        tx_xy_m=tx_xy_m,
+        rx_xy_m=rx_xy_m,
+        endpoint_draws=1,
+        summary=None,
+        hata_variant=None,
+        mean_building_share=None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("offset", "expected"),
+    [((100.0, 0.0), 90.0), ((0.0, 100.0), 0.0), ((0.0, -100.0), 180.0), ((-100.0, 0.0), 270.0)],
+)
+def test_bearing_is_clockwise_from_grid_north(offset: tuple[float, float], expected: float) -> None:
+    tx = (725_000.0, 4_285_000.0)
+    rx = (tx[0] + offset[0], tx[1] + offset[1])
+    assert pair(tx, rx).bearing_deg == pytest.approx(expected)
+
+
+def flat_draw(clutter_m: list[float]) -> DrawProfiles:
+    ground = PathProfile(
+        distance_m=np.linspace(0.0, 100.0, 101),
+        ground_m=np.full(101, 150.0),
+        tx_xy_m=(725_000.0, 4_285_000.0),
+        rx_xy_m=(725_100.0, 4_285_000.0),
+    )
+    cells = PathProfile(
+        distance_m=np.linspace(0.0, 100.0, len(clutter_m)),
+        ground_m=np.full(len(clutter_m), 150.0),
+        tx_xy_m=ground.tx_xy_m,
+        rx_xy_m=ground.rx_xy_m,
+        clutter_m=np.array(clutter_m),
+    )
+    return DrawProfiles(ground=ground, p1812=cells, dsm_filled_pixels=0)
+
+
+def fspl_only() -> DrawModels:
+    node = load_profile("mesh_node")
+    return DrawModels(models=("fspl",), frequency_mhz=906.875, tx=node, rx=node)
+
+
+def test_the_clutter_of_a_draw_is_the_median_over_every_interior_point() -> None:
+    quantities = LinkQuantities(models=fspl_only(), cells_required=False)
+    quantities(flat_draw([0.0, 1.0, 2.0, 9.0, 0.0]))
+    quantities(flat_draw([0.0, 4.0, 6.0, 0.0]))
+    assert quantities.clutter_m == [2.0, 5.0]
+
+
+def test_a_draw_without_cell_interior_has_no_clutter_unless_p1812_needs_the_cells() -> None:
+    lenient = LinkQuantities(models=fspl_only(), cells_required=False)
+    assert "fspl_db" in lenient(flat_draw([0.0, 0.0])).values
+    assert lenient.clutter_m == [None]
+    strict = LinkQuantities(models=fspl_only(), cells_required=True)
+    with pytest.raises(RefusedDrawError) as refused:
+        strict(flat_draw([0.0, 0.0]))
+    assert refused.value.reason == "short_profile"
+    assert strict.clutter_m == []
+
+
+def kept_summary(medians: dict[str, float]) -> DrawSummary:
+    return DrawSummary(
+        link_id="x",
+        seed=1,
+        endpoint_draws=1,
+        refusals=dict.fromkeys(get_args(RefusalReason), 0),
+        medians=medians,
+        iqrs=medians,
+        shares={},
+        tx_building_draws=None,
+        rx_building_draws=None,
+        dsm_filled_pixels_median=None,
+    )
+
+
+def test_a_missing_quantity_is_null_only_where_the_run_allows_it() -> None:
+    summary = kept_summary({"fspl_db": 100.0})
+    assert summary_value(summary, "median", "fspl_db", frozenset()) == 100.0
+    assert summary_value(summary, "median", "p1812_db", frozenset({"p1812_db"})) is None
+    with pytest.raises(KeyError):
+        summary_value(summary, "median", "p1812_db", frozenset())
+    assert summary_value(None, "median", "fspl_db", frozenset()) is None
+
+
+def test_footprints_outside_the_window_are_left_out() -> None:
+    near = box(725_490, 4_285_490, 725_510, 4_285_510)
+    far = box(745_000, 4_285_000, 745_010, 4_285_010)
+    layer = gpd.GeoDataFrame({"osm_id": [1, 2]}, geometry=[near, far], crs="EPSG:26915")
+    kept = Footprints.from_frame(layer, window_m=(725_000.0, 4_285_000.0, 726_000.0, 4_286_000.0))
+    assert len(kept.parts) == 1 and kept.parts[0].equals(near)
+
+
+def test_table_content_hash_sees_the_geoparquet_crs(tmp_path: Path) -> None:
+    frame = gpd.GeoDataFrame(
+        {"rx_id": ["a"]}, geometry=[Point(725_000, 4_285_000)], crs="EPSG:26915"
+    )
+    frame.to_parquet(tmp_path / "utm.parquet", index=False)
+    frame.set_crs("EPSG:32615", allow_override=True).to_parquet(
+        tmp_path / "wgs.parquet", index=False
+    )
+    assert table_content_sha256(tmp_path / "utm.parquet") != table_content_sha256(
+        tmp_path / "wgs.parquet"
+    )
+
+
+def test_py1812_archive_hash_is_checked_against_the_installed_metadata() -> None:
+    lock = Path(__file__).resolve().parents[1] / "uv.lock"
+    commit, archive_sha256 = py1812_pin(lock)
+    url = f"https://github.com/eeveetza/Py1812/archive/{commit}.tar.gz"
+    wrong = {"url": url, "archive_info": {"hashes": {"sha256": "0" * 64}}}
+    with pytest.raises(ConfigError, match="archive"):
+        py1812_pin(lock, direct_url=wrong)
+    right = {"url": url, "archive_info": {"hashes": {"sha256": archive_sha256}}}
+    assert py1812_pin(lock, direct_url=right) == (commit, archive_sha256)
 
 
 # The import above activates the autouse fixture for this module.
