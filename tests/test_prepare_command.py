@@ -17,9 +17,11 @@ import numpy as np
 import pytest
 import yaml
 from engine_fixture import no_logger_caching  # noqa: F401
-from prepare_snapshots import write_raster_snapshot
+from prepare_snapshots import named, write_raster_snapshot
 from shapely.geometry import Point
+from structlog.testing import capture_logs
 
+import engine.prepare.command as command
 from engine.config import load_config
 from engine.grid import run_grid
 from engine.points import read_points
@@ -53,6 +55,13 @@ def snapshots_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     write_raster_snapshot(root, DEM_ID, {"dem.tif": (dem, 10.0, corner)})
     write_raster_snapshot(root, DSM_ID, {"dsm.tif": (dsm, 10.0, corner)})
     return root
+
+
+@pytest.fixture(autouse=True)
+def keep_log_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    # configure_logging caches loggers process-wide, which would hide later
+    # tests' log lines from structlog's capture_logs.
+    monkeypatch.setattr(command, "configure_logging", lambda log_format: None)
 
 
 @pytest.fixture
@@ -92,12 +101,24 @@ def assert_no_real_coordinates(text: str) -> None:
         assert digits not in text
 
 
+def refusal(folder: Path, tile: str = "x72y429") -> str:
+    """Run the command, expecting a refusal; return the logged reason."""
+    with capture_logs() as logs:
+        assert run(folder, tile) == 2
+    (refused,) = [entry for entry in logs if entry["log_level"] == "error"]
+    reason = str(refused["reason"])
+    assert_no_real_coordinates(str(logs))
+    return reason
+
+
 @pytest.mark.usefixtures("env")
 def test_the_command_writes_the_run_folder(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     folder = write_inputs(tmp_path / "x72y429")
-    assert run(folder) == 0
+    with capture_logs() as logs:
+        assert run(folder) == 0
+    assert_no_real_coordinates(str(logs))
     names = sorted(p.name for p in folder.iterdir())
     assert names == [
         "crossing.md",
@@ -147,8 +168,6 @@ def test_tx_sites_hold_only_the_sites_inside_the_extent(tmp_path: Path) -> None:
 def test_the_written_layers_make_a_run_extent_the_engine_accepts(
     tmp_path: Path, snapshots_dir: Path
 ) -> None:
-    from prepare_snapshots import named
-
     folder = write_inputs(tmp_path / "x72y429")
     assert run(folder) == 0
     endpoints = read_points(folder / "tx_sites.parquet", "site_id") + read_points(
@@ -204,23 +223,19 @@ def test_crossing_md_lists_real_pairs_by_pseudonym_and_grid_paths_as_counts(
 
 
 @pytest.mark.usefixtures("env")
-def test_a_real_receiver_outside_the_extent_stops_the_command(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_real_receiver_outside_the_extent_stops_the_command(tmp_path: Path) -> None:
     folder = write_inputs(tmp_path / "x72y429", receiver=(RX, 720_030.0, 4_282_345.6, 182.4))
-    assert run(folder) == 2
+    reason = refusal(folder)
     assert sorted(p.name for p in folder.iterdir()) == ["rx_real.parquet", "tx_sites_real.parquet"]
-    _, err = capsys.readouterr()
-    assert RX in err
-    assert "extent" in err
-    assert "720030" not in err
-    assert_no_real_coordinates(err)
+    assert RX in reason
+    assert "extent" in reason
+    assert "720030" not in reason
 
 
 @pytest.mark.usefixtures("env")
 def test_no_site_inside_the_extent_stops_the_command(tmp_path: Path) -> None:
     folder = write_inputs(tmp_path / "x72y429", sites=[SITES[2]])
-    assert run(folder) == 2
+    assert "no site" in refusal(folder)
     assert not (folder / "x72y429.yaml").exists()
 
 
@@ -228,7 +243,7 @@ def test_no_site_inside_the_extent_stops_the_command(tmp_path: Path) -> None:
 def test_an_existing_output_is_never_overwritten(tmp_path: Path) -> None:
     folder = write_inputs(tmp_path / "x72y429")
     (folder / "crossing.md").write_text("earlier\n", encoding="utf-8")
-    assert run(folder) == 2
+    assert "never overwrites" in refusal(folder)
     assert (folder / "crossing.md").read_text(encoding="utf-8") == "earlier\n"
     assert not (folder / "x72y429.yaml").exists()
 
@@ -237,7 +252,7 @@ def test_an_existing_output_is_never_overwritten(tmp_path: Path) -> None:
 def test_a_folder_inside_a_git_checkout_is_refused(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
     folder = write_inputs(tmp_path / "configs" / "x72y429")
-    assert run(folder) == 2
+    assert "outside git" in refusal(folder)
     assert not (folder / "x72y429.yaml").exists()
 
 
@@ -245,7 +260,7 @@ def test_a_folder_inside_a_git_checkout_is_refused(tmp_path: Path) -> None:
 def test_a_missing_input_layer_is_refused(tmp_path: Path) -> None:
     folder = write_inputs(tmp_path / "x72y429")
     (folder / "rx_real.parquet").unlink()
-    assert run(folder) == 2
+    assert "rx_real.parquet" in refusal(folder)
 
 
 @pytest.mark.usefixtures("env")
@@ -254,26 +269,26 @@ def test_a_site_layer_without_an_agreed_column_is_refused(tmp_path: Path, drop: 
     folder = write_inputs(tmp_path / "x72y429")
     layer = gpd.read_parquet(folder / "tx_sites_real.parquet").drop(columns=[drop])
     layer.to_parquet(folder / "tx_sites_real.parquet")
-    assert run(folder) == 2
+    assert drop in refusal(folder)
 
 
 @pytest.mark.usefixtures("env")
 def test_an_unknown_site_role_is_refused(tmp_path: Path) -> None:
     sites = [(*SITES[0][:4], "gateway")]
     folder = write_inputs(tmp_path / "x72y429", sites=sites)
-    assert run(folder) == 2
+    assert "'gateway'" in refusal(folder)
 
 
 @pytest.mark.usefixtures("env")
 def test_a_tile_without_a_defined_run_is_refused(tmp_path: Path) -> None:
     folder = write_inputs(tmp_path / "x71y428")
-    assert run(folder, tile="x71y428") == 2
+    assert "x71y428" in refusal(folder, tile="x71y428")
 
 
 def test_an_unset_snapshots_dir_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SNAPSHOTS_DIR", raising=False)
     folder = write_inputs(tmp_path / "x72y429")
-    assert run(folder) == 2
+    assert "SNAPSHOTS_DIR" in refusal(folder)
 
 
 def test_the_yaml_holds_only_interface_fields(tmp_path: Path, env: None) -> None:
