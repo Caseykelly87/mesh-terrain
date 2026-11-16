@@ -2,11 +2,12 @@
 
 These say where things are on this machine or in this image, never what a run
 computes: every run parameter is in the config file (`docs/INTERFACE.md`).
-The engine reads the environment only, not a `.env` file. Under `make engine`
-the container's environment is the `engine` Compose service's (`SNAPSHOTS_DIR`,
-`LOG_FORMAT`) and the image's ENV (`ITM_SOURCE_COMMIT`, `ENGINE_GIT_COMMIT`);
-no `.env` variable reaches its environment. It needs no database, so it does not use
-`pipeline.common.settings`, whose warehouse fields are required.
+The engine reads the environment only, not a `.env` file. Under
+`make engine` the container's environment is the `engine` Compose service's
+(`SNAPSHOTS_DIR`, `LOG_FORMAT`) and the image's ENV (`ITM_SOURCE_COMMIT`,
+`ENGINE_GIT_COMMIT`); no `.env` variable reaches its environment. It needs
+no database, so it does not use `pipeline.common.settings`, whose warehouse
+fields are required.
 """
 
 from pathlib import Path
