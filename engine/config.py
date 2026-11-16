@@ -142,8 +142,8 @@ def load_config(path: Path, *, profiles_dir: Path = PROFILES_DIR) -> RunConfig:
         calibration=_optional_input_file(folder, fields, "calibration"),
         input_names=_input_names(fields),
         snapshots=_snapshot_ids(fields["snapshots"]),
-        endpoint_draws=_positive_integer(fields["endpoint_draws"], "endpoint_draws", minimum=1),
-        seed=_positive_integer(fields["seed"], "seed", minimum=0),
+        endpoint_draws=_integer_at_least(fields["endpoint_draws"], "endpoint_draws", minimum=1),
+        seed=_integer_at_least(fields["seed"], "seed", minimum=0),
         output_dir=_folder(folder, fields["output_dir"]),
     )
     _check_combination(config)
@@ -229,7 +229,7 @@ def _snapshot_ids(value: Any) -> SnapshotIds:
     return SnapshotIds(**value)
 
 
-def _positive_integer(value: Any, name: str, *, minimum: int) -> int:
+def _integer_at_least(value: Any, name: str, *, minimum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ConfigError(f"{name} must be an integer of at least {minimum}, got {value!r}")
     return value

@@ -84,14 +84,12 @@ def _refusals(pairs: list[PairPrediction]) -> str:
 def _canopy(terrain: TerrainBuild) -> str:
     if terrain.canopy is None:
         return "## Canopy pixels without a value\n\nNo canopy snapshot in this run.\n"
-    rows = [
-        f"| {name} | {'no nodata value declared' if count is None else count} |"
-        for name, count in terrain.canopy_nodata_by_tile.items()
-    ]
+    rows = [f"| {name} | {count} |" for name, count in terrain.canopy_nodata_by_tile.items()]
     return (
         "## Canopy pixels without a value\n\n"
         "Counted as canopy 0 in the clutter rule. Per tile, in the tile's own pixels "
-        "inside the bounding box of the run extent:\n\n"
+        "inside the bounding box of the run extent; a tile that does not reach the run "
+        "extent says so:\n\n"
         "| Tile | Pixels without a value |\n| --- | --- |\n" + "\n".join(rows) + "\n\n"
         f"Cells of `terrain/canopy.tif` without a value: {terrain.canopy_nodata_cells}.\n\n"
         "No corridors in this run, so no per-corridor count.\n"

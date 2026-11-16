@@ -42,10 +42,15 @@ def coverage_values(xy_m: FloatArray, values_db: FloatArray, grid: RunGrid) -> F
     """
     cells = np.full(grid.shape, np.nan)
     if len(values_db) < MIN_RECEIVERS:
+        # Safe to continue: the engine does not extrapolate, so the file is
+        # written with every cell empty, and the warning says why.
+        log.warning("coverage_too_few_receivers", receivers=len(values_db))
         return cells
     try:
         interpolate = LinearNDInterpolator(xy_m, values_db, fill_value=np.nan)
     except QhullError:
+        # Safe to continue: receivers on one line span no area to interpolate.
+        log.warning("coverage_receivers_not_triangulable", receivers=len(values_db))
         return cells
     columns = grid.west_m + (np.arange(grid.width) + 0.5) * grid.resolution_m
     rows = grid.north_m - (np.arange(grid.height) + 0.5) * grid.resolution_m

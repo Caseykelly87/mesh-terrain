@@ -45,11 +45,15 @@ def read_points(path: Path, id_column: str) -> list[Endpoint]:
         One endpoint per row.
 
     Raises:
-        ConfigError: for a missing or non-unique id, a CRS other than
-            EPSG:4326 or EPSG:26915, a geometry that is not a point, or a box
-            half-width that is negative or not a number.
+        ConfigError: for a file that is not GeoParquet, a missing or
+            non-unique id, a CRS other than EPSG:4326 or EPSG:26915, a geometry
+            that is not a point, or a box half-width that is negative or not a
+            number.
     """
-    layer = gpd.read_parquet(path)
+    try:
+        layer = gpd.read_parquet(path)
+    except (OSError, ValueError) as err:
+        raise ConfigError(f"{path.name} is not a readable GeoParquet layer: {err}") from err
     _check_layer(layer, path, id_column)
     projected = layer.to_crs(epsg=26915)
     half_widths = _half_widths(projected, path)

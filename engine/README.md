@@ -4,21 +4,28 @@ The terrain-aware path-loss engine of `docs/INTERFACE.md`: one command reads one
 
 ## Run it
 
+Inside the Docker image, where `RUNS_HOST_DIR` is mounted at `/runs` (once platform-eng adds `make engine CONFIG=...`):
+
 ```
-python -m engine run engine/fixtures/fixture-run.yaml
+SNAPSHOTS_DIR=/snapshots python -m engine run engine/fixtures/fixture-run.yaml
 ```
 
-Inside the Docker image, or through `make engine CONFIG=...` once platform-eng adds it. The environment says where things are; the config says what to compute:
+The committed fixture configs write to `/runs`, the container path; on Windows that path is `C:uns`. On the host, run a copy of the config with another `output_dir`, as `tests/engine_fixture.py` writes one:
+
+```
+SNAPSHOTS_DIR=tests/fixtures/snapshots uv run --frozen python -m engine run <copy of the config>
+```
+ The environment says where things are; the config says what to compute:
 
 | Variable | Meaning |
 | --- | --- |
-| `SNAPSHOTS_DIR` | folder whose subfolders are the snapshot ids a config names; `tests/fixtures/snapshots` for the fixture |
+| `SNAPSHOTS_DIR` | required: folder whose subfolders are the snapshot ids a config names; `tests/fixtures/snapshots` for the fixture |
 | `ITM_LIBRARY_PATH` | NTIA's `libitm.so`; needed only when `models` lists `itm` |
 | `ITM_SOURCE_COMMIT` | the NTIA commit the library was built from; needed with `itm` |
 | `ENGINE_GIT_COMMIT` | the engine's commit where there is no git checkout (the image) |
 | `LOG_FORMAT` | `console` or `json` |
 
-Exit status: 0 for a finished run; 2 when the config or anything it names is refused, with nothing written; 1 for a failure during the run, which leaves `<run_id>.partial/` without a manifest. Nothing deletes a run folder.
+Exit status: 0 for a finished run; 2 when the environment (an unset `SNAPSHOTS_DIR`), the config or anything it names is refused, with nothing written; 1 for a failure during the run, which leaves `<run_id>.partial/` without a manifest. Nothing deletes a run folder.
 
 ## The config
 
@@ -44,9 +51,11 @@ Site and receiver layers are GeoParquet points in EPSG:4326 or EPSG:26915 with `
 
 A worked example from the fixture run: 1000 pairs, 2500 draws, 88 refused (25 missing map data and 58 empty 10 m cells around the made-up DEM hole, 5 too-short profiles), 35 pairs with every draw refused and so null in every model column.
 
+`clutter_height_m_median` reads the same clutter as `terrain/clutter.tif` and P.1812: `terrain.clutter.clutter_height_m` (the ADR 0006 rule with its floor and fills) per 1 m pixel, averaged into P.1812's 10 m cells; per draw the median over the interior points of P.1812's profile, then the median over draws. A short path whose 10 m profile has no interior point is refused when the run lists p1812, and otherwise keeps its losses with no clutter for that draw. `seed` holds each pair's `draw_seed(run_seed, link_id)`, with `link_id` the JSON list `[site_id, rx_id]` (Casey, PR #42).
+
 ## Reproducibility
 
-Each artifact's `content_sha256` hashes its rows or cells, not the file (`engine/hashing.py`), and two runs of one config give the same values. The manifest's `engine_git_commit`, `engine_git_dirty`, `itm_library_sha256`, `itm_source_commit`, `py1812_commit` and `py1812_archive_sha256` name the code (`engine/provenance.py`).
+Each artifact's `content_sha256` hashes its rows or cells, not the file (`engine/hashing.py`), and two runs of one config give the same values. The manifest's `engine_git_commit`, `engine_git_dirty`, `itm_library_sha256`, `itm_source_commit`, `py1812_commit` and `py1812_archive_sha256` name the code (`engine/provenance.py`). `engine_git_dirty` counts tracked changes and untracked files, except the run's own `output_dir` when it lies inside the checkout, so a run written there does not mark the next one dirty.
 
 ## Fixtures
 

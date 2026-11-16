@@ -4,15 +4,19 @@ Six manifest fields (manifest_version 1.1.0) trace a run to exact code:
 
 - `engine_git_commit`, `engine_git_dirty`: the checkout's `git rev-parse HEAD`
   and whether `git status --porcelain` lists anything (tracked changes or
-  untracked files). Where there is no checkout, as in the image, the commit
-  comes from `ENGINE_GIT_COMMIT` and `engine_git_dirty` is null (unknown).
+  untracked files), leaving out the run's own output folder when it lies
+  inside the checkout, so a run written there does not mark the next one
+  dirty. Where there is no checkout, as in the image, the commit comes from
+  `ENGINE_GIT_COMMIT` with a warning, and `engine_git_dirty` is null.
 - `itm_library_sha256`, `itm_source_commit`: the sha256 of the file at
   `ITM_LIBRARY_PATH` and the NTIA commit it was built from
   (`ITM_SOURCE_COMMIT`, which the image records); null when the run does not
   list itm.
 - `py1812_commit`, `py1812_archive_sha256`: the commit in Py1812's archive URL
   and the archive's sha256, both from `uv.lock`, after checking the installed
-  package came from that URL; null when the run does not list p1812.
+  package came from that URL and, when its `direct_url.json` records a hash
+  (uv records none), that the hash matches; null when the run does not list
+  p1812.
 
 A run that would need a value it cannot find is refused before it starts.
 """
@@ -25,6 +29,9 @@ import tomllib
 from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
+from typing import Any
+
+import structlog
 
 from engine.errors import ConfigError
 from engine.settings import EngineSettings
@@ -33,6 +40,8 @@ from terrain.path_loss import Model
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMIT = re.compile(r"[0-9a-f]{40}")
 PY1812_ARCHIVE = re.compile(r"/archive/([0-9a-f]{40})\.tar\.gz$")
+
+log = structlog.get_logger(component="engine.provenance")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -47,15 +56,22 @@ class Provenance:
     py1812_archive_sha256: str | None
 
 
-def collect_provenance(models: tuple[Model, ...], settings: EngineSettings) -> Provenance:
+def collect_provenance(
+    models: tuple[Model, ...], settings: EngineSettings, output_dir: Path | None = None
+) -> Provenance:
     """Find the commit of the engine and of every model library the run uses.
+
+    Args:
+        models: The run's models.
+        settings: Where the ITM library and the fallback commit are.
+        output_dir: The run's output folder, left out of the dirty check.
 
     Raises:
         ConfigError: when the engine's commit is unknown, itm is listed and
             the library or its source commit is missing, or p1812 is listed
             and `uv.lock` or the installed Py1812 cannot be matched.
     """
-    commit, dirty = engine_commit(settings)
+    commit, dirty = engine_commit(settings, output_dir)
     itm_sha256, itm_commit = _itm(settings) if "itm" in models else (None, None)
     py1812_commit, py1812_sha256 = (
         py1812_pin(REPO_ROOT / "uv.lock") if "p1812" in models else (None, None)
@@ -70,19 +86,37 @@ def collect_provenance(models: tuple[Model, ...], settings: EngineSettings) -> P
     )
 
 
-def engine_commit(settings: EngineSettings) -> tuple[str, bool | None]:
+def engine_commit(
+    settings: EngineSettings, output_dir: Path | None = None
+) -> tuple[str, bool | None]:
     """The engine's commit and whether the checkout differs from it."""
     try:
         head = _git("rev-parse", "HEAD").strip()
-        status = _git("status", "--porcelain")
+        status = _git("status", "--porcelain", "--", ".", *_excluded(output_dir))
     except (OSError, subprocess.CalledProcessError):
         if settings.engine_git_commit and COMMIT.fullmatch(settings.engine_git_commit):
+            log.warning(
+                "engine_commit_from_environment",
+                reason="no git checkout",
+                commit=settings.engine_git_commit,
+            )
             return settings.engine_git_commit, None
         raise ConfigError(
             "the engine's commit is unknown: no git checkout, and ENGINE_GIT_COMMIT is not a "
             "40-character commit; the image sets it at build"
         ) from None
     return head, bool(status.strip())
+
+
+def _excluded(output_dir: Path | None) -> list[str]:
+    """A git pathspec leaving out the output folder when it lies inside the checkout."""
+    if output_dir is None:
+        return []
+    try:
+        inside = output_dir.resolve().relative_to(REPO_ROOT)
+    except ValueError:
+        return []
+    return [f":(exclude){inside.as_posix()}"]
 
 
 def _git(*arguments: str) -> str:
@@ -108,12 +142,17 @@ def _itm(settings: EngineSettings) -> tuple[str, str]:
     return hashlib.sha256(path.read_bytes()).hexdigest(), commit
 
 
-def py1812_pin(lock_path: Path) -> tuple[str, str]:
+def py1812_pin(lock_path: Path, direct_url: dict[str, Any] | None = None) -> tuple[str, str]:
     """Py1812's commit and archive sha256 from `uv.lock`, checked against the installed package.
+
+    Args:
+        lock_path: The project's `uv.lock`.
+        direct_url: The installed package's `direct_url.json`; read from the
+            installed metadata when None.
 
     Raises:
         ConfigError: if the lock has no Py1812 archive entry, or the installed
-            package came from another URL.
+            package came from another URL or records another archive hash.
     """
     if not lock_path.is_file():
         raise ConfigError(f"p1812 is listed but there is no uv.lock at {lock_path}")
@@ -124,7 +163,33 @@ def py1812_pin(lock_path: Path) -> tuple[str, str]:
     archive_hash = str((entry or {}).get("sdist", {}).get("hash", ""))
     if match is None or not archive_hash.startswith("sha256:"):
         raise ConfigError("uv.lock has no Py1812 archive with a sha256 (ADR 0006 decision 1)")
-    installed = json.loads(metadata.distribution("py1812").read_text("direct_url.json") or "{}")
+    installed = direct_url if direct_url is not None else _installed_direct_url()
     if installed.get("url") != url:
         raise ConfigError(f"the installed Py1812 came from {installed.get('url')!r}, not {url}")
-    return match.group(1), archive_hash.removeprefix("sha256:")
+    sha256 = archive_hash.removeprefix("sha256:")
+    _check_installed_hash(installed, sha256)
+    return match.group(1), sha256
+
+
+def _installed_direct_url() -> dict[str, Any]:
+    text = metadata.distribution("py1812").read_text("direct_url.json")
+    installed: dict[str, Any] = json.loads(text or "{}")
+    return installed
+
+
+def _check_installed_hash(installed: dict[str, Any], lock_sha256: str) -> None:
+    """Compare the installed archive hash with the lock's, where the installer recorded one."""
+    archive_info = installed.get("archive_info", {})
+    recorded = archive_info.get("hashes", {}).get("sha256")
+    legacy = str(archive_info.get("hash", ""))
+    if recorded is None and legacy.startswith("sha256="):
+        recorded = legacy.removeprefix("sha256=")
+    if recorded is None:
+        # Safe to continue: uv checked the archive against uv.lock when it
+        # installed it (`uv sync --frozen`) and records no hash itself.
+        log.warning("py1812_installed_hash_unrecorded", lock_sha256=lock_sha256)
+        return
+    if recorded != lock_sha256:
+        raise ConfigError(
+            f"the installed Py1812 archive has sha256 {recorded}, uv.lock has {lock_sha256}"
+        )

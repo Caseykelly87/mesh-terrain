@@ -242,6 +242,7 @@ def pair(tx_xy_m: tuple[float, float], rx_xy_m: tuple[float, float]) -> PairPred
         tx_xy_m=tx_xy_m,
         rx_xy_m=rx_xy_m,
         endpoint_draws=1,
+        seed=0,
         summary=None,
         hata_variant=None,
         mean_building_share=None,

@@ -49,18 +49,32 @@ class Footprints:
     _shares: dict[tuple[XY, float], float] = field(default_factory=dict)
 
     @classmethod
-    def from_frame(cls, frame: gpd.GeoDataFrame) -> "Footprints":
-        """Merge a footprint layer's polygons, converted to EPSG:26915."""
+    def from_frame(
+        cls, frame: gpd.GeoDataFrame, window_m: tuple[float, float, float, float] | None = None
+    ) -> "Footprints":
+        """Merge a footprint layer's polygons, converted to EPSG:26915.
+
+        Args:
+            frame: Footprint polygons in any CRS.
+            window_m: West, south, east and north in EPSG:26915 metres; only
+                footprints that reach into it are kept, before they are
+                repaired and merged, so a run reads the MSA-wide layer but
+                merges only its own area. None keeps every footprint.
+        """
         polygons = frame.to_crs(epsg=26915).geometry
         polygons = polygons[polygons.geom_type.isin(["Polygon", "MultiPolygon"])]
+        if window_m is not None:
+            polygons = polygons[polygons.intersects(shapely.box(*window_m))]
         merged = shapely.union_all(shapely.make_valid(polygons.to_numpy()))
         parts = tuple(p for p in shapely.get_parts(merged) if isinstance(p, shapely.Polygon))
         return cls(parts=parts, tree=STRtree(parts))
 
     @classmethod
-    def from_parquet(cls, path: Path) -> "Footprints":
-        """Read the snapshot's `buildings.parquet`."""
-        return cls.from_frame(gpd.read_parquet(path))
+    def from_parquet(
+        cls, path: Path, window_m: tuple[float, float, float, float] | None = None
+    ) -> "Footprints":
+        """Read the snapshot's `buildings.parquet`, keeping footprints that reach `window_m`."""
+        return cls.from_frame(gpd.read_parquet(path), window_m)
 
     def share_within(self, xy_m: XY, radius_m: float = SHARE_RADIUS_M) -> float:
         """Share of the circle around a point covered by footprints.
