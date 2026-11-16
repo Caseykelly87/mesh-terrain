@@ -124,19 +124,16 @@ def load_config(path: Path, *, profiles_dir: Path = PROFILES_DIR) -> RunConfig:
     """
     raw, fields = _read_fields(path)
     folder = path.resolve().parent
-    models = _models(fields["models"])
+    tx_profile, rx_profile, profile_files = _profiles(fields, profiles_dir)
     config = RunConfig(
         path=path,
         config_sha256=hashlib.sha256(raw).hexdigest(),
         run_id=_run_id(fields["run_id"]),
         frequency_mhz=_frequency(fields["frequency_mhz"]),
-        models=models,
-        tx_profile=load_profile(fields["tx_profile"], profiles_dir),
-        rx_profile=load_profile(fields["rx_profile"], profiles_dir),
-        profile_files=(
-            profile_path(fields["tx_profile"], profiles_dir),
-            profile_path(fields["rx_profile"], profiles_dir),
-        ),
+        models=_models(fields["models"]),
+        tx_profile=tx_profile,
+        rx_profile=rx_profile,
+        profile_files=profile_files,
         tx_sites=_input_file(folder, fields, "tx_sites"),
         rx_points=_input_file(folder, fields, "rx_points"),
         calibration=_optional_input_file(folder, fields, "calibration"),
@@ -148,6 +145,16 @@ def load_config(path: Path, *, profiles_dir: Path = PROFILES_DIR) -> RunConfig:
     )
     _check_combination(config)
     return config
+
+
+def _profiles(
+    fields: dict[str, Any], profiles_dir: Path
+) -> tuple[AntennaProfile, AntennaProfile, tuple[Path, Path]]:
+    """The transmitter and receiver profiles and their files, for the manifest's inputs."""
+    names = (fields["tx_profile"], fields["rx_profile"])
+    tx, rx = (load_profile(name, profiles_dir) for name in names)
+    files = (profile_path(names[0], profiles_dir), profile_path(names[1], profiles_dir))
+    return tx, rx, files
 
 
 def _read_fields(path: Path) -> tuple[bytes, dict[str, Any]]:
