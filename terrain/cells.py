@@ -67,7 +67,7 @@ CELL_STEP_M = 10.0
 
 _MARGIN_CELLS = 1
 
-log = structlog.get_logger(__name__).bind(component="terrain.cells")
+log = structlog.get_logger(component="terrain.cells")
 
 
 @dataclass(frozen=True, kw_only=True)
