@@ -501,7 +501,7 @@ def test_the_command_line_exits_zero_on_a_run_and_two_on_a_refusal(tmp_path: Pat
 def itm_library() -> Path:
     from engine.settings import EngineSettings
 
-    return EngineSettings().itm_library_path
+    return EngineSettings(snapshots_dir=SNAPSHOTS).itm_library_path
 
 
 @pytest.mark.skipif(not itm_library().is_file(), reason="libitm.so exists only in the image")
@@ -512,7 +512,7 @@ def test_the_itm_fixture_runs_in_the_image(tmp_path: Path) -> None:
     run = run_engine(
         config,
         fixture_settings(
-            **EngineSettings().model_dump(
+            **EngineSettings(snapshots_dir=SNAPSHOTS).model_dump(
                 include={"itm_library_path", "itm_source_commit", "engine_git_commit"}
             )
         ),
@@ -852,6 +852,23 @@ def test_the_seed_column_holds_each_pairs_draw_seed(two_runs: tuple[Path, Path])
     assert rows["seed"].notna().all()
     for _, row in rows.iloc[[0, 1, 517, 999]].iterrows():
         assert row["seed"] == draw_seed(20261108, link_id(row["site_id"], row["rx_id"]))
+
+
+def test_the_command_refuses_to_run_without_snapshots_dir(tmp_path: Path) -> None:
+    """No default hides in code (INTERFACE): an unset SNAPSHOTS_DIR is a refusal, exit 2."""
+    env = {k: v for k, v in engine_env().items() if k != "SNAPSHOTS_DIR"}
+    config = small_config(tmp_path)
+    done = subprocess.run(
+        [sys.executable, "-m", "engine", "run", str(config)],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 2
+    assert "SNAPSHOTS_DIR" in done.stderr
+    assert not (tmp_path / "out").exists()
 
 
 # The import above activates the autouse fixture for this module.
