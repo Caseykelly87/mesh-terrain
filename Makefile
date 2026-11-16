@@ -28,6 +28,7 @@ DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
 .PHONY: help env up down nuke check check-itm check-definitions check-pdal pdal fmt reproduce load capture dbt-deps dbt-build dbt-debug lint test
+.PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
 
 help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
@@ -50,6 +51,19 @@ help:
 	@echo "                /pipelines/<file>, WORKDIR is read-write at /work (write outputs there);"
 	@echo "                inside SNAPSHOTS_DIR only <id>.partial; --stream unless STREAM=no"
 	@echo "make check-pdal print the PDAL version and fail without readers.ept or writers.gdal"
+	@echo ""
+	@echo "Terrain snapshots: each target writes one snapshot under SNAPSHOTS_DIR (ROOT=<dir> instead)"
+	@echo "and refuses an id that exists. A write is permanent; run one only after Casey's yes."
+	@echo "make p1812-maps the ITU-R P.1812 maps, itu-r-p1812-8-202509"
+	@echo "make dem-1m     the USGS 1 m DEM tile, 3dep-1m-mo-saintlouis-2017-x72y429"
+	@echo "make osm-snapshot DATE=YYYY-MM-01"
+	@echo "                Geofabrik's Missouri and Illinois extracts of that date, osm-geofabrik-mo-il-<DATE>"
+	@echo "make canopy     the CHMv2 canopy tile, canopy-v2-0231113110"
+	@echo "make dsm OSM_SNAPSHOT=<id> SCRATCH=<dir>"
+	@echo "                the lidar DSM, ept-mo-stlouis-2017-x72y429, through make pdal; needs the OSM"
+	@echo "                snapshot written and registered; window rasters go to SCRATCH, outside the snapshots"
+	@echo "make register-snapshot ID=<id>"
+	@echo "                check a finished snapshot against its manifest and record it in raw.snapshot"
 
 env:
 	@test -f .env || cp .env.example .env
@@ -147,6 +161,41 @@ capture:
 # Load one finished snapshot into raw; refuses a .partial folder or a manifest mismatch.
 load:
 	$(UV) python -m ingester.load $(SNAPSHOT)
+
+# Stops make before anything runs when a variable is empty, so make -n shows
+# the refusal as well. Usage: $(call require,NAME,<what it holds>). Unexported
+# because the bare export above would expand it, and so raise the error, for
+# every recipe's environment.
+require = $(if $($(1)),,$(error make $@ needs $(1)=$(2)))
+unexport require
+
+# The terrain snapshot commands (pipeline/terrain_snapshots/README.md). They
+# run on the host, like load, because the DSM command calls make pdal from the
+# checkout and Compose mounts the snapshots folder read-only. Behind Norton the
+# downloads need SSL_CERT_FILE and the DSM's lidar reads need CA_BUNDLE_PATH,
+# both from .env. Each writes a snapshot, which is permanent, so none runs
+# without Casey's yes on its checklist; make -n prints the command instead.
+TERRAIN_SNAPSHOT := $(UV) python -m pipeline.terrain_snapshots
+SNAPSHOT_ROOT = $(if $(ROOT),--root '$(ROOT)')
+
+p1812-maps:
+	$(TERRAIN_SNAPSHOT) itu-maps $(SNAPSHOT_ROOT)
+
+dem-1m:
+	$(TERRAIN_SNAPSHOT) dem $(SNAPSHOT_ROOT)
+
+osm-snapshot:
+	$(call require,DATE,YYYY-MM-01)$(TERRAIN_SNAPSHOT) osm --date '$(DATE)' $(SNAPSHOT_ROOT)
+
+canopy:
+	$(TERRAIN_SNAPSHOT) canopy $(SNAPSHOT_ROOT)
+
+dsm:
+	$(call require,OSM_SNAPSHOT,<id>)$(call require,SCRATCH,<dir>)$(TERRAIN_SNAPSHOT) dsm \
+	    --osm-snapshot '$(OSM_SNAPSHOT)' --scratch '$(SCRATCH)' $(SNAPSHOT_ROOT)
+
+register-snapshot:
+	$(call require,ID,<snapshot id>)$(TERRAIN_SNAPSHOT) register '$(ID)' $(SNAPSHOT_ROOT)
 
 fmt:
 	$(UV) ruff check --fix .
