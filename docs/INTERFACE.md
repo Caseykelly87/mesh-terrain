@@ -24,10 +24,10 @@ YAML, loaded with `yaml.safe_load` only, every field explicit, no defaults hidde
 | `frequency_mhz` | a run parameter, never baked into a profile; LongFast is 906.875 |
 | `models` | list from {`fspl`, `knife_edge`, `hata`, `itm`, `p1812`}; one column per model in the predictions |
 | `tx_profile`, `rx_profile` | names of profile records (below) |
-| `tx_sites` | path to a caller-supplied point layer (GeoParquet, EPSG:4326 or 26915, `site_id` and geometry) |
-| `rx_points` | path to a GeoParquet point layer of receivers (`rx_id`, geometry) |
-| `snapshots` | ids of the snapshots to use: DEM always; DSM source (EPT project) and canopy optional; the OpenStreetMap buildings snapshot optional, and required when `models` lists `hata`; the P.1812 map snapshot, or the synthetic map fixture, and a DSM or canopy snapshot, required when `models` lists `p1812` (ADR 0006 decisions 2 and 4). Without the OpenStreetMap snapshot, `tx_building_draws` and `rx_building_draws` are null, never zero, and `hata_variant` is null. Each id is a folder with its manifest present; the engine needs no database row |
-| `endpoint_draws` | number of position draws when a site or receiver carries `box_half_width_m`; 1 for points |
+| `tx_sites` | path, relative to the config file, to a caller-supplied point layer (GeoParquet, EPSG:4326 or 26915, `site_id` and geometry, optional `box_half_width_m`) |
+| `rx_points` | path, relative to the config file, to a GeoParquet point layer of receivers (`rx_id`, geometry, optional `box_half_width_m`) |
+| `snapshots` | a mapping of the roles `dem`, `dsm`, `canopy`, `buildings` and `p1812_maps` to snapshot ids, or null for a role not used; each id is a folder under the `SNAPSHOTS_DIR` setting, not a config field. The roles: DEM always; DSM source (EPT project) and canopy optional; the OpenStreetMap buildings snapshot optional, and required when `models` lists `hata`; the P.1812 map snapshot, or the synthetic map fixture, and a DSM or canopy snapshot, required when `models` lists `p1812` (ADR 0006 decisions 2 and 4). Without the OpenStreetMap snapshot, `tx_building_draws` and `rx_building_draws` are null, never zero, and `hata_variant` is null. Each id is a folder with its manifest present, checked against that manifest before the run; the engine needs no database row |
+| `endpoint_draws` | number of position draws for a pair when either end carries `box_half_width_m`; 1 when neither does |
 | `seed` | integer seed for every random draw in the run; recorded in the manifest (`snp_01`) |
 | `calibration` | optional: path to an observations layer (`site_id`, `rx_id`, `observed_loss_db`); when present a calibration artifact is written, predictions are not changed. The acceptance run sets it to the synthetic fixture `fixtures/observations.parquet` |
 | `output_dir` | folder that receives `<run_id>/` |
@@ -47,10 +47,11 @@ Every run writes these into `<output_dir>/<run_id>/`:
 
 | Artifact | Format | Content |
 | --- | --- | --- |
-| `terrain/dem.tif`, and when the config names them `terrain/dsm.tif`, `terrain/canopy.tif`, `terrain/clutter.tif` | COG, EPSG:26915, float32 metres, nodata set | the terrain build for the run's extent; `clutter` is max(dsm minus dem, canopy where nonzero) and is written only when a DSM or canopy snapshot is named; without one, clutter columns are null, never zero |
-| `predictions.parquet` | GeoParquet, EPSG:26915, LINESTRING site to receiver | one row per (site_id, rx_id): distance_m, bearing_deg, `<model>_db_median` and `<model>_db_iqr` for each model in `models` (fspl, knife_edge, hata, itm, p1812), each a basic transmission loss in dB, antenna gains excluded (ADR 0006); `knife_edge` is free space plus the P.526 Bullington loss (Casey, PR #37), los_share, fresnel_clearance_pct_median, clutter_height_m_median, hata_variant, `endpoint_draws`, `refused_draws` (draws refused for a missing height or clutter value, from 0 to `endpoint_draws`; every median, interquartile range and share comes from the other draws, and all are null when every draw is refused; ADR 0006 item 11), `tx_building_draws` and `rx_building_draws` (of all drawn pairs, how many have their transmitter or receiver end on a building pixel of the 1 m layers; null where the run has no 1 m DEM), `p1812_at_cap_share` (share of the unrefused draws where P.1812's loss is within 0.1 dB of its troposcatter loss; null where `p1812_db_median` is null; ADR 0006 item 2) |
-| `coverage_<site_id>_<model>.tif` | COG, EPSG:26915, float32 dB, nodata set | predicted path loss from one site at each receiver point interpolated to the run's grid; one file per site and model, derived from `predictions.parquet` and never computed separately. Sites are not combined; a caller wanting best-server coverage takes the minimum across files |
-| `calibration.parquet`, `calibration.md` | Parquet and Markdown | only when `calibration` is set: per observation, predicted and observed, residual per model; RMSE, MAE, bias and n per model in the Markdown. It is labelled with the run id and never alters `predictions.parquet` |
+| `terrain/dem.tif`, and when the config names them `terrain/dsm.tif`, `terrain/canopy.tif`, `terrain/clutter.tif` | COG, EPSG:26915, float32 metres, nodata set | the terrain build for the run's extent; `clutter` is max(dsm minus dem, canopy where nonzero) with the floor at 0 and the fills of ADR 0006 decision 6 and items 6 (a) and 11 (i), the values P.1812's 10 m cells average, and is written only when a DSM or canopy snapshot is named; the canopy is resampled onto the run grid by nearest neighbour (Casey, PR #34); without one, clutter columns are null, never zero |
+| `predictions.parquet` | GeoParquet, EPSG:26915, LINESTRING site to receiver | one row per (site_id, rx_id): distance_m, bearing_deg (grid bearing in EPSG:26915, clockwise from grid north), `<model>_db_median` and `<model>_db_iqr` for each model in `models` (fspl, knife_edge, hata, itm, p1812), each a basic transmission loss in dB, antenna gains excluded (ADR 0006); `knife_edge` is free space plus the P.526 Bullington loss (Casey, PR #37), los_share, fresnel_clearance_pct_median, clutter_height_m_median, hata_variant, `endpoint_draws`, `refused_draws` (draws refused for a missing height or clutter value, from 0 to `endpoint_draws`; every median, interquartile range and share comes from the other draws, and all are null when every draw is refused; ADR 0006 item 11), `tx_building_draws` and `rx_building_draws` (of all drawn pairs, how many have their transmitter or receiver end on a building pixel of the 1 m layers; null where the run has no 1 m DEM), `p1812_at_cap_share` (share of the unrefused draws where P.1812's loss is within 0.1 dB of its troposcatter loss; null where `p1812_db_median` is null; ADR 0006 item 2) |
+| `coverage_<site_id>_<model>.tif` | COG, EPSG:26915, float32 dB, nodata set | predicted path loss from one site, interpolated linearly between receivers (a Delaunay triangulation of the receiver positions) onto 10 m cells over the run extent, with cell edges on multiples of 10 m, and nodata outside the receivers' hull; one file per site and model, derived from `predictions.parquet` and never computed separately. Sites are not combined; a caller wanting best-server coverage takes the minimum across files |
+| `calibration.parquet`, `calibration.md` | Parquet and Markdown | only when `calibration` is set: per observation `run_id`, `site_id`, `rx_id`, `observed_loss_db`, and per model `<model>_db_predicted` and `<model>_residual_db` (observed minus predicted, so a positive residual means the model predicted less loss than observed); RMSE, MAE, bias and n per model in the Markdown. It is labelled with the run id and never alters `predictions.parquet` |
+| `run_report.md` | Markdown | refused draws broken down by cause (missing map data, empty 10 m cell, missing clutter, too-short profile; Casey, PR #30), canopy no-data pixels per tile and per corridor (Casey, PR #24), the median DSM filled-pixel count, zero-length and all-refused pairs, and the pairs whose building share lies between 0.15 and 0.25; no column holds these |
 | `manifest.json` | JSON | below |
 
 Column names, units and CRS in `predictions.parquet` are fixed by `schema_version`; adding a column bumps the minor version, changing or removing one bumps the major version.
@@ -59,7 +60,7 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
 
 ```json
 {
-  "manifest_version": "1.0.0",
+  "manifest_version": "1.1.0",
   "schema_version": "1.1.0",
   "engine_version": "0.1.0",
   "run_id": "test-tile",
@@ -67,6 +68,12 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
   "config_sha256": "...",
   "seed": 20261108,
   "models": {"itm": "NTIA ITM 1.4", "p1812": "Py1812 6c9061dd, P.1812-8"},
+  "engine_git_commit": "<40 hex>",
+  "engine_git_dirty": false,
+  "itm_library_sha256": "...",
+  "itm_source_commit": "<40 hex>",
+  "py1812_commit": "6c9061dd022e93c84169059a016643926ce89964",
+  "py1812_archive_sha256": "03d7c5bd2bdb831d009266b4a17a2c721f63db4f817f60af47bb82fdc4268469",
   "snapshots": [
     {"id": "3dep-1m-mo-saintlouis-2017-x72y429", "manifest_sha256": "..."},
     {"id": "ept-mo-stlouis-2017-x72y429", "manifest_sha256": "..."},
@@ -86,6 +93,7 @@ Column names, units and CRS in `predictions.parquet` are fixed by `schema_versio
 Rules:
 
 - `manifest_version` follows semantic versioning. A minor bump adds a field; a major bump changes or removes one. A reader that knows 1.x reads every 1.y.
+- Manifest 1.1.0 records the code that produced the run (Casey, PR #32): `engine_git_commit`, `engine_git_dirty` (true, false, or null where there is no checkout), `itm_library_sha256` and `itm_source_commit` (null unless `models` lists `itm`), and `py1812_commit` and `py1812_archive_sha256` (null unless it lists `p1812`). Inputs are recorded with the paths the config gives, and profiles as `profiles/<name>.yaml`.
 - `schema_version` is the version of the artifact columns; `engine_version` is the package version. Both are recorded so a reader can tell a column change from a numerical change.
 - Every input and artifact carries its file sha256, and every artifact also carries a `content_sha256`: the hash of its rows (Parquet, in row order) or its cell values (COG), not of the file, because Parquet and COG writers embed timestamps. Two runs with the same config, seed and snapshots produce identical `content_sha256` values; that is the reproducibility test (`snp_01`). `make check` and CI run it on a committed 1 km sub-tile fixture (a few megabytes, no network); the full 10 km test tile (about 2.2 to 2.9 GB of EPT streamed through PDAL and not kept, about 0.5 GB kept) is a documented manual acceptance run.
 - The manifest is written last, and the `.partial` folder is renamed after it. A folder named `<run_id>/` with a manifest means the run completed.
