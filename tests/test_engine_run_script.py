@@ -78,6 +78,11 @@ def with_file(tmp_path: Path, relative: str) -> Path:
     return config
 
 
+def made(folder: Path) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 # Each case returns (config, runs folder, extra environment) from tmp_path,
 # whose "runs" folder exists, and names a fragment of the refusal line.
 Case = Callable[[Path], tuple[Path, Path | str, dict[str, str]]]
@@ -133,7 +138,11 @@ REFUSALS: dict[str, tuple[Case, str]] = {
         "checkout",
     ),
     "runs inside SNAPSHOTS_HOST_DIR": (
-        lambda t: (FIXTURE_CONFIG, SNAPSHOTS / "dem-1m-synthetic-subtile", {}),
+        lambda t: (
+            FIXTURE_CONFIG,
+            made(t / "snaps" / "inner"),
+            {"SNAPSHOTS_HOST_DIR": (t / "snaps").as_posix()},
+        ),
         "inside SNAPSHOTS_HOST_DIR",
     ),
     "runs holds SNAPSHOTS_DIR": (
