@@ -26,6 +26,7 @@ from engine.config import load_config
 from engine.grid import run_grid
 from engine.points import read_points
 from engine.prepare.command import main
+from engine.prepare.run_config import SITE_PROFILE
 from engine.terrain_build import check_sources, dem_resolution_m
 
 DEM_ID = "3dep-1m-mo-saintlouis-2017-x72y429"
@@ -40,6 +41,7 @@ SITES = [
     (SITE_C, 720_100.0, 4_285_000.0, 182.4, "busy_pair_gateway"),
 ]
 RX_ROW = (RX, 727_654.3, 4_282_345.6, 182.4)
+NEVER_PUBLISHED = "inherit the rule that precise MeshSTL positions are never published"
 REAL_COORDINATE_TEXT = ["723456", "4284321", "725012", "4287034", "720100", "727654", "4282345"]
 
 
@@ -186,7 +188,9 @@ def test_the_config_names_the_run_the_interface_needs(tmp_path: Path) -> None:
     assert config.run_id == "x72y429"
     assert config.frequency_mhz == 906.875
     assert config.models == ("fspl", "knife_edge", "hata", "itm", "p1812")
-    assert config.tx_profile.name == config.rx_profile.name == "mesh_node"
+    # The site profile waits on Casey (PR #48); the answer changes SITE_PROFILE only.
+    assert config.tx_profile.name == SITE_PROFILE
+    assert config.rx_profile.name == "mesh_node"
     assert config.tx_sites == folder / "tx_sites.parquet"
     assert config.rx_points == folder / "rx_points.parquet"
     assert config.snapshots.named() == {
@@ -218,7 +222,9 @@ def test_crossing_md_lists_real_pairs_by_pseudonym_and_grid_paths_as_counts(
     assert "| 1 |" in text  # one tall cell
     for site in (SITE_A, SITE_B):
         assert f"| {site} | 400 |" in text
-    assert "never published" in text
+    assert NEVER_PUBLISHED in text
+    assert "read locally only and never posted" in text
+    assert "## Paths between real endpoints" in text
     assert_no_real_coordinates(text)
 
 
@@ -309,3 +315,74 @@ def test_the_yaml_holds_only_interface_fields(tmp_path: Path, env: None) -> None
         "calibration",
         "output_dir",
     ]
+
+
+@pytest.mark.usefixtures("env")
+def test_a_site_id_that_cannot_name_a_coverage_file_is_refused(tmp_path: Path) -> None:
+    sites = [("a1/" + "a1" * 31, *SITES[0][1:])]
+    folder = write_inputs(tmp_path / "x72y429", sites=sites)
+    assert "coverage file" in refusal(folder)
+
+
+@pytest.mark.usefixtures("env")
+def test_a_real_receiver_id_that_repeats_a_grid_id_is_refused(tmp_path: Path) -> None:
+    folder = write_inputs(tmp_path / "x72y429", receiver=("grid-r00c00", *RX_ROW[1:]))
+    assert "grid-r00c00" in refusal(folder)
+
+
+@pytest.mark.usefixtures("env")
+def test_a_site_left_out_is_logged_at_warning(tmp_path: Path) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    with capture_logs() as logs:
+        assert run(folder) == 0
+    (left_out,) = [entry for entry in logs if entry["event"] == "prepare_site_left_out"]
+    assert left_out["log_level"] == "warning"
+    assert left_out["site_id"] == SITE_C
+    assert left_out["dem"] == DEM_ID
+
+
+@pytest.mark.usefixtures("env")
+def test_reads_scan_and_writes_log_begin_lines_and_the_write_its_duration(tmp_path: Path) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    with capture_logs() as logs:
+        assert run(folder) == 0
+    events = [entry["event"] for entry in logs]
+    for begin, end in [
+        ("prepare_layers_read_begin", "prepare_layers_read_end"),
+        ("tall_cells_begin", "tall_cells_found"),
+        ("prepare_write_begin", "prepare_written"),
+    ]:
+        assert events.index(begin) < events.index(end)
+    (written,) = [entry for entry in logs if entry["event"] == "prepare_written"]
+    assert written["duration_s"] >= 0.0
+
+
+@pytest.mark.usefixtures("env")
+def test_a_config_the_engine_refuses_leaves_nothing_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    monkeypatch.setattr(command, "config_text", lambda tile: "run_id: x72y429\n")
+    with pytest.raises(RuntimeError, match="engine's check"):
+        run(folder)
+    assert sorted(p.name for p in folder.iterdir()) == ["rx_real.parquet", "tx_sites_real.parquet"]
+
+
+@pytest.mark.usefixtures("env")
+def test_a_failure_while_moving_outputs_into_place_leaves_nothing_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    moved: list[Path] = []
+    real_replace = command.move_into_place
+
+    def fail_on_third(source: Path, target: Path) -> None:
+        if len(moved) == 2:
+            raise OSError("disk full")
+        real_replace(source, target)
+        moved.append(target)
+
+    monkeypatch.setattr(command, "move_into_place", fail_on_third)
+    with pytest.raises(OSError, match="disk full"):
+        run(folder)
+    assert sorted(p.name for p in folder.iterdir()) == ["rx_real.parquet", "tx_sites_real.parquet"]

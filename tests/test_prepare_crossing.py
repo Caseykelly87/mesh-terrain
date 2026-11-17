@@ -59,6 +59,20 @@ def test_dem_and_dsm_on_offset_grids_are_compared_at_the_same_place(tmp_path: Pa
     assert as_set(found) == {cell(50, 70)}
 
 
+def test_a_dem_gap_under_a_tall_surface_is_not_a_tall_cell(tmp_path: Path) -> None:
+    # No ground height means no height above ground: the cell is never tall,
+    # whatever the DSM says, and its neighbours still count.
+    dem = np.full((50, 50), 100.0, dtype=np.float32)
+    dem[10, 10] = NODATA
+    dsm = dem.copy()
+    dsm[10, 10:12] = 300.0
+    write_raster_snapshot(tmp_path, "dem", {"dem.tif": (dem, 1.0, (WEST_M, NORTH_M))})
+    write_raster_snapshot(tmp_path, "dsm", {"dsm.tif": (dsm, 1.0, (WEST_M, NORTH_M))})
+    snapshots = named(tmp_path, "dem", "dsm")
+    found = tall_cells(snapshots["dem"], snapshots["dsm"])
+    assert as_set(found) == {cell(10, 11)}
+
+
 def test_no_tall_cell_gives_an_empty_list(tmp_path: Path) -> None:
     dem = np.full((50, 50), 100.0, dtype=np.float32)
     write_raster_snapshot(tmp_path, "dem", {"dem.tif": (dem, 1.0, (WEST_M, NORTH_M))})

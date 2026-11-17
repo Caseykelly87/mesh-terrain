@@ -2,7 +2,7 @@
 
 The engine refuses a whole run when its extent, the bounding box of every
 site and receiver box plus 50 m rounded out to 10 m, reaches outside the DEM
-tiles (`engine.grid.run_grid`, `engine.terrain_build._check_covers`). The
+tiles (`engine.grid.run_grid`, `engine.terrain_build.check_covers`). The
 check runs that same rule on each endpoint alone, so the endpoints that pass
 make a run the engine cannot refuse for extent.
 
