@@ -468,10 +468,44 @@ def counts_for_issue(lines: list[str]) -> str:
     return next(text for text in lines if text.startswith("counts for"))
 
 
+REPORT_PREFIXES = ("dropped", "counts check", "sites by", "sites only", "left out", "counts for")
+GATEWAY_LINE = re.compile(r"[0-9a-f]{64} (both_ends|gateway_only)_gateway: ")
+
+
+def recorded(lines: list[str]) -> list[str]:
+    """The terminal lines the local report must hold, in the order they printed."""
+    return [t for t in lines if t.startswith(REPORT_PREFIXES) or GATEWAY_LINE.match(t)]
+
+
+def report_text(tmp_path: Path) -> str:
+    path = tmp_path / "configs" / "x72y429" / "engine_inputs_report.md"
+    return path.read_text(encoding="utf-8")
+
+
+def report_lines(tmp_path: Path) -> list[str]:
+    """The lines inside the report's text block."""
+    text = report_text(tmp_path)
+    block = text.split("```text\n", 1)[1].split("\n```", 1)[0]
+    return block.splitlines()
+
+
+def assert_report(tmp_path: Path, printed: str) -> None:
+    """The report holds every recorded terminal line and no coordinate (Casey, issue #55, 7)."""
+    text = report_text(tmp_path)
+    assert text.startswith("# engine_inputs --sites-only, x72y429\n")
+    assert engine_inputs.REPORT_NOTE in text
+    assert f"Snapshot {SNAPSHOT_ID}, DEM snapshot {DEM_SNAPSHOT_ID}." in text
+    assert report_lines(tmp_path) == recorded(printed.splitlines())
+    assert coordinates_in(text) == []
+
+
 def assert_sites(tmp_path: Path, kept: tuple[str, ...]) -> None:
-    """Only the site layer was written, with the kept gateways in site order, marked real."""
+    """The site layer and the local report alone, the kept gateways in site order, marked real."""
     out = tmp_path / "configs" / "x72y429"
-    assert [path.name for path in out.iterdir()] == ["tx_sites_real.parquet"]
+    assert sorted(path.name for path in out.iterdir()) == [
+        "engine_inputs_report.md",
+        "tx_sites_real.parquet",
+    ]
     sites = gpd.read_parquet(out / "tx_sites_real.parquet")
     assert list(sites.columns) == ["site_id", "geometry", "box_half_width_m", "role"]
     assert sites.crs.to_epsg() == 26915
@@ -512,9 +546,11 @@ def test_sites_only_writes_the_sites_and_no_receiver(
     assert COUNTS_PASS in lines
     assert engine_inputs.SITES_ONLY_RULE in lines
     assert (
-        "wrote tx_sites_real.parquet (3 sites); no rx_real.parquet: no real receiver written "
-        "(--sites-only)"
+        "wrote tx_sites_real.parquet (3 sites) and engine_inputs_report.md (local only); "
+        "no rx_real.parquet: no real receiver written (--sites-only)"
     ) in lines
+    assert_report(tmp_path, printed)
+    assert report_lines(tmp_path)[-1] == counts_for_issue(lines)
     assert counts_for_issue(lines) == (
         "counts for issue #44: pairs public 4, MeshSTL 2, shared 1, union 5; pairs touching "
         "the tile 3 (both ends 1); nodes selected 3; extent pass 3, fail 0; pairs dropped 0 "
@@ -545,6 +581,7 @@ def test_sites_only_writes_the_gateway_of_a_both_ends_pair_its_relayer_drops(
         "pairs dropped 1 (straddles the tile edge 1, fails the DEM edge check 0); "
         f"sites written 3, left out 0; {NO_RECEIVER}"
     )
+    assert_report(tmp_path, printed)
     assert coordinates_in(printed + repr(events)) == []
 
 
@@ -598,6 +635,8 @@ def test_sites_only_leaves_out_a_gateway_with_its_reason(
     line = counts_for_issue(lines)
     assert line.endswith(f"{counts}; {NO_RECEIVER}")
     assert not any(node.pseudonym in line for node in NODES.values())
+    assert_report(tmp_path, printed)
+    assert names(left_out) in report_lines(tmp_path)
     assert coordinates_in(printed + repr(events)) == []
 
 
@@ -642,6 +681,7 @@ def test_sites_only_reports_a_counts_mismatch_and_does_not_refuse(
         "and does not refuse"
     ) in lines
     assert [text for text in lines if text.startswith("dropped")] == [names(t) for t in dropped]
+    assert_report(tmp_path, printed)
     assert coordinates_in(printed + repr(events)) == []
 
 
@@ -659,7 +699,10 @@ def test_sites_only_roles_follow_the_counted_states(
     with capture_logs() as events:
         assert run_sites_only(tmp_path) == 0
     out = tmp_path / "configs" / "x72y429"
-    assert [path.name for path in out.iterdir()] == ["tx_sites_real.parquet"]
+    assert sorted(path.name for path in out.iterdir()) == [
+        "engine_inputs_report.md",
+        "tx_sites_real.parquet",
+    ]
     sites = gpd.read_parquet(out / "tx_sites_real.parquet")
     assert list(sites["site_id"]) == [pseudonym(name) for name in ("G1", "G2", "G3")]
     assert list(sites["role"]) == [
@@ -678,6 +721,7 @@ def test_sites_only_roles_follow_the_counted_states(
         names("dropped both-ends pair {B} to {G2}: relayer straddles the tile edge")
     ]
     assert counts_for_issue(lines).endswith(f"sites written 3, left out 0; {NO_RECEIVER}")
+    assert_report(tmp_path, printed)
     assert coordinates_in(printed + repr(events)) == []
 
 
@@ -717,20 +761,45 @@ def test_sites_only_does_not_place_the_relayer(
     build_capture(tmp_path / "snapshots", moved_a=True)
     assert run_sites_only(tmp_path) == 0
     assert_sites(tmp_path, SITE_ORDER)
-    assert pseudonym("A") + " both_ends_relayer" not in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert pseudonym("A") + " both_ends_relayer" not in printed
+    assert_report(tmp_path, printed)
 
 
 @pytest.mark.parametrize(
-    "name", ["rx_real.parquet", "tx_sites_real.parquet", "engine-inputs.partial"]
+    "name",
+    [
+        "rx_real.parquet",
+        "tx_sites_real.parquet",
+        "engine-inputs.partial",
+        "engine_inputs_report.md",
+    ],
 )
 def test_sites_only_refuses_an_existing_layer(tmp_path: Path, capture: Path, name: str) -> None:
-    """An earlier rx_real.parquet would sit beside the new sites; engine.prepare needs it absent."""
+    """An earlier rx_real.parquet would sit beside the new sites; engine.prepare needs it absent.
+
+    An earlier report is refused too, so a report always belongs to the layer beside it.
+    """
     out = tmp_path / "configs" / "x72y429"
     out.mkdir(parents=True)
     (out / name).write_bytes(b"earlier")
     assert run_sites_only(tmp_path) == 2
     assert [path.name for path in out.iterdir()] == [name]
     assert (out / name).read_bytes() == b"earlier"
+
+
+def test_a_failed_sites_only_move_leaves_neither_the_layer_nor_the_report(
+    tmp_path: Path, capture: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def move_one_then_fail(staging: Path, targets: list[Path], published: list[Path]) -> None:
+        (staging / targets[0].name).rename(targets[0])
+        published.append(targets[0])
+        raise OSError("rename refused")
+
+    monkeypatch.setattr(engine_inputs, "_publish", move_one_then_fail)
+    with pytest.raises(OSError, match="rename refused"):
+        run_sites_only(tmp_path)
+    assert not (tmp_path / "configs").exists()
 
 
 def test_without_sites_only_a_moved_gateway_still_refuses(
