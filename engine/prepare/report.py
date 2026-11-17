@@ -1,10 +1,11 @@
 """`crossing.md`: the crossing check written for Casey, by pseudonym and count only.
 
 Paths between real endpoints are listed one by one with the site's role,
-yes or no and the distance from the path to the nearest tall cell; grid paths
-are counted per site. The file holds no coordinate of any node, real or made
-up. Box half-widths are listed because the engine's draws move each end
-inside its box; they come from position precision, so the file and the
+yes or no and the distance from the path to the nearest tall cell, or the
+section says the run has no real receiver; grid paths are counted per site.
+The file holds no coordinate of any node, real or made up. Box half-widths
+are listed because the engine's draws move each end inside its box; they
+come from position precision, so the file and the
 printed summary are read locally only and never posted, and issue #44 gets
 counts only (the lead's rule; the repository is public).
 """
@@ -53,7 +54,8 @@ class CrossingReport:
         within_m: Crossing distance, metres.
         tall_cells: Number of tall cells found.
         sites: Every real site, in or out of the run.
-        receiver_half_widths: Real receiver pseudonym to box half-width, metres.
+        receiver_half_widths: Real receiver pseudonym to box half-width, metres;
+            empty for a run whose receivers are the grid alone.
         real: Crossings of the paths from sites in the run to real receivers.
         grid: Crossings of the paths from sites in the run to grid receivers.
     """
@@ -118,6 +120,13 @@ def _site_lines(report: CrossingReport) -> list[str]:
 
 
 def _real_lines(report: CrossingReport) -> list[str]:
+    if not report.receiver_half_widths:
+        return [
+            "## Paths between real endpoints",
+            "",
+            "This run has no real receiver (`--no-real-receivers`): its receivers are the "
+            "made-up grid alone, so there is no path between real endpoints.",
+        ]
     sites = {s.site_id: s for s in report.sites}
     rows = []
     for c in report.real:

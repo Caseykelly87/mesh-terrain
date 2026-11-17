@@ -18,6 +18,12 @@ It reads the two real layers another step wrote into the folder
    config with the engine's own `load_config`, then moves each file to its
    name, and prints `crossing.md`.
 
+With `--no-real-receivers` it reads only `tx_sites_real.parquet` and refuses
+a folder that holds `rx_real.parquet`, so a folder prepared for a run with a
+real receiver never loses it silently. The receivers are then the grid
+alone, `rx_points.parquet` is stamped `synthetic`, and `crossing.md` says the
+run has no real receiver; every other step is as above.
+
 Nothing is written under an output's name unless every check passes, and a
 failure at any step, the moves included, leaves the folder as it was: the
 temporary folder and any output already moved are removed. Exit status 0
@@ -91,6 +97,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m engine.prepare")
     parser.add_argument("tile", help="USGS 1 m tile name with a defined run, such as x72y429")
     parser.add_argument("--folder", type=Path, required=True, help="the run's config folder")
+    parser.add_argument(
+        "--no-real-receivers",
+        action="store_true",
+        help="the grid alone as receivers; refuses a folder that holds rx_real.parquet",
+    )
     arguments = parser.parse_args(argv)
     try:
         settings = EngineSettings()
@@ -101,7 +112,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     configure_logging(settings.log_format)
     try:
-        summary = prepare_folder(arguments.tile, arguments.folder, settings.snapshots_dir)
+        summary = prepare_folder(
+            arguments.tile,
+            arguments.folder,
+            settings.snapshots_dir,
+            real_receivers=not arguments.no_real_receivers,
+        )
     except ConfigError as err:
         log.error("prepare_refused", tile=arguments.tile, reason=str(err))
         return 2
@@ -109,13 +125,17 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def prepare_folder(tile_name: str, folder: Path, snapshots_dir: Path) -> str:
+def prepare_folder(
+    tile_name: str, folder: Path, snapshots_dir: Path, *, real_receivers: bool = True
+) -> str:
     """Check the folder's real layers and write the tile run's inputs and config into it.
 
     Args:
         tile_name: A tile with a defined run, such as x72y429.
         folder: The run's config folder, holding the two real layers.
         snapshots_dir: The snapshots folder (`SNAPSHOTS_DIR`).
+        real_receivers: False for a run whose receivers are the grid alone;
+            the folder must then hold no `rx_real.parquet`.
 
     Returns:
         The text of `crossing.md`.
@@ -124,13 +144,18 @@ def prepare_folder(tile_name: str, folder: Path, snapshots_dir: Path) -> str:
         ConfigError: for any refusal; nothing is written then.
     """
     tile = _tile(tile_name)
-    _check_folder(folder, tile)
-    log.info("prepare_layers_read_begin", tile=tile.name, folder=str(folder))
+    _check_folder(folder, tile, real_receivers)
+    log.info(
+        "prepare_layers_read_begin",
+        tile=tile.name,
+        folder=str(folder),
+        real_receivers=real_receivers,
+    )
     sites, roles = _read_sites(folder / REAL_SITES_FILE)
-    receivers = read_points(_agreed_layer(folder / REAL_RECEIVERS_FILE, RECEIVER_COLUMNS), "rx_id")
+    receivers, receivers_marker = _read_receivers(folder, real_receivers)
     markers = {
         SITES_FILE: _input_marker(folder / REAL_SITES_FILE),
-        RECEIVERS_FILE: _input_marker(folder / REAL_RECEIVERS_FILE),
+        RECEIVERS_FILE: receivers_marker,
     }
     log.info("prepare_layers_read_end", sites=len(sites), receivers=len(receivers), **markers)
     grid = grid_receivers(tile)
@@ -160,8 +185,8 @@ def _outputs(folder: Path, tile: Tile) -> list[Path]:
     return [folder / name for name in names]
 
 
-def _check_folder(folder: Path, tile: Tile) -> None:
-    """Refuse a folder git could pick up, or one this command already wrote into."""
+def _check_folder(folder: Path, tile: Tile, real_receivers: bool) -> None:
+    """Refuse a folder git could pick up or this command wrote into, or a real receiver to drop."""
     if not folder.is_dir():
         raise ConfigError(f"no folder at {folder}; the real layers are written there first")
     for place in (folder.resolve(), *folder.resolve().parents):
@@ -174,6 +199,11 @@ def _check_folder(folder: Path, tile: Tile) -> None:
         raise ConfigError(
             f"{folder} already holds {', '.join(existing)}; this command never overwrites"
         )
+    if not real_receivers and (folder / REAL_RECEIVERS_FILE).exists():
+        raise ConfigError(
+            f"{folder} holds {REAL_RECEIVERS_FILE}, but --no-real-receivers takes the grid "
+            "alone as receivers and would leave that real receiver out of the run"
+        )
 
 
 def _agreed_layer(path: Path, columns: Sequence[str]) -> Path:
@@ -185,6 +215,18 @@ def _agreed_layer(path: Path, columns: Sequence[str]) -> Path:
     if missing:
         raise ConfigError(f"{path.name} lacks the agreed column {', '.join(missing)}")
     return path
+
+
+def _read_receivers(folder: Path, real_receivers: bool) -> tuple[list[Endpoint], str]:
+    """The real receivers and the marker their layer gives `rx_points.parquet`.
+
+    Without real receivers there is no layer to read, and the grid that
+    makes up `rx_points.parquet` is made up, so it is `synthetic`.
+    """
+    if not real_receivers:
+        return [], SYNTHETIC
+    path = _agreed_layer(folder / REAL_RECEIVERS_FILE, RECEIVER_COLUMNS)
+    return read_points(path, "rx_id"), _input_marker(path)
 
 
 def _read_sites(path: Path) -> tuple[list[Endpoint], dict[str, str]]:
