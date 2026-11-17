@@ -9,8 +9,9 @@ do not reproduce that check.
 
 The measurements file does not say how it ranked the busiest pairs.
 `busiest_two` ranks them by link-hours over both runs, ties broken by
-receipts in those link-hours (Casey, 2026-11-16, Q2 (a)), and refuses when
-second and third place are still equal on both.
+receipts in those link-hours (Casey, issue #44, engine_inputs Q2 (a),
+2026-11-16), and refuses when second and third place are still equal on
+both.
 
 The DEM check uses the engine's rule: `engine.grid.run_grid` builds the grid
 for one box plus the engine's 50 m margin, and the comparison of
@@ -121,7 +122,7 @@ def parse_tile(name: str) -> Tile:
 
 BUSIEST_RULE = (
     "by link-hours over both runs, ties broken by receipts in those link-hours "
-    "(Casey, 2026-11-16, Q2 (a))"
+    "(Casey, issue #44, engine_inputs Q2 (a), 2026-11-16)"
 )
 
 
