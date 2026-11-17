@@ -52,6 +52,7 @@ receiver. A gateway is kept only when it is stationary, does not straddle
 and passes the DEM edge check; the others are returned with their reason.
 `count_differences` lists every count that differs from 2026-11-08, so that
 run can report them; `select_nodes` refuses on the first.
+`site_straddle_drops` gives that run's straddle drops with their kinds.
 
 `busiest_two` ranks pairs by link-hours over both runs, ties broken by
 receipts in those link-hours (Casey, issue #44, engine_inputs Q2 (a),
@@ -615,12 +616,28 @@ class SiteSelection:
         Raises:
             SelectionError: when no site is left.
         """
+        if not self.selection.placed and not self.left_out:
+            raise SelectionError("no site: no pair touching the tile has its gateway in it")
         kept = [node for node in self.selection.placed if self.selection.dem_check[node.pseudonym]]
         if not kept:
             raise SelectionError(
                 f"no site left; all {len(self.left_out)} in-tile gateways were left out"
             )
         return kept
+
+
+def site_straddle_drops(links: CaptureLinks, tile: Tile) -> tuple[DroppedPair, ...]:
+    """The pairs a straddling node drops in a sites-only run, each with its kind.
+
+    A sites-only run never refuses on the 2026-11-08 counts, so the kind is
+    known before they are checked: `both-ends pair` or `gateway-only pair`
+    by the counted states `select_sites` uses, `other pair` otherwise.
+
+    Raises:
+        SelectionError: if a node has no usable position.
+    """
+    states = pair_states(links, tile)
+    return dropped_pairs(states, _gateway_pairs(states), {})
 
 
 def _place_sites(
