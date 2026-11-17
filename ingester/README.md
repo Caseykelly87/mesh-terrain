@@ -39,6 +39,7 @@ Run:
     - a multi-line string with `search_path` and the name on different lines and SQL after;
     - a database-qualified name at the end of a string (`"delete from mesh.raw" + ".snapshot"`);
     - an f-string with a replacement field directly before the name (`f"delete from {p}raw.snapshot"`);
+    - a printf-style placeholder directly before the name (`"delete from %sraw.snapshot" % p`);
     - a SQL comment between the name and the dot (`raw/**/.snapshot`);
     - a Unicode-escaped identifier (`U&"\0072aw"`);
     - the `schema` default read at run time (`inspect.signature`, `__kwdefaults__`);
