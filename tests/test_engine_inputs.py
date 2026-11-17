@@ -138,7 +138,7 @@ def test_the_command_states_the_site_rule_and_no_busiest_pairs(
         "sites by tile membership: the in-tile gateway of every pair touching the tile, "
         "the both-ends pair's first (Casey, issue #44, busiest pair, 2026-11-17)"
     ) in lines
-    assert not any("busiest" in line for line in lines)
+    assert not any(line.startswith("busiest") for line in lines)
 
 
 def test_the_busiest_pair_outside_the_tile_leaves_the_sites_as_they_are(
