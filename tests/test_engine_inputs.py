@@ -59,11 +59,13 @@ def east_west_half_m(name: str) -> float:
     return 2 ** (31 - bits) * 1e-7 * 111_320.0 * math.cos(math.radians(latitude_i / 1e7))
 
 
-def run(tmp_path: Path, expect_pairs: str = "5", out: Path | None = None) -> int:
+def run(
+    tmp_path: Path, expect_pairs: str = "5", out: Path | None = None, flags: tuple[str, ...] = ()
+) -> int:
     out = out or tmp_path / "configs" / "x72y429"
     argv = ["--snapshot", SNAPSHOT_ID, "--snapshots-dir", str(tmp_path / "snapshots")]
     argv += ["--tile", "x72y429", "--dem-snapshot", DEM_SNAPSHOT_ID, "--out", str(out)]
-    return engine_inputs.main([*argv, "--expect-pairs", expect_pairs])
+    return engine_inputs.main([*argv, "--expect-pairs", expect_pairs, *flags])
 
 
 def coordinates_in(text: str) -> list[str]:
@@ -380,11 +382,15 @@ def test_command_refuses_to_overwrite(tmp_path: Path, capture: Path, name: str) 
     assert [path.name for path in out.iterdir()] == [name]
 
 
-def test_command_refuses_an_out_folder_inside_a_checkout(tmp_path: Path, capture: Path) -> None:
+@pytest.mark.parametrize("flags", [(), ("--sites-only",)])
+def test_command_refuses_an_out_folder_inside_a_checkout(
+    tmp_path: Path, capture: Path, flags: tuple[str, ...]
+) -> None:
+    """The layers and the sites-only report hold real positions or pseudonyms; none enters git."""
     checkout = tmp_path / "checkout"
     (checkout / ".git").mkdir(parents=True)
     out = checkout / "configs"
-    assert run(tmp_path, out=out) == 2
+    assert run(tmp_path, out=out, flags=flags) == 2
     assert not out.exists()
 
 
