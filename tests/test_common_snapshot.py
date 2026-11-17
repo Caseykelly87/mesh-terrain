@@ -382,6 +382,16 @@ def test_registration_logs_its_start_and_the_rows_inserted(tmp_path: Path) -> No
     assert end["snapshot_id"] == SNAPSHOT_ID
     assert end["inserted"] == 1
     assert end["duration_s"] >= 0
+    begin = next(entry for entry in logs if entry["event"] == "snapshot_register_begin")
+    assert begin["schema"] == end["schema"] == "raw"
+
+
+def test_registration_logs_the_schema_it_was_given(tmp_path: Path) -> None:
+    final = finished(tmp_path)
+    with capture_logs() as logs:
+        register(RecordingConnection(), final, read_manifest(final), schema="test_load_0")
+    registered = [entry for entry in logs if entry["event"].startswith("snapshot_register_")]
+    assert [entry["schema"] for entry in registered] == ["test_load_0", "test_load_0"]
 
 
 @pytest.mark.parametrize("seeds", [None, [], 7, "seed"])

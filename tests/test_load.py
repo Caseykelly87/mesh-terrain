@@ -67,7 +67,6 @@ def test_every_loader_query_takes_a_schema_that_defaults_to_raw(name: str) -> No
 
 
 def test_the_ddl_names_only_the_schema_it_is_given() -> None:
-    assert load.RAW_SCHEMA == "raw"
     default = load.raw_ddl().as_string(None)
     other = load.raw_ddl("test_load_000000000000").as_string(None)
     assert default.count('create table if not exists "raw".') == 4
@@ -82,6 +81,14 @@ def test_load_inserts_every_row_once(raw: ThrowawayRaw, snapshot: Path) -> None:
     assert inserted["snapshot"] == 1
     counts = load.row_counts(raw.conn, SNAPSHOT_ID, schema=raw.schema)
     assert counts["mqtt_message"] == inserted["mqtt_message"]
+
+
+def test_the_load_logs_its_schema(raw: ThrowawayRaw, snapshot: Path) -> None:
+    with structlog.testing.capture_logs() as logs:
+        load.load_snapshot(raw.conn, snapshot, schema=raw.schema)
+    events = {entry["event"]: entry for entry in logs}
+    assert events["load_snapshot"]["schema"] == raw.schema
+    assert {entry["schema"] for entry in logs if entry["event"] == "load_table"} == {raw.schema}
 
 
 def test_a_second_load_changes_nothing(raw: ThrowawayRaw, snapshot: Path) -> None:

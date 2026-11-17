@@ -3,14 +3,28 @@
 Casey, issue #55 comment 6960283869, item 10: the loader tests use their own
 throwaway schema, never `raw` and never `raw_dev_wh`. The source scan reads
 every test module; the database tests need the local stack and skip without it.
+
+What the scan matches, outside docstrings: a string literal or f-string whose
+text names `raw.` or `raw_dev_wh.` (quoted or not, f-string values read as
+`x`); a string literal that is exactly `raw` or `raw_dev_wh`, however it is
+used afterwards (a variable, `.format`, `%`, `+`, an Identifier); and any
+name, attribute or import called `RAW_SCHEMA`. Each match is reported with
+the function (or `<module>`) it sits in, and ALLOWED lists the ones that are
+not SQL. It does not see a name built at run time (`"r" + "aw"`, a join, a
+value read from settings or a file, `getattr`), nor a production function
+called without `schema=`, which falls back to `raw`: the throwaway fixture's
+lock check catches that last case on its own connection.
 """
 
 import ast
 import re
 import secrets
+from collections import defaultdict
 from pathlib import Path
 
+import psycopg
 import pytest
+import raw_schema
 from psycopg import sql
 from raw_schema import (
     REAL_SCHEMAS,
@@ -23,11 +37,32 @@ from raw_schema import (
 )
 
 TESTS = Path(__file__).resolve().parent
-QUALIFIED = re.compile(rf"\b({'|'.join(REAL_SCHEMAS)})\.")
-SQL_WORDS = re.compile(
-    r"\b(select|insert|update|delete|alter|create|drop|truncate|copy|from|into|table)\b",
-    re.IGNORECASE,
-)
+QUALIFIED = re.compile(rf'\b({"|".join(REAL_SCHEMAS)})"?\.["\w]')
+NAMES = frozenset({"RAW_SCHEMA"})
+# Matches that are not SQL, by (file, enclosing function or <module>), with
+# every match expected there; any other match, or a different set, fails.
+ALLOWED: dict[tuple[str, str], list[str]] = {
+    # The two names the scan and the lock check look for.
+    ("raw_schema.py", "<module>"): ["constant 'raw'", "constant 'raw_dev_wh'"],
+    # A Dagster asset key and an S3 bucket name, not schemas.
+    ("test_assets.py", "test_the_raw_snapshot_asset_and_its_checks_are_defined"): [
+        "constant 'raw'"
+    ],
+    ("test_settings.py", "<module>"): ["constant 'raw'"],
+    # The production default, checked on signatures, rendered text and log fields only.
+    ("test_load.py", "test_every_loader_query_takes_a_schema_that_defaults_to_raw"): [
+        "constant 'raw'"
+    ],
+    ("test_common_snapshot.py", "test_registration_takes_a_schema_that_defaults_to_raw"): [
+        "constant 'raw'"
+    ],
+    ("test_common_snapshot.py", "test_registration_logs_its_start_and_the_rows_inserted"): [
+        "constant 'raw'"
+    ],
+    ("test_common_snapshot.py", "test_register_inserts_into_the_schema_it_is_given"): [
+        "qualified raw"
+    ],
+}
 
 
 def docstrings(tree: ast.Module) -> set[int]:
@@ -41,52 +76,125 @@ def docstrings(tree: ast.Module) -> set[int]:
     return found
 
 
-def real_schema_sql(source: str) -> list[str]:
-    """String literals that run SQL against raw or raw_dev_wh, and identifiers built on them."""
+class _Scan(ast.NodeVisitor):
+    """Collects (scope, kind, line) for every match, scope being the innermost def or class."""
+
+    def __init__(self, skip: set[int]) -> None:
+        self.skip = skip
+        self.scopes = ["<module>"]
+        self.hits: list[tuple[str, str, int]] = []
+
+    def _hit(self, node: ast.AST, kind: str) -> None:
+        self.hits.append((self.scopes[-1], kind, getattr(node, "lineno", 0)))
+
+    def _scoped(self, node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) -> None:
+        self.scopes.append(node.name)
+        self.generic_visit(node)
+        self.scopes.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._scoped(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._scoped(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._scoped(node)
+
+    def _text(self, node: ast.AST, text: str) -> None:
+        if match := QUALIFIED.search(text):
+            self._hit(node, f"qualified {match.group(1)}")
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> None:
+        parts = [part.value if isinstance(part, ast.Constant) else "x" for part in node.values]
+        self._text(node, "".join(str(part) for part in parts))
+        for part in node.values:
+            if isinstance(part, ast.FormattedValue):
+                self.visit(part)
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if isinstance(node.value, str) and id(node) not in self.skip:
+            if node.value in REAL_SCHEMAS:
+                self._hit(node, f"constant {node.value!r}")
+            else:
+                self._text(node, node.value)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id in NAMES:
+            self._hit(node, f"name {node.id}")
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr in NAMES:
+            self._hit(node, f"attribute {node.attr}")
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name in NAMES or alias.asname in NAMES:
+                self._hit(node, f"import {alias.name}")
+
+
+def real_schema_uses(source: str) -> list[tuple[str, str, int]]:
+    """Every (scope, kind, line) in the source that may name raw or raw_dev_wh."""
     tree = ast.parse(source)
-    skip = docstrings(tree)
-    hits = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in skip:
-            if QUALIFIED.search(node.value) and SQL_WORDS.search(node.value):
-                hits.append(f"line {node.lineno}: {node.value[:60]!r}")
-        if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == "Identifier":
-            first = node.args[0] if node.args else None
-            if isinstance(first, ast.Constant) and first.value in REAL_SCHEMAS:
-                hits.append(f"line {node.lineno}: Identifier({first.value!r}, ...)")
-        if isinstance(node, ast.keyword) and node.arg == "schema":
-            if isinstance(node.value, ast.Constant) and node.value.value in REAL_SCHEMAS:
-                hits.append(f"line {node.value.lineno}: schema={node.value.value!r}")
-    return hits
+    scan = _Scan(docstrings(tree))
+    scan.visit(tree)
+    return scan.hits
 
 
-@pytest.mark.parametrize(
-    "line",
-    [
-        # Built from the names, so this file holds no such literal itself.
-        f'conn.execute("update {REAL_SCHEMAS[0]}.mqtt_message set rx_snr = 0")',
-        f'conn.execute("select count(*) from {REAL_SCHEMAS[1]}.snapshot")',
-        'sql.Identifier("raw", "mqtt_message")',
-        'load.row_counts(conn, "x", schema="raw_dev_wh")',
-    ],
-)
-def test_the_scan_finds_sql_against_a_real_schema(line: str) -> None:
-    assert real_schema_sql(line)
+# One per form a test could use to reach a real schema; @ stands for its name.
+PROBES = {
+    "qualified literal": 'conn.execute("update @.mqtt_message set rx_snr = 0")',
+    "quoted identifiers": 'conn.execute(\'select 1 from "@"."snapshot"\')',
+    "format": 'q = "select * from {}.snapshot".format("@")',
+    "percent": 'q = "select * from %s.snapshot" % "@"',
+    "concatenation": 'q = "select * from " + "@" + ".snapshot"',
+    "qualified concatenation": 'q = "select * from " + "@.snapshot"',
+    "table variable in f-string": 'table = "@.snapshot"\nq = f"select * from {table}"',
+    "schema variable in f-string": 's = "@"\nq = f"select * from {s}.snapshot"',
+    "f-string literal part": 'q = f"select * from @.{table}"',
+    "Identifier": 'sql.Identifier("@", "mqtt_message")',
+    "bare Identifier": 'from psycopg.sql import Identifier\nIdentifier("@", "snapshot")',
+    "Identifier on a variable": 's = "@"\nsql.Identifier(s, "snapshot")',
+    "schema keyword": 'load.row_counts(conn, "x", schema="@")',
+    "RAW_SCHEMA attribute": 'load.row_counts(conn, "x", schema=load.RAW_SCHEMA)',
+    "RAW_SCHEMA name": 'load.row_counts(conn, "x", schema=RAW_SCHEMA)',
+    "RAW_SCHEMA import": "from ingester.load import RAW_SCHEMA as default",
+}
+
+
+@pytest.mark.parametrize("schema", REAL_SCHEMAS)
+@pytest.mark.parametrize("form", sorted(PROBES))
+def test_the_scan_finds_each_form(form: str, schema: str) -> None:
+    assert real_schema_uses(PROBES[form].replace("@", schema)), form
 
 
 def test_the_scan_leaves_docstrings_and_other_words_alone() -> None:
-    docstring = f'"""Loads into {REAL_SCHEMAS[0]}.snapshot."""\n'
-    source = docstring + 'draw.ground = 1\nkey = ["raw", "mqtt_snapshot"]\n'
-    assert real_schema_sql(source) == []
+    docstring = '"""Loads into @.snapshot."""\n'.replace("@", REAL_SCHEMAS[0])
+    others = 'draw.ground = 1\nname = "rawness"\nkey = "raw_bucket"\nrawdata.x = 1\n'
+    assert real_schema_uses(docstring + others) == []
 
 
-def test_no_test_module_sends_sql_to_raw_or_raw_dev_wh() -> None:
-    found = {
-        path.relative_to(TESTS).as_posix(): hits
-        for path in sorted(TESTS.rglob("*.py"))
-        if (hits := real_schema_sql(path.read_text(encoding="utf-8")))
+def test_the_scan_names_the_enclosing_function() -> None:
+    source = 'def test_one():\n    s = "@"\n'.replace("@", REAL_SCHEMAS[0])
+    assert real_schema_uses(source) == [("test_one", "constant 'raw'", 2)]
+
+
+def test_no_test_module_names_raw_or_raw_dev_wh_outside_the_allowed_places() -> None:
+    found: dict[tuple[str, str], list[str]] = defaultdict(list)
+    lines: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for path in sorted(TESTS.rglob("*.py")):
+        name = path.relative_to(TESTS).as_posix()
+        for scope, kind, line in real_schema_uses(path.read_text(encoding="utf-8")):
+            found[(name, scope)].append(kind)
+            lines[(name, scope)].append(line)
+    unexpected = {
+        key: list(zip(kinds, lines[key], strict=True))
+        for key, kinds in found.items()
+        if sorted(kinds) != sorted(ALLOWED.get(key, []))
     }
-    assert found == {}
+    assert unexpected == {}
+    assert set(ALLOWED) <= set(found), "an allowed place no longer matches; remove it"
 
 
 def test_the_throwaway_schema_is_gone_after_use() -> None:
@@ -107,22 +215,53 @@ def test_the_throwaway_schema_is_gone_after_a_failure() -> None:
         assert not schema_exists(other, names[0])
 
 
-def test_the_lock_check_sees_a_table_the_transaction_only_read() -> None:
-    # The teardown's guard against reaching raw, shown on a committed throwaway
-    # schema: a new transaction holds no lock on it until a select reads its table.
-    name = f"{SCHEMA_PREFIX}{secrets.token_hex(6)}"
+def probe_name() -> str:
+    """A new throwaway schema name; the caller creates, commits and drops it."""
+    return f"{SCHEMA_PREFIX}{secrets.token_hex(6)}"
+
+
+def create_probe(conn: psycopg.Connection, name: str) -> sql.Identifier:
+    """Create and commit a schema holding one table, probe, and return the table."""
     probe = sql.Identifier(name, "probe")
+    conn.execute(sql.SQL("create schema {}").format(sql.Identifier(name)))
+    conn.execute(sql.SQL("create table {} (id integer)").format(probe))
+    conn.commit()
+    return probe
+
+
+def test_the_lock_check_sees_a_table_the_transaction_only_read() -> None:
+    # A new transaction holds no lock on a committed table until a select reads it.
+    name = probe_name()
     with connect_or_skip() as conn:
         try:
-            conn.execute(sql.SQL("create schema {}").format(sql.Identifier(name)))
-            conn.execute(sql.SQL("create table {} (id integer)").format(probe))
-            conn.commit()
+            probe = create_probe(conn, name)
             assert locked_relations(conn, (name,)) == []
             conn.execute(sql.SQL("select id from {}").format(probe))
             assert locked_relations(conn, (name,)) == [f"{name}.probe"]
-            conn.rollback()
         finally:
             drop_throwaway(conn, name)
+
+
+def test_the_teardown_fails_a_test_that_read_a_watched_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reading a table in a watched schema fails the fixture at exit.
+
+    A committed probe schema stands in for raw, with REAL_SCHEMAS pointed at it.
+    The read is outside any savepoint: a savepoint that is rolled back releases
+    the locks taken inside it, so the check cannot see a read made there.
+    Without the lock check in throwaway_raw_schema this test fails.
+    """
+    name = probe_name()
+    with connect_or_skip() as setup:
+        try:
+            probe = create_probe(setup, name)
+            monkeypatch.setattr(raw_schema, "REAL_SCHEMAS", (name,))
+            with pytest.raises(AssertionError, match="touched real tables"):
+                with throwaway_raw_schema() as raw:
+                    raw.conn.execute(sql.SQL("select id from {}").format(probe))
+        finally:
+            drop_throwaway(setup, name)
 
 
 @pytest.mark.parametrize("name", [*REAL_SCHEMAS, "public", "test_load_", "test_load_x; drop"])
@@ -133,10 +272,9 @@ def test_only_a_throwaway_name_is_ever_dropped(name: str) -> None:
 
 
 def test_a_committed_throwaway_schema_is_dropped() -> None:
-    name = f"{SCHEMA_PREFIX}{secrets.token_hex(6)}"
+    name = probe_name()
     with connect_or_skip() as conn:
-        conn.execute(sql.SQL("create schema if not exists {}").format(sql.Identifier(name)))
-        conn.commit()
+        create_probe(conn, name)
         try:
             assert schema_exists(conn, name)
         finally:
