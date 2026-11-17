@@ -224,11 +224,21 @@ def busiest_two(pairs: Sequence[PairActivity]) -> tuple[PairActivity, PairActivi
         SelectionError: with fewer than two pairs, or when second and third
             place are equal on both link-hours and receipts.
     """
+    ranked = _busiest_or_reason(pairs)
+    if isinstance(ranked, str):
+        raise SelectionError(ranked)
+    return ranked
+
+
+def _busiest_or_reason(
+    pairs: Sequence[PairActivity],
+) -> tuple[PairActivity, PairActivity] | str:
+    """The two busiest pairs, or the reason busiest_two refuses."""
     if len(pairs) < 2:
-        raise SelectionError(f"{len(pairs)} pairs; the selection needs two busy pairs")
+        return f"{len(pairs)} pairs; the selection needs two busy pairs"
     first, second, *rest = sorted(pairs, key=_busyness, reverse=True)
     if rest and _busyness(second) == _busyness(rest[0]):
-        raise SelectionError("a tie for second busiest pair on link-hours and receipts")
+        return "a tie for second busiest pair on link-hours and receipts"
     return first, second
 
 
@@ -373,7 +383,7 @@ def dropped_pairs(
     return tuple(dropped)
 
 
-def straddle_drops(links: CaptureLinks, tile: Tile) -> tuple[DroppedPair, ...]:
+def straddle_drops(links: CaptureLinks, tile: Tile, expect_pairs: int) -> tuple[DroppedPair, ...]:
     """The pairs a straddling node drops, found before the tile check can refuse.
 
     Casey, PR #51, (a): the drop lines print before the count checks, so a
@@ -383,20 +393,20 @@ def straddle_drops(links: CaptureLinks, tile: Tile) -> tuple[DroppedPair, ...]:
     Args:
         links: The capture's pairs and node positions.
         tile: The engine run's tile.
+        expect_pairs: The union of pairs the tile check counted, 8 on 2026-11-08.
 
     Returns:
-        Each pair with a straddling end, with its kind when the 2026-11-08
-        tile check and the busiest-pair ranking would pass, else
+        Each pair with a straddling end, with its kind when every check of
+        `select_nodes` before placement would pass (the pair count, the
+        2026-11-08 tile counts and the busiest-pair ranking), else
         KIND_NOT_DETERMINED.
 
     Raises:
         SelectionError: if a node has no usable position.
     """
     states = pair_states(links, tile)
-    try:
-        kinds = _selected_pairs(links, states, tile)
-    except SelectionError:
-        # Not swallowed: select_nodes runs the same checks next and refuses there.
+    kinds = _tile_check(links, states, tile, expect_pairs)
+    if isinstance(kinds, str):
         return dropped_pairs(states, {}, {}, other_kind=KIND_NOT_DETERMINED)
     return dropped_pairs(states, kinds, {})
 
@@ -414,19 +424,27 @@ def _place(nodes: dict[str, NodePositions], pseudonym: str, role: str) -> Placed
     return PlacedNode(pseudonym, role, easting_m, northing_m, half_width_m, found.precise_source)
 
 
-def _selected_pairs(
-    links: CaptureLinks, states: dict[PairActivity, PairState], tile: Tile
-) -> dict[PairActivity, str]:
-    """The both-ends pair and the two busiest pairs, after the 2026-11-08 tile check."""
+def _tile_check(
+    links: CaptureLinks, states: dict[PairActivity, PairState], tile: Tile, expect_pairs: int
+) -> dict[PairActivity, str] | str:
+    """The both-ends pair and the two busiest pairs, or the reason the 2026-11-08 check refuses.
+
+    The reason is returned, not raised, so `straddle_drops` can ask without
+    catching anything; `select_nodes` raises it.
+    """
+    if len(links.pairs) != expect_pairs:
+        return f"{len(links.pairs)} pairs, not the {expect_pairs} expected"
     counts = {pair: _counted(state) for pair, state in states.items()}
     both = [pair for pair, state in counts.items() if state == (IN, IN)]
     if len(both) != 1:
-        raise SelectionError(f"{len(both)} pairs have both ends in {tile.name}, not one")
-    busy = busiest_two(links.pairs)
+        return f"{len(both)} pairs have both ends in {tile.name}, not one"
+    busy = _busiest_or_reason(links.pairs)
+    if isinstance(busy, str):
+        return busy
     if both[0] in busy or any(counts[pair] != (OUT, IN) for pair in busy):
-        raise SelectionError(f"the two busiest pairs are not gateway-only pairs of {tile.name}")
+        return f"the two busiest pairs are not gateway-only pairs of {tile.name}"
     if tile_counts(states)["touched"] != PAIRS_TOUCHED:
-        raise SelectionError(f"pairs touching {tile.name} are not {PAIRS_TOUCHED}")
+        return f"pairs touching {tile.name} are not {PAIRS_TOUCHED}"
     return {both[0]: BOTH_ENDS_PAIR, busy[0]: BUSIEST_PAIR, busy[1]: BUSIEST_PAIR}
 
 
@@ -472,10 +490,14 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
             pairs tie for second busiest on both keys, or a selected node that
             does not straddle sent more than one box during the capture.
     """
+    # The pair count refuses before pair_states, as it did before _tile_check
+    # repeated it, so a run with both problems still names the count.
     if len(links.pairs) != expect_pairs:
         raise SelectionError(f"{len(links.pairs)} pairs, not the {expect_pairs} expected")
     states = pair_states(links, tile)
-    kinds = _selected_pairs(links, states, tile)
+    kinds = _tile_check(links, states, tile, expect_pairs)
+    if isinstance(kinds, str):
+        raise SelectionError(kinds)
     straddling = _straddling(states)
     placed = tuple(
         _place(links.nodes, node, role) for node, role in _roles(kinds) if node not in straddling
