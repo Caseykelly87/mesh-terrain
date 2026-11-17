@@ -47,7 +47,7 @@ def pseudonym(name: str) -> str:
 
 
 # The both-ends gateway, then the gateway-only pairs' gateways in the capture's
-# pair order, which sorts by pseudonym: C to G3 before B to G2.
+# pair order, which sorts by relayer pseudonym: C to G3 before B to G2.
 SITE_ORDER = ("G1", "G3", "G2")
 SITE_ROLES = ["both_ends_gateway", "gateway_only_gateway", "gateway_only_gateway"]
 
