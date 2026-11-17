@@ -28,7 +28,7 @@ from structlog.testing import capture_logs
 from engine import positions_marker
 from engine.points import read_points
 from ingester import engine_inputs
-from ingester.link_pairs import CaptureLinks, PairActivity
+from ingester.link_pairs import CaptureLinks, PairActivity, SelectionError
 from ingester.tile_selection import (
     FAILS_DEM,
     OTHER_PAIR,
@@ -36,6 +36,7 @@ from ingester.tile_selection import (
     DroppedPair,
     PlacedNode,
     Selection,
+    SiteSelection,
 )
 
 # The import above activates the autouse fixture for this module.
@@ -453,7 +454,7 @@ def test_a_failure_keeps_an_output_folder_that_existed(
 # A DEM 10 m square, far from every fixture node, so every gateway fails the edge check.
 FAR_DEM_BOUNDS_M = (700_000.0, 4_250_000.0, 700_010.0, 4_250_010.0)
 COUNTS_PASS = "counts check against 2026-11-08: pass"
-NO_RECEIVER = "no real receiver written"
+NO_RECEIVER = "no real receiver written; relayers not DEM-checked"
 
 
 def run_sites_only(tmp_path: Path, expect_pairs: str = "5", tile: str = "x72y429") -> int:
@@ -518,7 +519,7 @@ def test_sites_only_writes_the_sites_and_no_receiver(
         "counts for issue #44: pairs public 4, MeshSTL 2, shared 1, union 5; pairs touching "
         "the tile 3 (both ends 1); nodes selected 3; extent pass 3, fail 0; pairs dropped 0 "
         "(straddles the tile edge 0, fails the DEM edge check 0); sites written 3, left out 0; "
-        "no real receiver written"
+        "no real receiver written; relayers not DEM-checked"
     )
     assert "both_ends_relayer" not in printed
     assert not any(text.startswith(("dropped", "left out")) for text in lines)
@@ -600,15 +601,19 @@ def test_sites_only_leaves_out_a_gateway_with_its_reason(
     assert coordinates_in(printed + repr(events)) == []
 
 
+D_STRADDLES = ["dropped other pair {D} to {E}: relayer straddles the tile edge"]
+
+
 @pytest.mark.parametrize(
-    ("options", "expect_pairs", "differences"),
+    ("options", "expect_pairs", "differences", "dropped"),
     [
-        ({}, "8", "5 pairs, not the 8 expected"),
-        ({"straddler": "D"}, "5", "pairs touching x72y429 are not 3"),
+        ({}, "8", "5 pairs, not the 8 expected", []),
+        ({"straddler": "D"}, "5", "pairs touching x72y429 are not 3", D_STRADDLES),
         (
             {"straddler": "D"},
             "8",
             "5 pairs, not the 8 expected; pairs touching x72y429 are not 3",
+            D_STRADDLES,
         ),
     ],
 )
@@ -618,19 +623,70 @@ def test_sites_only_reports_a_counts_mismatch_and_does_not_refuse(
     options: dict[str, Any],
     expect_pairs: str,
     differences: str,
+    dropped: list[str],
 ) -> None:
-    """Every count that differs is named on one line; the sites are written all the same."""
+    """Every count that differs is named on one line; the sites are written all the same.
+
+    A straddle drop line names its pair's kind even though the counts differ,
+    since a sites-only run never refuses on them.
+    """
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", **options)
     with capture_logs() as events:
         assert run_sites_only(tmp_path, expect_pairs=expect_pairs) == 0
     assert_sites(tmp_path, SITE_ORDER)
     printed = capsys.readouterr().out
+    lines = printed.splitlines()
     assert (
         f"counts check against 2026-11-08: differs ({differences}); --sites-only reports it "
         "and does not refuse"
-    ) in printed.splitlines()
+    ) in lines
+    assert [text for text in lines if text.startswith("dropped")] == [names(t) for t in dropped]
     assert coordinates_in(printed + repr(events)) == []
+
+
+def test_sites_only_roles_follow_the_counted_states(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """B straddles and counts as in the tile, so B to G2 counts as a both-ends pair.
+
+    G2 is then written as a second both_ends_gateway (decided without Casey,
+    PR #57). The both-ends pairs come first in the capture's pair order, A to
+    G1 before B to G2 because A's pseudonym sorts before B's, then C to G3.
+    """
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", straddler="B")
+    with capture_logs() as events:
+        assert run_sites_only(tmp_path) == 0
+    out = tmp_path / "configs" / "x72y429"
+    assert [path.name for path in out.iterdir()] == ["tx_sites_real.parquet"]
+    sites = gpd.read_parquet(out / "tx_sites_real.parquet")
+    assert list(sites["site_id"]) == [pseudonym(name) for name in ("G1", "G2", "G3")]
+    assert list(sites["role"]) == [
+        "both_ends_gateway",
+        "both_ends_gateway",
+        "gateway_only_gateway",
+    ]
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    assert (
+        "counts check against 2026-11-08: differs (2 pairs have both ends in x72y429, not one; "
+        "1 pairs have only the gateway end in x72y429, not two); --sites-only reports it and "
+        "does not refuse"
+    ) in lines
+    assert [text for text in lines if text.startswith("dropped")] == [
+        names("dropped both-ends pair {B} to {G2}: relayer straddles the tile edge")
+    ]
+    assert counts_for_issue(lines).endswith(f"sites written 3, left out 0; {NO_RECEIVER}")
+    assert coordinates_in(printed + repr(events)) == []
+
+
+def test_sites_only_names_a_tile_with_no_gateway_in_it() -> None:
+    """No candidate at all is not the same as every candidate left out."""
+    chosen = SiteSelection(Selection(placed=(), dem_check={}, dropped=()), left_out=())
+    message = r"^no site: no pair touching the tile has its gateway in it$"
+    with pytest.raises(SelectionError, match=message):
+        chosen.sites()
 
 
 def test_sites_only_refuses_when_no_site_is_left(
