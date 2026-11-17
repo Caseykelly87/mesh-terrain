@@ -316,7 +316,7 @@ def _run(args: argparse.Namespace) -> None:
     # Casey, PR #51, (a): straddle drop lines print before the count checks
     # in select_nodes can refuse, so a refusal shows which pair and end caused it.
     printed: set[DropEnd] = set()
-    _print_drops(straddle_drops(links, tile), printed)
+    _print_drops(straddle_drops(links, tile, args.expect_pairs), printed)
     selection = select_nodes(links, tile, args.expect_pairs, extent)
     _print_selection(selection, printed)
     # Casey's stop for a dropped selected pair comes here, after the drop lines
