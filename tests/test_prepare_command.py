@@ -431,3 +431,29 @@ def test_an_input_marker_other_than_real_or_synthetic_is_refused(tmp_path: Path)
     metadata = {**table.schema.metadata, b"mesh_terrain:positions": b"maybe"}
     pq.write_table(table.replace_schema_metadata(metadata), path)
     assert "mesh_terrain:positions" in refusal(folder)
+
+
+@pytest.mark.usefixtures("env")
+def test_layers_written_by_ingest_engs_command_are_accepted(tmp_path: Path) -> None:
+    # The interface the lead set for both agents (issue #44): ingest-eng's own
+    # writer produces the folder, and this command reads it as written.
+    from ingester.engine_inputs import write_layers
+    from ingester.tile_selection import PlacedNode
+
+    def placed(row: tuple, role: str) -> PlacedNode:
+        return PlacedNode(
+            pseudonym=row[0],
+            role=role,
+            easting_m=row[1],
+            northing_m=row[2],
+            half_width_m=row[3],
+            precise_source=False,
+        )
+
+    folder = tmp_path / "x72y429"
+    write_layers(folder, [placed(s, s[4]) for s in SITES], placed(RX_ROW, "both_ends_relayer"))
+    assert run(folder) == 0
+    assert list(gpd.read_parquet(folder / "tx_sites.parquet")["site_id"]) == [SITE_A, SITE_B]
+    assert gpd.read_parquet(folder / "rx_points.parquet")["rx_id"].iloc[0] == RX
+    assert positions_marker(folder / "rx_points.parquet") == "real"
+    assert positions_marker(folder / "tx_sites.parquet") == "real"
