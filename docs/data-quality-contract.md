@@ -1,8 +1,8 @@
 # Data-quality contract
 
-Every rule here has a dbt test or a Dagster asset check with the same identifier, an asset check being named `<identifier>` or `<identifier>_<what>` (Casey, issue #55, D11; ADR 0007). A unit test in `tests/test_contract.py` parses this file and fails if a rule has no matching test. Change a rule only with an ADR and Casey's approval.
+Every rule here has a dbt test or a Dagster asset check with the same identifier, named as the next paragraph says. A unit test in `tests/test_contract.py` parses this file and fails if a rule has no matching test. Change a rule only with an ADR and Casey's approval.
 
-Identifiers are stable. Tests are named `assert_<identifier>` or `assert_<identifier>_<what>`, `<what>` being a short description of the case (dbt singular), or declared in the model YAML with `meta: {contract: <identifier>}` (Casey, issue #55, 2026-11-17, item 9; ADR 0007). Asset checks are named `<identifier>` or `<identifier>_<what>` (Casey, issue #55, D11; ADR 0007).
+Identifiers are stable. Tests are named `assert_<identifier>` or `assert_<identifier>_<what>`, `<what>` being a short description of the case (dbt singular), or declared in the model YAML with `meta: {contract: <identifier>}` (Casey, issue #55, 2026-11-17, item 9; ADR 0007). Asset checks are named `<identifier>` or `<identifier>_<what>` (Casey, issue #55, item 7; ADR 0007).
 
 ## Ingestion
 
@@ -68,6 +68,6 @@ Identifiers are stable. Tests are named `assert_<identifier>` or `assert_<identi
 
 | Id | Rule | Enforced by |
 | --- | --- | --- |
-| `val_01` | Hold-out splits never place a node pair in both train and test. | dbt singular test on the hold-out split, once the validation marts exist (Phase 4) |
+| `val_01` | Hold-out splits never place a node pair in both train and test. | pytest on the split function; dbt singular test on the hold-out split, once the validation marts exist (Phase 4) |
 | `val_02` | Every headline number in `docs/results.md` names the asset or notebook cell that produced it. | reviewer checks |
 | `val_03` | The residual variogram's nugget, sill, range and nugget-to-sill ratio are written to `analytics.variogram_result` before any kriging; kriging runs only when the ratio is below 0.8, and the skip is recorded as a row with `kriged = false`. | pytest on the guard function; singular test that no kriged grid exists for a run with ratio >= 0.8 |
