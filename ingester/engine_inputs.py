@@ -36,9 +36,10 @@ The command refuses an output folder inside a git checkout and never prints or
 logs a coordinate. Its per-node and drop lines tie pseudonyms to roles,
 link-hours, the precise flag, the DEM check and the tile edge, which narrows
 where a node is, so they are read locally; only the final counts line is for
-issue #44. It does not write the
-grid receivers, the run config or any check of the paths; those are
-terrain-rf-eng's.
+issue #44. That line keeps the pairs dropped in all and per reason, but
+under the current count checks every drop refuses, so these fields read 0
+whenever the line prints. The command does not write the grid receivers, the
+run config or any check of the paths; those are terrain-rf-eng's.
 """
 
 import argparse
