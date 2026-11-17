@@ -84,6 +84,35 @@ def schema_hook(target: str, *extra: str, environment: dict[str, str] | None = N
     return "" if result.returncode == 0 else result.stdout + result.stderr
 
 
+def recipes_using(makefile: str, word: str) -> list[str]:
+    """The Makefile targets whose recipe holds the word, directly or through a variable.
+
+    A variable holds the word when its value does, or names a variable that
+    holds it, so `FLAG := --vars '{real_build: true}'` and a recipe using
+    `$(FLAG)` count as passing it.
+    """
+    assignments = re.findall(r"^([A-Za-z_][\w]*)\s*[:+?!]?=(.*)$", makefile, re.MULTILINE)
+    holding: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for name, value in assignments:
+            if name in holding:
+                continue
+            if word in value or any(
+                f"$({held})" in value or f"${{{held}}}" in value for held in holding
+            ):
+                holding.add(name)
+                changed = True
+    recipes = re.findall(r"^([\w-]+):[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.MULTILINE)
+    return [
+        name
+        for name, recipe in recipes
+        if word in recipe
+        or any(f"$({held})" in recipe or f"${{{held}}}" in recipe for held in holding)
+    ]
+
+
 def hard_coded_schemas(sql: str) -> list[str]:
     """Warehouse schema names written into SQL outside Jinja and comments."""
     return SCHEMA_REFERENCE.findall(SQL_COMMENT.sub(" ", JINJA.sub(" ", sql)))
@@ -140,11 +169,30 @@ def test_the_development_target_runs_without_the_flag() -> None:
     assert schema_hook(DEVELOPMENT_TARGET) == ""
 
 
+@pytest.mark.usefixtures("warehouse")
+def test_a_real_build_value_other_than_true_is_refused() -> None:
+    assert "make dbt-build-real" in schema_hook(REAL_TARGET, "--vars", "{real_build: 'true'}")
+    assert "make dbt-build-real" in schema_hook(REAL_TARGET, "--vars", "{real_build: 1}")
+
+
+def test_the_makefile_scan_follows_variables() -> None:
+    makefile = (
+        "FLAG := --vars '{real_build: true}'\n"
+        "OTHER = $(FLAG)\n"
+        "QUIET = --quiet\n"
+        "via-variable:\n"
+        "\t$(DBT) build ${OTHER}\n"
+        "direct:\n"
+        "\tdbt build --vars '{real_build: true}'\n"
+        "plain:\n"
+        "\tdbt build $(QUIET)\n"
+    )
+    assert recipes_using(makefile, "real_build") == ["via-variable", "direct"]
+
+
 def test_only_make_dbt_build_real_passes_the_real_build_flag() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
-    recipes = re.findall(r"^([\w-]+):[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.MULTILINE)
-    passing = [name for name, recipe in recipes if "real_build" in recipe]
-    assert passing == ["dbt-build-real"]
+    assert recipes_using(makefile, "real_build") == ["dbt-build-real"]
 
 
 def test_the_scanner_finds_schema_names_written_into_sql() -> None:
