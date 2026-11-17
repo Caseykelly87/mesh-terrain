@@ -75,7 +75,7 @@ REAL_RECEIVERS_FILE = "rx_real.parquet"
 CROSSING_FILE = "crossing.md"
 SITE_COLUMNS = ("site_id", "geometry", "box_half_width_m", "role")
 RECEIVER_COLUMNS = ("rx_id", "geometry", "box_half_width_m")
-SITE_ROLES = ("both_ends_gateway", "busy_pair_gateway")
+SITE_ROLES = ("both_ends_gateway", "gateway_only_gateway")
 LAYER_CRS = "EPSG:26915"
 
 
