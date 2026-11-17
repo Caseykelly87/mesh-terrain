@@ -11,6 +11,12 @@ its stationary box centre. Both files carry the key `mesh_terrain:positions`
 with the value `real` in their Parquet metadata (Casey, issue #44, 4 (a)); the
 engine does not read it yet.
 
+The sites are the in-tile gateway of every pair that touches the tile, as the
+2026-11-08 counts define touching, and the receiver is the relayer of the pair
+with both ends in it (Casey, issue #44, busiest pair, 2026-11-17). The
+command still prints each pair's link-hours and receipts for the local
+record; no busiest-pair ranking selects anything.
+
 A node whose usable boxes lie on both sides of the tile edge counts as in the
 tile for the tile check, then drops its own pair, as a node the run places
 that fails the DEM edge check does (Casey, issue #44, engine_inputs Q1 (a),
@@ -19,8 +25,8 @@ prints one line per end that drops a pair, naming both ends' pseudonyms, the
 end and the reason. Straddle lines print before the tile check's count checks
 can refuse (Casey, PR #51, (a)), so a refusal shows which pair and end caused
 it; edge-check lines print after the nodes are placed. When the both-ends pair
-or a busiest pair is dropped it refuses (exit 2) after those lines, before
-anything is written.
+or a gateway-only pair is dropped it refuses (exit 2) after those lines,
+before anything is written.
 
 Both layers are written into a staging folder inside the output folder and
 moved to their names only when both are complete. A refusal exits 2 and any
@@ -36,9 +42,10 @@ The command refuses an output folder inside a git checkout and never prints or
 logs a coordinate. Its per-node and drop lines tie pseudonyms to roles,
 link-hours, the precise flag, the DEM check and the tile edge, which narrows
 where a node is, so they are read locally; only the final counts line is for
-issue #44. That line keeps the pairs dropped in all and per reason, but
-under the current count checks every drop refuses, so these fields read 0
-whenever the line prints. The command does not write the grid receivers, the
+issue #44. That line keeps the pairs dropped in all and per reason, and the
+nodes that fail the DEM edge check (`extent ... fail`), but under the current
+count checks every drop and every failing node refuses, so these fields read
+0 whenever the line prints. The command does not write the grid receivers, the
 run config or any check of the paths; those are terrain-rf-eng's.
 """
 
@@ -61,9 +68,9 @@ from ingester.link_pairs import (
 )
 from ingester.settings import get_ingester_settings
 from ingester.tile_selection import (
-    BUSIEST_RULE,
     FAILS_DEM,
     LAYER_EPSG,
+    SITE_RULE,
     STRADDLES,
     DroppedPair,
     PlacedNode,
@@ -139,8 +146,8 @@ def _print_drops(dropped: Sequence[DroppedPair], printed: set[DropEnd]) -> None:
 
 
 def _print_selection(selection: Selection, printed: set[DropEnd]) -> None:
-    """Per placed node its DEM edge check, then the drop lines not printed yet."""
-    print(f"busiest two pairs: {BUSIEST_RULE}")
+    """The site rule, per placed node its DEM edge check, then the drop lines not printed yet."""
+    print(f"sites by tile membership: {SITE_RULE}")
     for node in selection.placed:
         inside = selection.dem_check[node.pseudonym]
         print(

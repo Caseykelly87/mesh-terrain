@@ -30,7 +30,7 @@ class Site:
 
     Attributes:
         site_id: Pseudonym.
-        role: `both_ends_gateway` or `busy_pair_gateway`.
+        role: `both_ends_gateway` or `gateway_only_gateway`.
         half_width_m: Position box half-width in metres.
         in_run: Whether its box plus 50 m lies inside the DEM.
     """
