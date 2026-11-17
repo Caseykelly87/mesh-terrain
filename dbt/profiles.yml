@@ -1,6 +1,7 @@
 mesh_terrain:
-  # The default is the development target, so a dbt command that names no
-  # target never reaches the real schemas. dbt/README.md says who runs which.
+  # The default is the development target. dbt uses it when a command gives
+  # no --target and DBT_TARGET is unset; a run on prod refuses to start unless
+  # make dbt-build-real started it. dbt/README.md says who runs which.
   target: dev_wh
   outputs:
     # Builds into staging_dev_wh, core_dev_wh and analytics_dev_wh and reads

@@ -14,7 +14,8 @@ clean-targets:
   - dbt_packages
 
 # Creates the development target's raw, staging, core and analytics schemas
-# when absent; does nothing on prod (macros/target_schemas.sql).
+# when absent; on prod, stops the run unless make dbt-build-real passed
+# --vars '{real_build: true}' (macros/target_schemas.sql).
 on-run-start:
   - "{{ create_target_schemas() }}"
 
