@@ -30,16 +30,24 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+import rasterio
 from pyproj import Transformer
+from rasterio.transform import from_origin
 
 from ingester.allowlist import DECODER_VERSION, SCHEMA_VERSION, allowlist
 from ingester.parquet import write_rows
 from pipeline.common import snapshot as common
 
 SNAPSHOT_ID = "capture-fixture-2026-10-22"
+DEM_SNAPSHOT_ID = "dem-fixture-x72y429"
+# The real x72y429 DEM's bounds (issue #44, step 2), held by a 2 by 2 raster of
+# 5006 m pixels: the command reads only the bounds.
+DEM_BOUNDS_M = (719_994.0, 4_279_994.0, 730_006.0, 4_290_006.0)
 TELEMETRY_APP = 67
 POSITION_APP = 3
 _TO_DEGREES = Transformer.from_crs(26915, 4326, always_xy=True)
+_TO_METRES = Transformer.from_crs(4326, 26915, always_xy=True)
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,13 @@ class FakeNode:
         lon, lat = _TO_DEGREES.transform(self.easting_m + east_shift_m, self.northing_m)
         bits = self.precision_bits
         return quantise(round(lat * 1e7), bits), quantise(round(lon * 1e7), bits), bits
+
+
+def centre_m(name: str) -> tuple[float, float]:
+    """The quantised box centre of a fixture node in EPSG:26915 metres."""
+    latitude_i, longitude_i, _ = NODES[name].box()
+    easting_m, northing_m = _TO_METRES.transform(longitude_i / 1e7, latitude_i / 1e7)
+    return float(easting_m), float(northing_m)
 
 
 def quantise(value: int, bits: int) -> int:
@@ -219,8 +234,12 @@ def build_capture(root: Path, *, moved_a: bool = False, one_coordinate: bool = T
     # The reproduction gate reads these two files; the command does not.
     for name in ("coverage.json", "coverage_roots.json"):
         (partial / name).write_text(json.dumps({}), encoding="utf-8")
+    return _finish(partial, SNAPSHOT_ID)
+
+
+def _finish(partial: Path, snapshot_id: str) -> Path:
     metadata = {
-        "snapshot_id": SNAPSHOT_ID,
+        "snapshot_id": snapshot_id,
         "capture_date": "2026-10-22",
         "source_url": "synthetic",
         "licence": "synthetic test data",
@@ -228,3 +247,23 @@ def build_capture(root: Path, *, moved_a: bool = False, one_coordinate: bool = T
     }
     common.write_manifest(partial, metadata, required=common.REQUIRED_METADATA)
     return common.finish_snapshot(partial)
+
+
+def build_dem(root: Path) -> Path:
+    """Write a DEM snapshot with the x72y429 DEM's bounds under root and return its folder."""
+    partial = common.start_snapshot(root, DEM_SNAPSHOT_ID)
+    west, _, east, north = DEM_BOUNDS_M
+    pixel_m = (east - west) / 2
+    profile = {
+        "driver": "GTiff",
+        "width": 2,
+        "height": 2,
+        "count": 1,
+        "dtype": "float32",
+        "crs": "EPSG:26915",
+        "transform": from_origin(west, north, pixel_m, pixel_m),
+        "nodata": -9999.0,
+    }
+    with rasterio.open(partial / "dem.tif", "w", **profile) as dataset:
+        dataset.write(np.full((1, 2, 2), 150.0, dtype="float32"))
+    return _finish(partial, DEM_SNAPSHOT_ID)
