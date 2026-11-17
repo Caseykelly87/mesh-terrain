@@ -587,6 +587,7 @@ def test_without_real_receivers_a_receiver_layer_in_the_folder_is_refused(tmp_pa
     (refused,) = [entry for entry in logs if entry["log_level"] == "error"]
     assert "rx_real.parquet" in str(refused["reason"])
     assert "--no-real-receivers" in str(refused["reason"])
+    assert_no_real_coordinates(str(logs))
     assert sorted(p.name for p in folder.iterdir()) == ["rx_real.parquet", "tx_sites_real.parquet"]
 
 
@@ -596,6 +597,32 @@ def test_without_the_flag_a_folder_with_no_receiver_layer_is_still_refused(
 ) -> None:
     folder = write_sites_only(tmp_path / "x72y429")
     assert "rx_real.parquet" in refusal(folder)
+    assert sorted(p.name for p in folder.iterdir()) == ["tx_sites_real.parquet"]
+
+
+@pytest.mark.usefixtures("env")
+def test_without_the_flag_a_receiver_layer_with_no_rows_is_refused(tmp_path: Path) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    layer = gpd.read_parquet(folder / "rx_real.parquet")
+    layer.iloc[0:0].to_parquet(folder / "rx_real.parquet")
+    assert "rx_real.parquet" in refusal(folder)
+    assert sorted(p.name for p in folder.iterdir()) == ["rx_real.parquet", "tx_sites_real.parquet"]
+
+
+@pytest.mark.usefixtures("env")
+def test_without_real_receivers_a_tile_other_than_x72y429_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Casey's engine_inputs (c), 2026-11-17, covers the x72y429 run only; a
+    # second tile with a defined run would still need real receivers.
+    monkeypatch.setitem(command.TILE_SNAPSHOTS, "x71y428", command.TILE_SNAPSHOTS["x72y429"])
+    folder = write_sites_only(tmp_path / "x71y428")
+    with capture_logs() as logs:
+        assert main(["x71y428", "--folder", str(folder), "--no-real-receivers"]) == 2
+    (refused,) = [entry for entry in logs if entry["log_level"] == "error"]
+    assert "x71y428" in str(refused["reason"])
+    assert "--no-real-receivers" in str(refused["reason"])
+    assert_no_real_coordinates(str(logs))
     assert sorted(p.name for p in folder.iterdir()) == ["tx_sites_real.parquet"]
 
 
