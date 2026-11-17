@@ -38,8 +38,8 @@ SITE_C = "c3" * 32
 RX = "d4" * 32
 SITES = [
     (SITE_A, 723_456.7, 4_284_321.9, 182.4, "both_ends_gateway"),
-    (SITE_B, 725_012.3, 4_287_034.5, 91.2, "busy_pair_gateway"),
-    (SITE_C, 720_100.0, 4_285_000.0, 182.4, "busy_pair_gateway"),
+    (SITE_B, 725_012.3, 4_287_034.5, 91.2, "gateway_only_gateway"),
+    (SITE_C, 720_100.0, 4_285_000.0, 182.4, "gateway_only_gateway"),
 ]
 RX_ROW = (RX, 727_654.3, 4_282_345.6, 182.4)
 NEVER_PUBLISHED = "inherit the rule that precise MeshSTL positions are never published"
@@ -217,8 +217,8 @@ def test_crossing_md_lists_real_pairs_by_pseudonym_and_grid_paths_as_counts(
     assert run(folder) == 0
     text = (folder / "crossing.md").read_text(encoding="utf-8")
     assert f"| {SITE_A} | both_ends_gateway | {RX} | yes | 0.0 |" in text
-    assert f"| {SITE_B} | busy_pair_gateway | {RX} | no |" in text
-    assert f"| {SITE_C} | busy_pair_gateway | left out |" in text
+    assert f"| {SITE_B} | gateway_only_gateway | {RX} | no |" in text
+    assert f"| {SITE_C} | gateway_only_gateway | left out |" in text
     assert "| 1 |" in text  # one tall cell
     for site in (SITE_A, SITE_B):
         assert f"| {site} | 400 |" in text
