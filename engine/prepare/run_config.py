@@ -1,13 +1,16 @@
 """The run config of a prepared tile run, with the source of every value.
 
-Each value is a decision already in the repo, named in the comment the
-config carries:
+Each value names where it comes from:
 
 - frequency 906.875 MHz: the US LongFast preset the plan fixes
   (`docs/PLAN.md`, Objective), whose frequency `docs/INTERFACE.md` gives in
   its `frequency_mhz` row;
-- all five models, and `mesh_node` at both ends (ADR 0006 decision 5.1);
-- 16 endpoint draws (`docs/PLAN.md`, Phase 3 tasks);
+- the five models `docs/INTERFACE.md` lists, all of which the lead's brief
+  for this run names (issue #44);
+- `mesh_node` at the receivers; the profile at the gateway sites is open
+  for Casey (PR #48) and set in `SITE_PROFILE` alone, so his answer is a
+  one-line change;
+- 16 endpoint draws (`docs/PLAN.md`, Phase 3 tasks; ADR 0006 item 10);
 - the five snapshots registered for the tile (issue #44, PR #46);
 - `output_dir: /runs`, the folder `make engine` mounts (PR #43).
 
@@ -20,12 +23,17 @@ from engine.config import SNAPSHOT_ROLES
 from terrain.path_loss import MODELS
 
 FREQUENCY_MHZ = 906.875
-PROFILE = "mesh_node"
+SITE_PROFILE = "mesh_node"
+"""Profile at the gateway sites: open for Casey on PR #48 (mesh_node or site_gateway)."""
+RECEIVER_PROFILE = "mesh_node"
 ENDPOINT_DRAWS = 16
 SEED = 20261108
 OUTPUT_DIR = "/runs"
 SITES_FILE = "tx_sites.parquet"
 RECEIVERS_FILE = "rx_points.parquet"
+
+NEVER_PUBLISHED = "inherit the rule that precise MeshSTL positions are never published"
+"""Casey's words, issue #44, used verbatim wherever the rule is stated."""
 
 TILE_SNAPSHOTS = {
     "x72y429": {
@@ -62,15 +70,16 @@ def config_text(tile: str) -> str:
         f"# The {tile} engine run (issue #44, Casey's Q1 (b) and Q2 (a)), written by",
         f"# python -m engine.prepare {tile}. Sites are real gateways and receivers are one",
         "# real relay end plus a made-up grid; every id is a pseudonym or a grid id.",
-        "# This folder holds real positions: it stays outside git, and coverage outputs",
-        "# built from real gateway positions are never published (Casey, issue #44).",
+        "# This folder holds real positions and stays outside git.",
+        "# Coverage outputs built from real gateway positions "
+        f"{NEVER_PUBLISHED} (Casey, issue #44).",
         "# Frequency: US LongFast (docs/PLAN.md, Objective; docs/INTERFACE.md, frequency_mhz).",
-        "# Profiles: mesh_node at both ends (ADR 0006 decision 5.1).",
+        "# Profiles: the site profile is open for Casey (PR #48).",
         f"run_id: {tile}",
         f"frequency_mhz: {FREQUENCY_MHZ}",
         f"models: [{', '.join(MODELS)}]",
-        f"tx_profile: {PROFILE}",
-        f"rx_profile: {PROFILE}",
+        f"tx_profile: {SITE_PROFILE}",
+        f"rx_profile: {RECEIVER_PROFILE}",
         f"tx_sites: {SITES_FILE}",
         f"rx_points: {RECEIVERS_FILE}",
         "snapshots:",

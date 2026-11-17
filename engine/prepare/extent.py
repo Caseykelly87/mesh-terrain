@@ -2,21 +2,21 @@
 
 The engine builds one grid over every site and receiver box plus 50 m,
 rounded out to multiples of 10 m (`engine.grid.run_grid`), and refuses the
-whole run when that grid reaches beyond the DEM tiles' bounding box
-(`engine.terrain_build._check_covers`). This module calls those two
-functions unchanged on one endpoint at a time. The run grid is the bounding
-box of the endpoints' own grids, since rounding out commutes with taking the
-outermost edge, so a set of endpoints that each pass is a run the engine
-cannot refuse for extent. It reads tile bounds only, no cells.
+whole run when that grid is not inside the DEM tiles' bounding box
+(`engine.terrain_build.check_covers`, through `dem_extent` and
+`grid_inside`). This module applies the same three functions to one endpoint
+at a time. The run grid is the bounding box of the endpoints' own grids,
+since rounding out commutes with taking the outermost edge, so a set of
+endpoints that each pass is a run the engine cannot refuse for extent. It
+reads tile bounds only, no cells.
 """
 
 from collections.abc import Sequence
 
-from engine.errors import ConfigError
 from engine.grid import run_grid
 from engine.points import Endpoint
 from engine.snapshots import NamedSnapshot
-from engine.terrain_build import _check_covers, dem_resolution_m
+from engine.terrain_build import dem_extent, dem_resolution_m, grid_inside
 
 
 def outside_extent(endpoints: Sequence[Endpoint], dem: NamedSnapshot) -> list[str]:
@@ -34,12 +34,9 @@ def outside_extent(endpoints: Sequence[Endpoint], dem: NamedSnapshot) -> list[st
             EPSG:26915, as the engine would refuse it.
     """
     resolution_m = dem_resolution_m(dem)
-    failing = []
-    for endpoint in endpoints:
-        try:
-            _check_covers(dem, run_grid([endpoint], resolution_m))
-        except ConfigError:
-            # The message holds the endpoint's extent in metres, a real
-            # position for a real node, so only the id leaves this function.
-            failing.append(endpoint.endpoint_id)
-    return failing
+    extent = dem_extent(dem)
+    return [
+        endpoint.endpoint_id
+        for endpoint in endpoints
+        if not grid_inside(run_grid([endpoint], resolution_m), extent)
+    ]

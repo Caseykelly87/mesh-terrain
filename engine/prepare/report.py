@@ -1,22 +1,26 @@
 """`crossing.md`: the crossing check written for Casey, by pseudonym and count only.
 
-Real pairs are listed one by one with the site's role, yes or no and the
-distance from the path to the nearest tall cell; grid paths are counted per
-site. The file holds no coordinate of any node, real or made up, so it can be
-read out on an issue as it stands. Box half-widths are listed because the
-engine's draws move each end inside its box.
+Paths between real endpoints are listed one by one with the site's role,
+yes or no and the distance from the path to the nearest tall cell; grid paths
+are counted per site. The file holds no coordinate of any node, real or made
+up. Box half-widths are listed because the engine's draws move each end
+inside its box; they come from position precision, so the file and the
+printed summary are read locally only and never posted, and issue #44 gets
+counts only (the lead's rule; the repository is public).
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 from engine.prepare.crossing import PathCrossing
+from engine.prepare.run_config import NEVER_PUBLISHED
 from engine.snapshots import NamedSnapshot
 
-NEVER_PUBLISHED = (
-    "Coverage outputs built from real gateway positions inherit the rule that precise "
-    "MeshSTL positions are never published (Casey, issue #44). This file names nodes by "
-    "pseudonym only and holds no coordinates; it stays in this folder, outside git."
+PRIVACY = (
+    f"Coverage outputs built from real gateway positions {NEVER_PUBLISHED} (Casey, issue #44). "
+    "This file names nodes by pseudonym only and holds no coordinates; it stays in this "
+    "folder, outside git. This file and the printed summary are read locally only and never "
+    "posted: the repository is public, so issue #44 gets counts only."
 )
 
 
@@ -71,7 +75,7 @@ def crossing_markdown(report: CrossingReport) -> str:
     lines = [
         f"# Crossing check, {report.tile}",
         "",
-        NEVER_PUBLISHED,
+        PRIVACY,
         "",
         f"A tall cell is a DSM cell more than {report.threshold_m:g} m above the DEM at the "
         f"same place. A path crosses when the straight line between its site's and its "
@@ -124,7 +128,7 @@ def _real_lines(report: CrossingReport) -> list[str]:
             f"| {half_width_m:.1f} |"
         )
     return [
-        "## Real pairs",
+        "## Paths between real endpoints",
         "",
         f"| site_id | role | rx_id | within {report.within_m:g} m | closest distance (m) "
         "| larger box half-width (m) |",
