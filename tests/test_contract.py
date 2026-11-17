@@ -22,7 +22,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-from dbt_listing import REPO_ROOT, dbt_nodes
+from dbt_listing import DEVELOPMENT_TARGET, REPO_ROOT, dbt_nodes
 
 CONTRACT = REPO_ROOT / "docs" / "data-quality-contract.md"
 RULE_ROW = re.compile(r"^\| `([a-z]{3}_\d{2})` \|", re.MULTILINE)
@@ -174,7 +174,7 @@ def pytest_functions() -> list[NamedTest]:
 
 
 def all_named_tests() -> list[NamedTest]:
-    return [*dbt_tests(dbt_nodes("dev_wh")), *asset_checks(), *pytest_functions()]
+    return [*dbt_tests(dbt_nodes(DEVELOPMENT_TARGET)), *asset_checks(), *pytest_functions()]
 
 
 def contract_problems(
