@@ -110,7 +110,7 @@ def test_a_node_whose_only_boxes_lie_outside_the_msa_has_no_positions() -> None:
 
 
 def test_node_positions_read_only_usable_boxes_in_the_area() -> None:
-    """The area test is passed in; here it keeps the boxes within about 3.5 km east of G1."""
+    """The area test is passed in; here it keeps boxes west of a line about 3.5 km east of G1."""
     west, east = NODES["G1"].box(), NODES["G1"].box(east_shift_m=50_000)
     coarse = NODES["G1"].box(bits=COARSE_BITS)
     rows = [position_row("G1", place, meshstl=True) for place in (west, east, coarse)]
