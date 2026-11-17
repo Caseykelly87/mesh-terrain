@@ -35,6 +35,7 @@ from pyproj import Transformer
 from rasterio.transform import from_origin
 from shapely.geometry import Point, box
 
+from engine.positions_marker import SYNTHETIC, stamp_positions
 from pipeline.common.snapshot import finish_snapshot, start_snapshot, write_manifest
 
 REPO = Path(__file__).resolve().parents[1]
@@ -214,6 +215,7 @@ def write_points() -> None:
         crs="EPSG:26915",
     ).to_crs("EPSG:4326")
     sites.to_parquet(POINTS / "two_sites.parquet", index=False)
+    stamp_positions(POINTS / "two_sites.parquet", SYNTHETIC)
     rng = np.random.default_rng(500)
     xy = np.round(rng.uniform([725_080.0, 4_285_080.0], [725_920.0, 4_285_920.0], (500, 2)), 2)
     half_widths = np.where(np.arange(500) % 10 == 0, 20.0, 0.0)
@@ -223,6 +225,7 @@ def write_points() -> None:
         crs="EPSG:26915",
     )
     receivers.to_parquet(POINTS / "receivers_500.parquet", index=False)
+    stamp_positions(POINTS / "receivers_500.parquet", SYNTHETIC)
     write_observations(sites.to_crs("EPSG:26915"), receivers, rng)
 
 
@@ -238,6 +241,7 @@ def write_observations(
         rows.append((site.site_id, receiver.rx_id, round(loss_db, 2)))
     observations = pd.DataFrame(rows, columns=["site_id", "rx_id", "observed_loss_db"])
     observations.to_parquet(POINTS / "observations.parquet", index=False)
+    stamp_positions(POINTS / "observations.parquet", SYNTHETIC)
 
 
 if __name__ == "__main__":
