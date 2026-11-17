@@ -35,7 +35,7 @@ Run:
     - `getattr` with an attribute name built at run time;
     - a loader or register call without `schema=`, which falls back to `raw` (the throwaway fixture's lock check catches this on its own connection only);
     - SQL read from a file that is not Python.
-  - The database role with no INSERT, UPDATE, DELETE or TRUNCATE on `raw` or `raw_dev_wh`, queued for platform-eng (Casey, issue #55 comment 6961809084, item 10), is the guard for everything the scan cannot see.
+  - The scan is capped (Casey, issue #55, 2026-11-17, item 4): a gap found later goes into this list, not into new code. The database role with no INSERT, UPDATE, DELETE or TRUNCATE on `raw` or `raw_dev_wh`, next in platform-eng's queue (Casey, issue #55 comment 6961809084, item 10), is the guard for everything the scan cannot see.
 - Reduction: `uv run --frozen python -I -m ingester.reduce`. It ran once, on 2026-11-14, and cannot run again: its input archive was deleted that day.
 - Load: `uv run --frozen python -m ingester.load <snapshot id>`.
 - Capture and gate: `docs/adr/0003-spike/README.md`.
