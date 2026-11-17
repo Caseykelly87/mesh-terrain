@@ -319,7 +319,7 @@ def test_a_refused_run_prints_and_logs_no_coordinate(
     with capture_logs() as events:
         assert run(tmp_path) == 2
     text = capsys.readouterr().out + repr(events)
-    assert "refused, nothing written: the both_ends_relayer sent 2 boxes" in text
+    assert "refused, nothing written: the both_ends_relayer's 2 usable boxes" in text
     assert coordinates_in(text) == []
 
 
@@ -333,10 +333,34 @@ def test_command_refuses_a_node_that_moved_during_the_capture(
     assert not (tmp_path / "configs").exists()
     lines = capsys.readouterr().out.splitlines()
     assert (
-        "refused, nothing written: the both_ends_relayer sent 2 boxes during the capture; "
-        "the layers need its one stationary box"
+        "refused, nothing written: the both_ends_relayer's 2 usable boxes in the MSA do not "
+        "all overlap; the layers need a stationary node (lnk_02)"
     ) in lines
     assert not any(text.startswith("dropped") for text in lines)
+
+
+@pytest.mark.parametrize("option", ["nested_g1", "nested_g3", "ignored_a"])
+def test_boxes_the_overlap_rule_reads_as_one_place_leave_the_layers_as_they_are(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], option: str
+) -> None:
+    """Each option adds boxes the rule of 2026-10-31 refused (lnk_02, Overlap amendment)."""
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", **{option: True})
+    with capture_logs() as events:
+        assert run(tmp_path) == 0
+    out = tmp_path / "configs" / "x72y429"
+    sites = gpd.read_parquet(out / "tx_sites_real.parquet")
+    receivers = gpd.read_parquet(out / "rx_real.parquet")
+    assert list(sites["site_id"]) == [pseudonym(name) for name in SITE_ORDER]
+    for frame, names_in_order in ((sites, SITE_ORDER), (receivers, ("A",))):
+        for point, name in zip(frame.geometry, names_in_order, strict=True):
+            assert (point.x, point.y) == pytest.approx(centre_m(name), abs=1e-6)
+        assert list(frame["box_half_width_m"]) == pytest.approx(
+            [east_west_half_m(name) for name in names_in_order], abs=1e-9
+        )
+    printed = capsys.readouterr().out
+    assert not any(line.startswith("dropped") for line in printed.splitlines())
+    assert coordinates_in(printed + repr(events)) == []
 
 
 def test_command_refuses_an_unexpected_pair_count(tmp_path: Path, capture: Path) -> None:

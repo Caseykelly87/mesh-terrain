@@ -29,6 +29,20 @@ With `straddler`, one node also sends a second box on the other side of the
 tile edge (`STRADDLE_SHIFTS_M`), as a MeshSTL row outside the MeshSTL run's
 window: neither spike run sees it, so the pairs and their link-hours stay as
 above, while the node's boxes over the capture lie on both sides of the edge.
+
+Three options exercise the amended `lnk_02` overlap rule (ADR 0003, Overlap
+amendment, 2026-11-17), each adding boxes that the rule of 2026-10-31 would
+refuse or count as straddling and the overlap rule places as before:
+
+- `nested_g1`: G1 also sends its position at 15 bits on the public broker, a
+  box holding its 20-bit MeshSTL box. G1 is in no public pair, so the spike's
+  per-run rules give the same pairs.
+- `nested_g3`: G3 also sends its position at 15 bits, a box holding its
+  18-bit box whose centre lies east of the tile edge, as a MeshSTL row outside
+  the MeshSTL run's window.
+- `ignored_a`: A also sends a 16-bit box outside the MSA
+  (`OUTSIDE_MSA_SHIFT_M`) and a coarse 13-bit box, as MeshSTL rows outside
+  the MeshSTL run's window.
 """
 
 import hashlib
@@ -72,12 +86,20 @@ class FakeNode:
     def pseudonym(self) -> str:
         return hashlib.sha256(f"fixture-node-{self.name}".encode()).hexdigest()
 
-    def box(self, east_shift_m: float = 0.0, north_shift_m: float = 0.0) -> tuple[int, int, int]:
-        """(latitude_i, longitude_i, precision_bits) as firmware would send it."""
+    def box(
+        self, east_shift_m: float = 0.0, north_shift_m: float = 0.0, bits: int | None = None
+    ) -> tuple[int, int, int]:
+        """(latitude_i, longitude_i, precision_bits) as firmware would send it.
+
+        Args:
+            east_shift_m: Metres east of the node's position, EPSG:26915.
+            north_shift_m: Metres north of the node's position, EPSG:26915.
+            bits: The precision sent; the node's own when None.
+        """
         lon, lat = _TO_DEGREES.transform(
             self.easting_m + east_shift_m, self.northing_m + north_shift_m
         )
-        bits = self.precision_bits
+        bits = self.precision_bits if bits is None else bits
         return quantise(round(lat * 1e7), bits), quantise(round(lon * 1e7), bits), bits
 
 
@@ -94,9 +116,11 @@ def box_centre_m(box: tuple[int, int, int]) -> tuple[float, float]:
 
 
 def every_box() -> list[tuple[int, int, int]]:
-    """Every box the fixture can send: each node's own, the straddlers' second, G3's edge box."""
+    """Every box the fixture can send: each node's own and every box an option adds."""
     boxes = [node.box() for node in NODES.values()]
     boxes += [NODES[name].box(*shift) for name, shift in STRADDLE_SHIFTS_M.items()]
+    boxes += [NODES["G1"].box(bits=WIDE_BITS), NODES["G3"].box(bits=WIDE_BITS)]
+    boxes += [NODES["A"].box(east_shift_m=OUTSIDE_MSA_SHIFT_M), NODES["A"].box(bits=COARSE_BITS)]
     return [*boxes, NODES["G3"].box(east_shift_m=G3_EDGE_SHIFT_M)]
 
 
@@ -133,6 +157,12 @@ STRADDLE_SHIFTS_M = {
 }
 # G3's box 45 m from the tile's east edge, as the fixture first placed it.
 G3_EDGE_SHIFT_M = 250.0
+# The precision of the boxes nested_g1 and nested_g3 add: usable, and wide
+# enough that G3's 15-bit box centre lies east of the tile edge.
+WIDE_BITS = 15
+COARSE_BITS = 13
+# 300 km west of A, in western Missouri: outside the MSA, inside UTM zone 15.
+OUTSIDE_MSA_SHIFT_M = -300_000.0
 PUBLIC = {"seen_public": True, "seen_meshstl": False}
 MESHSTL = {"seen_public": False, "seen_meshstl": True}
 BOTH = {"seen_public": True, "seen_meshstl": True}
@@ -248,6 +278,33 @@ def _links(rows: RowMaker, busy_outside_pair: bool) -> None:
     rows.receipts(n["M"], n["E"], at(23, 15), PUBLIC)
 
 
+def _overlap_options(rows: RowMaker, nested_g1: bool, nested_g3: bool, ignored_a: bool) -> None:
+    """Boxes the overlap rule places as before (module docstring)."""
+    n = NODES
+    if nested_g1:
+        rows.position(n["G1"], n["G1"], at(23, 9), PUBLIC, n["G1"].box(bits=WIDE_BITS))
+    if nested_g3:
+        rows.position(n["G3"], n["G3"], at(25, 1), MESHSTL, n["G3"].box(bits=WIDE_BITS))
+    if ignored_a:
+        outside = n["A"].box(east_shift_m=OUTSIDE_MSA_SHIFT_M)
+        rows.position(n["A"], n["G1"], at(25, 1), MESHSTL, outside)
+        rows.position(n["A"], n["G1"], at(25, 2), MESHSTL, n["A"].box(bits=COARSE_BITS))
+
+
+def position_row(name: str, place: tuple[int, int, int], meshstl: bool = False) -> dict[str, Any]:
+    """The fields of a Position row that node positions read, for tests without a snapshot."""
+    latitude_i, longitude_i, bits = place
+    return {
+        "origin_pseudonym": NODES[name].pseudonym,
+        "position_source": "position",
+        "latitude_i": latitude_i,
+        "longitude_i": longitude_i,
+        "precision_bits": bits,
+        "seen_public": not meshstl,
+        "seen_meshstl": meshstl,
+    }
+
+
 def _straddle(rows: RowMaker, name: str) -> None:
     """A second box across the tile edge, after the MeshSTL run's window closes."""
     node = NODES[name]
@@ -263,6 +320,9 @@ def build_capture(
     g3_at_edge: bool = False,
     straddler: str | None = None,
     busy_outside_pair: bool = False,
+    nested_g1: bool = False,
+    nested_g3: bool = False,
+    ignored_a: bool = False,
 ) -> Path:
     """Write the synthetic capture snapshot under root and return its finished folder.
 
@@ -278,9 +338,13 @@ def build_capture(
             the other side of the tile edge.
         busy_outside_pair: Give D to E, which does not touch the tile, 5 more
             link-hours, so it is the busiest pair by link-hours.
+        nested_g1: G1 also sends a 15-bit box holding its 20-bit box.
+        nested_g3: G3 also sends a 15-bit box, centred east of the tile edge.
+        ignored_a: A also sends a box outside the MSA and a coarse box.
     """
     rows = RowMaker()
     _positions(rows, moved_a, one_coordinate, g3_at_edge)
+    _overlap_options(rows, nested_g1, nested_g3, ignored_a)
     if straddler is not None:
         _straddle(rows, straddler)
     _links(rows, busy_outside_pair)
