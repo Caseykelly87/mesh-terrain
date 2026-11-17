@@ -509,6 +509,105 @@ def test_an_output_that_cannot_be_removed_after_a_failure_is_logged_and_the_firs
     assert sorted(Path(str(entry["path"])).name for entry in left) == sorted(p.name for p in moved)
 
 
+def write_sites_only(folder: Path) -> Path:
+    """The folder ingest-eng's `--sites-only` writes: the sites layer, no receiver layer."""
+    write_inputs(folder)
+    (folder / "rx_real.parquet").unlink()
+    return folder
+
+
+def run_without_real_receivers(folder: Path) -> int:
+    return main(["x72y429", "--folder", str(folder), "--no-real-receivers"])
+
+
+@pytest.mark.usefixtures("env")
+def test_without_real_receivers_the_grid_alone_is_written_and_marked_synthetic(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folder = write_sites_only(tmp_path / "x72y429")
+    with capture_logs() as logs:
+        assert run_without_real_receivers(folder) == 0
+    assert sorted(p.name for p in folder.iterdir()) == [
+        "crossing.md",
+        "rx_points.parquet",
+        "tx_sites.parquet",
+        "tx_sites_real.parquet",
+        "x72y429.yaml",
+    ]
+    layer = gpd.read_parquet(folder / "rx_points.parquet")
+    assert list(layer.columns) == ["rx_id", "geometry", "box_half_width_m"]
+    assert len(layer) == 400
+    assert layer["rx_id"].iloc[0] == "grid-r00c00"
+    assert layer["rx_id"].str.startswith("grid-").all()
+    assert (layer["box_half_width_m"] == 0.0).all()
+    assert positions_marker(folder / "rx_points.parquet") == "synthetic"
+    # The sites are still the real gateways, so their layer stays real.
+    assert positions_marker(folder / "tx_sites.parquet") == "real"
+    assert list(gpd.read_parquet(folder / "tx_sites.parquet")["site_id"]) == [SITE_A, SITE_B]
+    out, err = capsys.readouterr()
+    assert_no_real_coordinates(out + err + str(logs))
+
+
+@pytest.mark.usefixtures("env")
+def test_without_real_receivers_the_config_and_extent_pass_the_engines_checks(
+    tmp_path: Path, snapshots_dir: Path
+) -> None:
+    folder = write_sites_only(tmp_path / "x72y429")
+    assert run_without_real_receivers(folder) == 0
+    config = load_config(folder / "x72y429.yaml")
+    assert config.rx_points == folder / "rx_points.parquet"
+    assert config.tx_sites == folder / "tx_sites.parquet"
+    endpoints = read_points(config.tx_sites, "site_id") + read_points(config.rx_points, "rx_id")
+    dem = named(snapshots_dir, DEM_ID)["dem"]
+    check_sources({"dem": dem}, run_grid(endpoints, dem_resolution_m(dem)))
+
+
+@pytest.mark.usefixtures("env")
+def test_without_real_receivers_crossing_md_says_there_is_no_real_receiver(
+    tmp_path: Path,
+) -> None:
+    folder = write_sites_only(tmp_path / "x72y429")
+    assert run_without_real_receivers(folder) == 0
+    text = (folder / "crossing.md").read_text(encoding="utf-8")
+    real_section = text.split("## Paths between real endpoints")[1].split("## Grid paths")[0]
+    assert "no real receiver" in real_section
+    assert "|" not in real_section
+    assert f"| {SITE_C} | gateway_only_gateway | left out |" in text
+    for site in (SITE_A, SITE_B):
+        assert f"| {site} | 400 |" in text
+    assert NEVER_PUBLISHED in text
+    assert_no_real_coordinates(text)
+
+
+@pytest.mark.usefixtures("env")
+def test_without_real_receivers_a_receiver_layer_in_the_folder_is_refused(tmp_path: Path) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    with capture_logs() as logs:
+        assert run_without_real_receivers(folder) == 2
+    (refused,) = [entry for entry in logs if entry["log_level"] == "error"]
+    assert "rx_real.parquet" in str(refused["reason"])
+    assert "--no-real-receivers" in str(refused["reason"])
+    assert sorted(p.name for p in folder.iterdir()) == ["rx_real.parquet", "tx_sites_real.parquet"]
+
+
+@pytest.mark.usefixtures("env")
+def test_without_the_flag_a_folder_with_no_receiver_layer_is_still_refused(
+    tmp_path: Path,
+) -> None:
+    folder = write_sites_only(tmp_path / "x72y429")
+    assert "rx_real.parquet" in refusal(folder)
+    assert sorted(p.name for p in folder.iterdir()) == ["tx_sites_real.parquet"]
+
+
+@pytest.mark.usefixtures("env")
+def test_without_real_receivers_synthetic_sites_give_synthetic_outputs(tmp_path: Path) -> None:
+    folder = write_sites_only(tmp_path / "x72y429")
+    stamp_positions(folder / "tx_sites_real.parquet", "synthetic")
+    assert run_without_real_receivers(folder) == 0
+    assert positions_marker(folder / "tx_sites.parquet") == "synthetic"
+    assert positions_marker(folder / "rx_points.parquet") == "synthetic"
+
+
 def test_a_move_never_replaces_a_file_that_appeared_meanwhile(tmp_path: Path) -> None:
     source, target = tmp_path / "staged.md", tmp_path / "crossing.md"
     source.write_text("new\n", encoding="utf-8")
