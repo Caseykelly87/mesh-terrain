@@ -58,6 +58,9 @@ class CrossingReport:
             empty for a run whose receivers are the grid alone.
         real: Crossings of the paths from sites in the run to real receivers.
         grid: Crossings of the paths from sites in the run to grid receivers.
+        real_receivers: False when the run was prepared with
+            `--no-real-receivers`; the section on real endpoints then says
+            the run has none.
     """
 
     tile: str
@@ -70,6 +73,7 @@ class CrossingReport:
     receiver_half_widths: dict[str, float]
     real: Sequence[PathCrossing]
     grid: Sequence[PathCrossing]
+    real_receivers: bool
 
 
 def crossing_markdown(report: CrossingReport) -> str:
@@ -120,7 +124,7 @@ def _site_lines(report: CrossingReport) -> list[str]:
 
 
 def _real_lines(report: CrossingReport) -> list[str]:
-    if not report.receiver_half_widths:
+    if not report.real_receivers:
         return [
             "## Paths between real endpoints",
             "",
