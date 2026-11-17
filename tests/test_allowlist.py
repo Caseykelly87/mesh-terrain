@@ -70,12 +70,14 @@ ADR_FIELDS = {
 # Columns that are not message fields: identity, provenance and decode outcome.
 BOOKKEEPING = {"snapshot_id", "delivery_key", "decode_status", "decoder_version", "schema_version"}
 FORBIDDEN = re.compile(r"payload$|^payload_bytes|text|long_name|short_name|public_key|node_id|mac")
+# The DDL is a template: ingester.load.raw_ddl puts the target schema in place of {schema}.
+TABLE_PATTERN = re.compile(r"create table if not exists \{schema\}\.(\w+) \((.*?)\n\);", re.S)
 
 
 def parse_ddl(sql: str) -> dict[str, list[tuple[str, str, bool]]]:
-    """Columns per raw table as (name, type, not null), from the DDL file."""
+    """Columns per raw table as (name, type, not null), from the DDL template."""
     tables: dict[str, list[tuple[str, str, bool]]] = {}
-    for match in re.finditer(r"create table if not exists raw\.(\w+) \((.*?)\n\);", sql, re.S):
+    for match in TABLE_PATTERN.finditer(sql):
         columns = []
         for line in match.group(2).splitlines():
             line = line.strip().rstrip(",")
@@ -90,7 +92,7 @@ def parse_ddl(sql: str) -> dict[str, list[tuple[str, str, bool]]]:
 
 def primary_keys(sql: str) -> dict[str, tuple[str, ...]]:
     keys = {}
-    for match in re.finditer(r"create table if not exists raw\.(\w+) \((.*?)\n\);", sql, re.S):
+    for match in TABLE_PATTERN.finditer(sql):
         key = re.search(r"primary key \(([^)]*)\)", match.group(2))
         assert key is not None, match.group(1)
         keys[match.group(1)] = tuple(part.strip() for part in key.group(1).split(","))

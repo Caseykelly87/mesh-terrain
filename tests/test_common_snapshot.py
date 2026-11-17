@@ -2,24 +2,26 @@
 
 The snapshot here is an invented elevation tile, not an MQTT capture, so the
 tests show that nothing in the shared module needs the capture's fields. The
-database test runs inside a transaction that is rolled back and is skipped
-where no warehouse answers, as in CI's tests job.
+database test registers into a throwaway schema built from the raw DDL
+(tests/raw_schema.py), inside a transaction that is rolled back, never into
+`raw` or `raw_dev_wh` (Casey, issue #55, item 10), and is skipped where no
+warehouse answers, as in CI's tests job.
 """
 
 import ast
+import inspect
 import json
 import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-import psycopg
 import pytest
+from psycopg import sql
+from raw_schema import ThrowawayRaw, throwaway_raw_schema
 from structlog.testing import capture_logs
 
-from ingester.load import apply_ddl
 from pipeline.common import snapshot as snapshot_module
-from pipeline.common.settings import get_settings
 from pipeline.common.snapshot import (
     MANIFEST_NAME,
     REQUIRED_METADATA,
@@ -58,8 +60,11 @@ class RecordingConnection:
         self.statements: list[tuple[str, tuple[object, ...]]] = []
         self.rowcount = 1
 
-    def execute(self, query: str, params: tuple[object, ...]) -> "RecordingConnection":
-        self.statements.append((query, params))
+    def execute(
+        self, query: str | sql.Composable, params: tuple[object, ...]
+    ) -> "RecordingConnection":
+        text = query if isinstance(query, str) else query.as_string(None)
+        self.statements.append((text, params))
         return self
 
 
@@ -410,31 +415,36 @@ def test_the_shared_module_never_updates_or_deletes() -> None:
 
 
 @pytest.fixture
-def conn() -> Iterator[psycopg.Connection]:
-    settings = get_settings()
-    try:
-        connection = psycopg.connect(
-            host=settings.warehouse_host,
-            port=settings.warehouse_port,
-            user=settings.warehouse_user,
-            password=settings.warehouse_password.get_secret_value(),
-            dbname=settings.warehouse_db,
-            connect_timeout=3,
-        )
-    except psycopg.OperationalError as err:
-        pytest.skip(f"no local warehouse ({err.__class__.__name__}); run make up")
-    with connection, connection.transaction(force_rollback=True):
-        yield connection
+def raw() -> Iterator[ThrowawayRaw]:
+    with throwaway_raw_schema() as throwaway:
+        yield throwaway
 
 
-def test_register_is_idempotent(conn: psycopg.Connection, tmp_path: Path) -> None:
+@pytest.mark.parametrize("function", [register, register_verified])
+def test_registration_takes_a_schema_that_defaults_to_raw(function: Any) -> None:
+    parameter = inspect.signature(function).parameters["schema"]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default == "raw"
+
+
+def test_register_inserts_into_the_schema_it_is_given(tmp_path: Path) -> None:
     final = finished(tmp_path)
-    apply_ddl(conn)
-    assert register_verified(conn, final) == 1
-    assert register_verified(conn, final) == 0
-    row = conn.execute(
-        "select capture_date::text, source_url, licence, manifest_sha256 "
-        "from raw.snapshot where snapshot_id = %s",
+    default, other = RecordingConnection(), RecordingConnection()
+    register(default, final, read_manifest(final))
+    register(other, final, read_manifest(final), schema="test_load_000000000000")
+    assert default.statements[0][0].startswith('insert into "raw"."snapshot" ')
+    assert other.statements[0][0].startswith('insert into "test_load_000000000000"."snapshot" ')
+
+
+def test_register_is_idempotent(raw: ThrowawayRaw, tmp_path: Path) -> None:
+    final = finished(tmp_path)
+    assert register_verified(raw.conn, final, schema=raw.schema) == 1
+    assert register_verified(raw.conn, final, schema=raw.schema) == 0
+    row = raw.conn.execute(
+        sql.SQL(
+            "select capture_date::text, source_url, licence, manifest_sha256 "
+            "from {} where snapshot_id = %s"
+        ).format(sql.Identifier(raw.schema, "snapshot")),
         (SNAPSHOT_ID,),
     ).fetchall()
     assert row == [
