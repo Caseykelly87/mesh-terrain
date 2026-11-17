@@ -1,7 +1,12 @@
 mesh_terrain:
-  target: dev
+  # The default is the development target, so a dbt command that names no
+  # target never reaches the real schemas. dbt/README.md says who runs which.
+  target: dev_wh
   outputs:
-    dev:
+    # Builds into staging_dev_wh, core_dev_wh and analytics_dev_wh and reads
+    # raw_dev_wh, which holds synthetic fixture tables only
+    # (macros/target_schemas.sql). make check and make dbt-build use it.
+    dev_wh: &warehouse
       type: postgres
       host: "{{ env_var('WAREHOUSE_HOST') }}"
       port: "{{ env_var('WAREHOUSE_PORT') | as_number }}"
@@ -9,7 +14,10 @@ mesh_terrain:
       password: "{{ env_var('WAREHOUSE_PASSWORD') }}"
       dbname: "{{ env_var('WAREHOUSE_DB') }}"
       # The target schema is only the default; every model folder pins its own
-      # schema in dbt_project.yml and the macro below keeps that name exact.
+      # schema in dbt_project.yml and the schema macro suffixes it by target.
       schema: staging
       threads: 4
       connect_timeout: 10
+    # The real raw, staging, core and analytics schemas. Only the lead runs it,
+    # through make dbt-build-real.
+    prod: *warehouse
