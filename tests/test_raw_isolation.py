@@ -36,6 +36,8 @@ past the scan. The database role (platform-eng, next) is the guard.
   ".snapshot"`);
 - an f-string with a replacement field directly before the name (`f"delete from
   {p}raw.snapshot"`);
+- a printf-style placeholder directly before the name (`"delete from
+  %sraw.snapshot" % p`);
 - a SQL comment between the name and the dot (`raw/**/.snapshot`);
 - a Unicode-escaped identifier (`U&"\0072aw"`);
 - the `schema` default read at run time (`inspect.signature`,
@@ -277,6 +279,7 @@ NOT_SEEN = {
     ),
     "database-qualified name at the end": 'conn.execute("delete from mesh.@" + ".snapshot")',
     "replacement field before the name": 'conn.execute(f"delete from {p}@.snapshot")',
+    "placeholder before the name": 'conn.execute("delete from %s@.snapshot" % p)',
     "SQL comment before the dot": 'conn.execute("select 1 from @/**/.snapshot")',
     "Unicode-escaped identifier": "conn.execute('select 1 from U&\"\\\\0072aw\".snapshot')",
     "default read by inspect.signature": (
@@ -308,9 +311,10 @@ def test_the_scan_finds_each_form(form: str, schema: str) -> None:
     assert real_schema_uses(probe(PROBES[form], schema)), form
 
 
+@pytest.mark.parametrize("schema", WATCHED)
 @pytest.mark.parametrize("form", sorted(NOT_SEEN))
-def test_the_scan_does_not_see_these_forms(form: str) -> None:
-    assert real_schema_uses(probe(NOT_SEEN[form], WATCHED[0])) == [], form
+def test_the_scan_does_not_see_these_forms(form: str, schema: str) -> None:
+    assert real_schema_uses(probe(NOT_SEEN[form], schema)) == [], form
 
 
 def test_an_allowed_match_used_as_sql_adds_no_match() -> None:
