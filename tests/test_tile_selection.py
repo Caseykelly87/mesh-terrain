@@ -1,4 +1,4 @@
-"""The tile's nodes by tile membership, the busiest-pair rule, the DEM extent rule and drops.
+"""Tile membership, the lnk_02 overlap rule, the busiest-pair rule, the DEM extent rule, drops.
 
 Every node is invented.
 
@@ -12,8 +12,12 @@ from engine_inputs_fixture import (
     DEM_BOUNDS_M,
     G3_EDGE_SHIFT_M,
     NODES,
+    OUTSIDE_MSA_SHIFT_M,
     STRADDLE_SHIFTS_M,
+    WIDE_BITS,
     FakeNode,
+    box_centre_m,
+    position_row,
 )
 
 from engine.config import SnapshotIds
@@ -22,7 +26,17 @@ from engine.grid import run_grid
 from engine.points import Endpoint
 from engine.snapshots import resolve_snapshots
 from engine.terrain_build import check_covers
-from ingester.link_pairs import Box, CaptureLinks, NodePositions, PairActivity, SelectionError
+from ingester.link_pairs import (
+    USABLE_BITS,
+    Box,
+    CaptureLinks,
+    NodePositions,
+    PairActivity,
+    SelectionError,
+    box_half_width_m,
+    msa_contains,
+    node_positions,
+)
 from ingester.tile_selection import (
     BOTH_ENDS_PAIR,
     FAILS_DEM,
@@ -60,10 +74,11 @@ def pair(relayer: str, gateway: str, link_hours: int) -> PairActivity:
 
 
 def links(*pairs: PairActivity, nodes: dict[str, NodePositions] | None = None) -> CaptureLinks:
-    """The pairs with every fixture node at its one box, unless nodes says otherwise."""
+    """The pairs with every usable fixture node at its one box, unless nodes says otherwise."""
     found = {
         node.pseudonym: NodePositions(frozenset({Box(*node.box())}), False)
         for node in NODES.values()
+        if node.precision_bits >= USABLE_BITS
     }
     found.update(nodes or {})
     return CaptureLinks(tuple(pairs), {}, found, 0, 0)
@@ -83,6 +98,13 @@ def two_boxes(name: str, east_m: float, north_m: float) -> dict[str, NodePositio
 def straddling(name: str) -> dict[str, NodePositions]:
     """The node with a second box across the tile edge, as the capture fixture sends it."""
     return two_boxes(name, *STRADDLE_SHIFTS_M[name])
+
+
+def nested(name: str) -> dict[str, NodePositions]:
+    """The node at its own box and at the 15-bit box that holds it."""
+    node = NODES[name]
+    boxes = frozenset({Box(*node.box()), Box(*node.box(bits=WIDE_BITS))})
+    return {node.pseudonym: NodePositions(boxes, False)}
 
 
 def g3_at_edge() -> dict[str, NodePositions]:
@@ -266,6 +288,8 @@ def test_a_selection_with_no_drop_gives_the_layers() -> None:
 
 
 def test_a_straddling_gateway_only_gateway_is_counted_then_its_pair_is_dropped() -> None:
+    """G2's two boxes do not overlap, so it is not stationary and straddles, as before."""
+    assert straddling("G2")[pseudonym("G2")].stationary_box is None
     selection = select(links(*SELECTED, nodes=straddling("G2")), 3)
     assert selection.dropped == (
         DroppedPair(pair("B", "G2", 5), GATEWAY_ONLY_PAIR, (("gateway", STRADDLES),)),
@@ -390,6 +414,37 @@ def test_a_straddling_gateway_only_relayer_fails_the_one_both_ends_pair_check() 
         select(found, 3)
 
 
+def test_a_stationary_node_whose_wider_box_crosses_the_edge_counts_as_in() -> None:
+    """G3's 15-bit box is centred east of the edge; its placed 18-bit box lies inside."""
+    assert not TILE.contains(*box_centre_m(NODES["G3"].box(bits=WIDE_BITS)))
+    found = links(*SELECTED, nodes=nested("G3"))
+    assert pair_states(found, TILE)[SELECTED[2]] == ("out", "in")
+    selection = select(found, 3)
+    assert selection.dropped == ()
+    g3 = next(node for node in selection.placed if node.pseudonym == pseudonym("G3"))
+    assert (g3.easting_m, g3.northing_m) == pytest.approx(box_centre_m(NODES["G3"].box()))
+
+
+def test_a_node_is_placed_at_its_smallest_box_with_that_boxs_half_width() -> None:
+    latitude_i, _, bits = NODES["G1"].box()
+    selection = select(links(*SELECTED, nodes=nested("G1")), 3)
+    sites, _ = selection.layers()
+    assert sites[0].pseudonym == pseudonym("G1")
+    assert (sites[0].easting_m, sites[0].northing_m) == pytest.approx(
+        box_centre_m(NODES["G1"].box())
+    )
+    assert sites[0].half_width_m == box_half_width_m(bits, latitude_i / 1e7)
+    assert sites[0].half_width_m < box_half_width_m(WIDE_BITS, latitude_i / 1e7)
+
+
+def test_a_node_whose_only_boxes_lie_outside_the_msa_has_no_usable_position() -> None:
+    rows = [position_row(name, NODES[name].box()) for name in ("A", "B", "C", "G1", "G2")]
+    rows.append(position_row("G3", NODES["G3"].box(east_shift_m=OUTSIDE_MSA_SHIFT_M)))
+    found = CaptureLinks(SELECTED, {}, node_positions(rows, msa_contains()), 0, 0)
+    with pytest.raises(SelectionError, match="a node of a pair has no usable position"):
+        select(found, 3)
+
+
 def test_refuses_a_selected_node_that_sent_two_boxes_without_naming_it() -> None:
     moved = FakeNode("A", 0x21, 726_500, 4_286_500, 16)
     boxes = frozenset({Box(*moved.box()), Box(*moved.box(east_shift_m=2_000))})
@@ -401,7 +456,9 @@ def test_refuses_a_selected_node_that_sent_two_boxes_without_naming_it() -> None
     )
     with pytest.raises(SelectionError) as refused:
         select(found, 3)
-    assert "the both_ends_relayer sent 2 boxes" in str(refused.value)
+    assert "the both_ends_relayer's 2 usable boxes in the MSA do not all overlap" in str(
+        refused.value
+    )
     assert pseudonym("A") not in str(refused.value)
 
 
