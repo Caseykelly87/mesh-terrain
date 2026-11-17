@@ -17,9 +17,11 @@ from engine_inputs_fixture import (
     DEM_SNAPSHOT_ID,
     NODES,
     SNAPSHOT_ID,
+    box_centre_m,
     build_capture,
     build_dem,
     centre_m,
+    every_box,
 )
 from structlog.testing import capture_logs
 
@@ -58,9 +60,9 @@ def run(tmp_path: Path, expect_pairs: str = "5", out: Path | None = None) -> int
 
 
 def coordinates_in(text: str) -> list[str]:
-    """Any fixture node's box centre, in metres or 1e-7 degrees, or a St. Louis degree value."""
-    numbers = [f"{value:.0f}" for name in NODES for value in centre_m(name)]
-    numbers += [str(part) for node in NODES.values() for part in node.box()[:2]]
+    """Any box centre the fixture can send, in metres or 1e-7 degrees, or a St. Louis degree."""
+    numbers = [f"{value:.0f}" for box in every_box() for value in box_centre_m(box)]
+    numbers += [str(part) for box in every_box() for part in box[:2]]
     found = [number for number in numbers if number in text]
     return found + re.findall(r"-?\b(?:38|90)\.\d+", text)
 
@@ -227,6 +229,8 @@ def test_a_dropped_selected_pair_stops_the_run_before_any_write(
     assert [text for text in lines if text.startswith("dropped")] == [names(line)]
     rule = next(index for index, text in enumerate(lines) if text.startswith(BUSIEST_RULE_LINE))
     assert (lines.index(names(line)) < rule) is before_selection
+    if options.get("g3_at_edge"):
+        assert re.search(rf"^{pseudonym('G3')} busy_pair_gateway: .*extent fail$", printed, re.M)
     assert "refused, nothing written: selected pairs dropped" in printed
     assert not any(text.startswith("counts for") for text in lines)
     assert coordinates_in(printed + repr(events)) == []
