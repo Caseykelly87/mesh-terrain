@@ -45,6 +45,7 @@ log = structlog.get_logger(component="ingester.link_pairs")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SPIKE_DIR = REPO_ROOT / "docs" / "adr" / "0003-spike"
+SPIKE_SCRIPTS = ("analyze.py", "figures.py")
 DELIVERY_FOLDER = "mqtt_message/"
 COLUMNS = [
     "received_at", "topic", "decode_status", "gateway_pseudonym", "gateway_low_byte",
@@ -59,6 +60,10 @@ PRECISE_BITS = 20
 # The two spike runs whose pairs make the union (docs/measurements-2026-11-08.md).
 RUNS = {"public": "public_full", "meshstl": "meshstl_24h"}
 MSA_GEOID = "41180"
+
+
+class SelectionError(Exception):
+    """Engine inputs are refused: the snapshot, spike scripts or output folder do not allow them."""
 
 
 class Box(NamedTuple):
@@ -164,6 +169,9 @@ def capture_links(rows: Sequence[dict[str, Any]]) -> CaptureLinks:
 
     Returns:
         The pairs in a stable order, the counts per run, and the positions.
+
+    Raises:
+        SelectionError: if the spike scripts are not in the checkout.
     """
     figures = _spike()
     ids = StandIns()
@@ -222,26 +230,42 @@ class StandIns:
         return self.ids[pseudonym]
 
 
-def spike_box_half_width_m(precision_bits: int, latitude_deg: float) -> float:
-    """Half the side of the square that holds a position box, metres: analyze.py's larger half.
+def box_half_width_m(precision_bits: int, latitude_deg: float) -> float:
+    """The one half-width a layer carries for a position box, metres.
 
-    analyze.box_half_width_m gives the box's north-south and east-west
-    half-widths; a square of the larger one holds the whole box, so a layer
-    that carries one half-width does not make a position sharper than sent.
-    In EPSG:26915 the box is turned by the grid convergence, about 1.6 degrees
-    at tile x72y429, so its corners reach past the square by up to about 2
-    percent of the half-width.
+    The rule is waiting on Casey (PR #49): the options are the larger half,
+    the east-west half, or a rectangle in the engine. Until he answers it is
+    the larger of analyze.box_half_width_m's north-south and east-west halves,
+    which is always the north-south half, so latitude, which only narrows the
+    east-west half, has no effect on the value at present. A square of that
+    half-width holds the box in degrees; in EPSG:26915 the box is turned by the
+    grid convergence, about 1.6 degrees at tile x72y429, so its corners reach
+    past the square by up to about 2 percent of the half-width. This function
+    is the only place the rule is written.
 
     Args:
         precision_bits: Bits of the 32-bit integer degrees the node kept.
         latitude_deg: Latitude of the box centre, degrees (EPSG:4326).
+
+    Returns:
+        The half-width in metres.
     """
     north_south_m, east_west_m = _spike().az.box_half_width_m(precision_bits, latitude_deg)
     return float(max(north_south_m, east_west_m))
 
 
 def _spike() -> ModuleType:
-    """The spike's figures module, which imports analyze.py as `az`."""
+    """The spike's figures module, which imports analyze.py as `az`.
+
+    Raises:
+        SelectionError: if the spike scripts are not in the checkout.
+    """
+    missing = [name for name in SPIKE_SCRIPTS if not (SPIKE_DIR / name).is_file()]
+    if missing:
+        raise SelectionError(
+            f"{', '.join(missing)} not found in {SPIKE_DIR}; the pair rules run the ADR 0003 "
+            "spike's scripts, so the command runs from a full checkout"
+        )
     # The spike folder holds a capture.py and other plain module names, so it
     # is on the path only while figures and analyze are imported.
     added = str(SPIKE_DIR) not in sys.path
