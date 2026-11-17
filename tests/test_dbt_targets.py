@@ -102,8 +102,10 @@ def variable_assignments(makefile: str) -> list[tuple[str, str]]:
     `export`, `override` or `private` prefix, after a target as a
     target-specific variable, across backslash-continued lines, and
     `define` blocks up to `endef`, each indented with spaces or not. It does
-    not see a variable set inside `$(eval ...)`, in an included file, or
-    under a computed name such as `$(PREFIX)_FLAG`, and `references` does not
+    not see a variable set inside `$(eval ...)`, in an included file, under a
+    computed name such as `$(PREFIX)_FLAG`, or on a tab-indented line inside
+    `ifeq ... endif` after a variable definition, which make reads as an
+    assignment and the scan skips as a recipe line; and `references` does not
     see one read through `$(value FLAG)`.
     """
     joined = makefile.replace("\\\n", " ")
