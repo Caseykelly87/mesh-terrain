@@ -1,6 +1,6 @@
 # ADR 0003: Resolve links from relay_node on radio receipts, take positions from the MeshSTL broker under a stationarity window, and keep the MSA
 
-Date: 2026-10-22, final numbers 2026-10-30, accepted 2026-10-31, area and position source amended 2026-11-08, stationarity rule amended 2026-11-17
+Date: 2026-10-22, final numbers 2026-10-30, accepted 2026-10-31, area and position source amended 2026-11-08, stationarity rule and link rules amended 2026-11-17
 Status: accepted
 
 Amended 2026-11-08 by Casey's scope change (see Decision and Consequences): the widening trigger is retired, the position source is further MeshSTL captures under his approval rather than a standing subscription, and the data is a single capture from 2026-10-22 to 2026-10-25, snapshot `meshtastic-capture-2026-10-22` (ADR 0005).
@@ -29,7 +29,7 @@ Terms:
 - precision_bits: how many of the 32 bits of a position's integer latitude and longitude the node keeps. At St. Louis, 16 bits is a box of plus or minus 365 m north-south, 13 bits plus or minus 2.9 km. A position box is that square; two boxes overlap when they share ground, and then the distance is a range from 0 m to the larger box's diagonal.
 - stationary node: a node whose every position in the capture is the same box. Since 2026-11-17 (Overlap amendment): a node whose usable positions inside the MSA, from either broker, all overlap one another, placed at its smallest box. The capture stands in for the trailing 7-day window the warehouse applies (with one capture, the window is the capture), but the spike also sees positions sent after a receipt, so it looks ahead; relayer candidates likewise come from the whole capture, not the trailing 24 hours.
 - gateway: a node connected to the internet that uploads what it hears. Its `rx_snr` and `rx_rssi` describe the last radio hop.
-- link-hour: one (relayer, gateway) pair in one clock hour that passes `lnk_01` to `lnk_06`: relayer resolved, both ends with a usable position (15 bits or more) within the position rule, different nodes, at least 3 packets, 500 m to 60 km on the median distance, signal in range.
+- link-hour: one (relayer, gateway) pair in one clock hour that passes `lnk_01` to `lnk_06`: relayer resolved, both ends with a usable position (15 bits or more) within the position rule, different nodes, at least 3 packets, 500 m to 60 km on the median distance, signal in range. As the spike computes it and as `lnk_04` and `lnk_05` say since 2026-11-17: each receipt must lie between 500 m and 60 km, only those count toward the 3 packets, and their median must reach 500 m.
 - topic root: the segment after `msh/US` in a topic, a state or community name (`MO`, `IL`, `MeshSTL`) or the protocol version `2` when the gateway sets none.
 - MSA and CBSA: a metropolitan statistical area is a Census grouping of counties around a city, identified by a core-based statistical area code; St. Louis is 41180, and the boundary is the merged seed `dbt/seeds/msa_boundary.csv`.
 
@@ -94,7 +94,7 @@ Casey accepted all four on 2026-10-31.
     - `b65382c2-4257-4139-8e70-2f6ac1f6652a.jsonl`, 4 580 568 bytes.
 
   No off-machine copy of the raw capture existed, so the raw capture no longer exists anywhere. The gate's raw-side figures, (b) and (c), can no longer be recomputed; the committed files under `docs/adr/0003-spike/reference/`, with `gate-2026-11-14.md`, are their record. After the deletion the snapshot passed its manifest check (0 problems, 195 data files).
-- `lnk_06` was widened on 2026-11-14 by Casey's decision (option A, PR #15 comments 6883121025 and 6883294736) to RSSI [-150, 0] dBm and SNR [-30, 20] dB. A receipt with either reading outside its range does not enter `fct_rx_observation`; impossible values (a corrupt RSSI, an SNR beyond what the chip can report, a value that is not a number) are treated as missing and fail the rule. Every figure in this ADR was computed with the spike's limits, [-140, 0] dBm and [-25, 15] dB, and the reproduction gate keeps those limits so the figures still reproduce. The reproduction from the snapshot was rerun with the new limits, using `reproduce_from_snapshot.py` with `analyze.RSSI_RANGE_DBM` and `analyze.SNR_RANGE_DB` set to them. One more receipt passes `lnk_06` in the public full run and in the two public regional-root runs. The other two public runs, the MeshSTL runs and every link-hour and headline figure do not change.
+- `lnk_06` was widened on 2026-11-14 by Casey's decision (option A, PR #15 comments 6883121025 and 6883294736) to RSSI [-150, 0] dBm and SNR [-30, 20] dB (since 2026-11-17, [-150, 0) dBm, an RSSI of 0 being treated as missing; Link-rule amendment below). A receipt with either reading outside its range does not enter `fct_rx_observation`; impossible values (a corrupt RSSI, an SNR beyond what the chip can report, a value that is not a number) are treated as missing and fail the rule. Every figure in this ADR was computed with the spike's limits, [-140, 0] dBm and [-25, 15] dB, and the reproduction gate keeps those limits so the figures still reproduce. The reproduction from the snapshot was rerun with the new limits, using `reproduce_from_snapshot.py` with `analyze.RSSI_RANGE_DBM` and `analyze.SNR_RANGE_DB` set to them. One more receipt passes `lnk_06` in the public full run and in the two public regional-root runs. The other two public runs, the MeshSTL runs and every link-hour and headline figure do not change.
   - In the public full run, receipts passing `lnk_06` go from 5 738 to 5 739, and the receipt goes on to the relayer-resolved and different-nodes steps (4 600 to 4 601 at each). Its relayer has no position in the capture, so it then fails `lnk_02` (2 325 to 2 326). The MSA relayer counts in `results.md` table (2a) and the no-position line each rise by one: 76 to 77 relayers, 33 to 34 with no decodable position, 31 to 32 of them sending other packets. The last funnel step stays at 277.
   - The two public regional-root runs show the same single receipt: relayer resolved goes from 4 597 to 4 598, their relayer count rises by one (74 to 75), and their last funnel step stays at 265.
 
@@ -130,3 +130,27 @@ What changes, against the rule of 2026-10-31:
 - Boxes that overlap count as one place; the node is placed at its smallest box. The firmware stores a reduced-precision position as the centre of its box (meshtastic/firmware `src/mesh/PositionPrecision.cpp`, `truncateCoordinate`, commit 647831b; MapReport the same in `src/mqtt/MQTT.cpp`), and boxes of different precisions are nested grid cells. Two boxes overlap when their stored coordinates differ by less than the sum of the two half-widths, 2^(31 - `precision_bits`) x 1e-7 degrees each, in latitude and in longitude, computed on the integer values; boxes that only touch do not overlap. Overlapping cells nest, so boxes that overlap one another all contain the smallest one, and that box is unique. The spike's `boxes_overlap` computes the same test in floating point, which counts some touching boxes as overlapping, so it is not the definition here.
 
 Effect on the figures: recomputed from the snapshot with `reproduce_from_snapshot.py`, the exact-box test replaced by the overlap rule and each broker's run reading that run's rows. The stationarity window row becomes 185 (4, 6, 6) at 500 m and 178 (3, 5, 5) at 3 km on the public broker's 63.53 hours, stays 228 (2, 2, 3) on its shared 24 hours, and becomes 617 (6, 6, 7) at 500 m on MeshSTL, with 309 (4, 4, 5) at 3 km unchanged. The 30-minute and gateway-only rows do not change. Stationary usable MSA nodes rise from 35 to 45 of 58 on the public broker's full run, from 25 to 35 of 41 in its shared 24 hours, and from 29 to 41 of 47 on MeshSTL. Of the 22 nodes added in the two full runs, 15 had one usable box with only coarse boxes beside it and 7 had usable boxes nested inside one another; none was added because of a box outside the MSA. The both-ends pairs at 500 m become public 6, MeshSTL 7, shared 5, union 8. No decision changes: the stationarity window gives more link-hours than the 30-minute rule everywhere, 185 against 100 on the public broker and 617 against 469 on MeshSTL at 500 m; MeshSTL still gives more than the public broker; and the 3 km figures are 178 public and 309 MeshSTL. The deduplicated table above keeps the figures of the rule of 2026-10-31.
+
+## Link-rule amendment, 2026-11-17
+
+Casey's answers on issue #55 (comment 6959184944), verbatim, settle the points the conformance fixture needs before its expected outputs are written by hand:
+
+> Q1 agree: item 4 implements the contract as written on the merged snapshot; the spike's per-run figures stay the record, and the pair count is whatever the contract gives.
+> Q2 agree: overlapping relayer and gateway boxes fail lnk_05 by the integer test.
+> Q3 agree: per receipt first, then the median.
+> Q4 geodesic (::geography), not EPSG:26915: exact, matches the spike, and avoids the UTM 15/16 boundary through Metro East. State it in lnk_05.
+> Q5 agree: nearest in time, the earlier on a tie, 30 minutes and 7 days inclusive.
+> Q6 drop the link-hour when an end used more than one box within it, and count those hours in mart_data_quality. This matches the per-pair rule for moving nodes in the engine.
+> Q7 agree: lnk_06 reads [-150, 0) dBm, 0 treated as missing.
+> Q8 agree, all three.
+
+The questions are in issue #55's body, section 2. Q8's three items are the `percentile_cont(0.5)` median, the first copy kept in `stg_packet` by `received_at`, and the inclusive 7-day boundary, written under Q5.
+
+What changes in the contract:
+- `ing_06`: staging keeps the first copy of a packet for one gateway by `received_at`.
+- `lnk_02`: the fallback takes the nearest position, the earlier on a tie, and 30 minutes and 7 days are inclusive. A link-hour where an end used more than one box is dropped and counted in `mart_data_quality`.
+- `lnk_04`: packets are counted after `lnk_05`'s per-receipt test, and medians are `percentile_cont(0.5)` over those receipts.
+- `lnk_05`: each receipt's distance is the WGS84 geodesic. A receipt passes between 500 m and 60 000 m inclusive, and only if the two ends' boxes do not overlap. The link-hour's median must reach 500 m.
+- `lnk_06`: RSSI in [-150, 0) dBm.
+
+The spike's figures in this ADR are not recomputed: per Q1 they stay the record, computed by the spike's own rules (run by run, looking ahead, floating-point overlap, the geodesic distance, the older `lnk_06` limits).
