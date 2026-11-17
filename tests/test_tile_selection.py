@@ -187,6 +187,14 @@ def test_a_gateway_in_two_selected_pairs_is_one_site_with_the_both_ends_role() -
     assert receiver.pseudonym == pseudonym("A")
 
 
+def test_two_gateway_only_pairs_sharing_a_gateway_give_one_site() -> None:
+    found = links(pair("A", "G1", 2), pair("B", "G2", 5), pair("C", "G2", 4))
+    assert site_roles(select(found, 3)) == [
+        (pseudonym("G1"), "both_ends_gateway"),
+        (pseudonym("G2"), "gateway_only_gateway"),
+    ]
+
+
 def test_sites_are_the_touching_gateways_when_the_busiest_pair_is_outside_the_tile() -> None:
     """D to E, outside the tile, is the busiest pair by link-hours and selects nothing."""
     found = links(*SELECTED, pair("D", "E", 9))
