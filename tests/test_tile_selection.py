@@ -259,23 +259,33 @@ def test_a_placed_node_failing_the_dem_check_drops_every_pair_it_is_in() -> None
 
 
 def test_straddle_drops_name_the_kind_when_the_tile_check_holds() -> None:
-    assert straddle_drops(links(*SELECTED, nodes=straddling("G2")), TILE) == (
+    assert straddle_drops(links(*SELECTED, nodes=straddling("G2")), TILE, 3) == (
         DroppedPair(pair("B", "G2", 5), BUSIEST_PAIR, (("gateway", STRADDLES),)),
     )
 
 
-@pytest.mark.parametrize(("name", "dropped"), [("D", pair("D", "E", 1)), ("B", SELECTED[1])])
+@pytest.mark.parametrize(
+    ("name", "dropped", "end", "expect_pairs"),
+    [
+        # A fourth touching pair.
+        ("D", pair("D", "E", 1), "relayer", 4),
+        # Two pairs with both ends in the tile.
+        ("B", SELECTED[1], "relayer", 4),
+        # The checks would pass but for the pair count.
+        ("G2", SELECTED[1], "gateway", 8),
+    ],
+)
 def test_straddle_drops_leave_the_kind_open_when_the_tile_check_would_refuse(
-    name: str, dropped: PairActivity
+    name: str, dropped: PairActivity, end: str, expect_pairs: int
 ) -> None:
     found = links(*SELECTED, pair("D", "E", 1), nodes=straddling(name))
-    assert straddle_drops(found, TILE) == (
-        DroppedPair(dropped, KIND_NOT_DETERMINED, (("relayer", STRADDLES),)),
+    assert straddle_drops(found, TILE, expect_pairs) == (
+        DroppedPair(dropped, KIND_NOT_DETERMINED, ((end, STRADDLES),)),
     )
 
 
 def test_straddle_drops_leave_the_dem_edge_check_to_the_selection() -> None:
-    assert straddle_drops(links(*SELECTED, nodes=g3_at_edge()), TILE) == ()
+    assert straddle_drops(links(*SELECTED, nodes=g3_at_edge()), TILE, 3) == ()
 
 
 def test_a_pair_failing_at_both_ends_names_both() -> None:

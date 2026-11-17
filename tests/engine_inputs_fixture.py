@@ -81,9 +81,21 @@ class FakeNode:
 
 def centre_m(name: str) -> tuple[float, float]:
     """The quantised box centre of a fixture node in EPSG:26915 metres."""
-    latitude_i, longitude_i, _ = NODES[name].box()
+    return box_centre_m(NODES[name].box())
+
+
+def box_centre_m(box: tuple[int, int, int]) -> tuple[float, float]:
+    """The centre of a (latitude_i, longitude_i, precision_bits) box in EPSG:26915 metres."""
+    latitude_i, longitude_i, _ = box
     easting_m, northing_m = _TO_METRES.transform(longitude_i / 1e7, latitude_i / 1e7)
     return float(easting_m), float(northing_m)
+
+
+def every_box() -> list[tuple[int, int, int]]:
+    """Every box the fixture can send: each node's own, the straddlers' second, G3's edge box."""
+    boxes = [node.box() for node in NODES.values()]
+    boxes += [NODES[name].box(*shift) for name, shift in STRADDLE_SHIFTS_M.items()]
+    return [*boxes, NODES["G3"].box(east_shift_m=G3_EDGE_SHIFT_M)]
 
 
 def quantise(value: int, bits: int) -> int:
