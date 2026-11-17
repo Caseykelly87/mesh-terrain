@@ -231,17 +231,17 @@ class StandIns:
 
 
 def box_half_width_m(precision_bits: int, latitude_deg: float) -> float:
-    """The one half-width a layer carries for a position box, metres.
+    """The one half-width a layer carries for a position box, metres: an inscribed square.
 
-    The rule is waiting on Casey (PR #49): the options are the larger half,
-    the east-west half, or a rectangle in the engine. Until he answers it is
-    the larger of analyze.box_half_width_m's north-south and east-west halves,
-    which is always the north-south half, so latitude, which only narrows the
-    east-west half, has no effect on the value at present. A square of that
-    half-width holds the box in degrees; in EPSG:26915 the box is turned by the
-    grid convergence, about 1.6 degrees at tile x72y429, so its corners reach
-    past the square by up to about 2 percent of the half-width. This function
-    is the only place the rule is written.
+    Casey's decision 1 (b) on issue #44 for the x72y429 run: "an inscribed
+    square that trims the long side". The value is the smaller of
+    analyze.box_half_width_m's north-south and east-west halves, which at any
+    latitude away from the equator is the east-west half, so the engine's
+    square lies inside the reported box and leaves out the strips at its north
+    and south ends. In EPSG:26915 the box is also turned by the grid
+    convergence, about 1.6 degrees at x72y429. Drawing the real rectangle with
+    that rotation is a later unit (Casey's (c)); this function is the only
+    place the rule is written.
 
     Args:
         precision_bits: Bits of the 32-bit integer degrees the node kept.
@@ -251,7 +251,7 @@ def box_half_width_m(precision_bits: int, latitude_deg: float) -> float:
         The half-width in metres.
     """
     north_south_m, east_west_m = _spike().az.box_half_width_m(precision_bits, latitude_deg)
-    return float(max(north_south_m, east_west_m))
+    return float(min(north_south_m, east_west_m))
 
 
 def _spike() -> ModuleType:
