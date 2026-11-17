@@ -5,9 +5,9 @@ yes or no and the distance from the path to the nearest tall cell, or the
 section says the run has no real receiver; grid paths are counted per site.
 The file holds no coordinate of any node, real or made up. Box half-widths
 are listed because the engine's draws move each end inside its box; they
-come from position precision, so the file and the
-printed summary are read locally only and never posted, and issue #44 gets
-counts only (the lead's rule; the repository is public).
+come from position precision, so the file and the printed summary are read
+locally only and never posted, and issue #44 gets counts only (the lead's
+rule; the repository is public).
 """
 
 from collections.abc import Sequence
