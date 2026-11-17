@@ -81,6 +81,11 @@ def test_receipts_order_a_tie_on_link_hours_for_first_place() -> None:
     assert [found.relayer for found in busiest_two(pairs)] == ["r-b", "r-a"]
 
 
+def test_a_tie_for_first_on_both_keys_keeps_the_input_order() -> None:
+    pairs = [activity("a", 5, 5, 18), activity("b", 5, 6, 18), activity("c", 4, 4, 12)]
+    assert [found.relayer for found in busiest_two(pairs)] == ["r-a", "r-b"]
+
+
 @pytest.mark.parametrize(
     "other",
     [

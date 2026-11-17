@@ -117,7 +117,7 @@ def test_the_command_states_the_busiest_pair_rule(
     assert run(tmp_path) == 0
     assert (
         "busiest two pairs: by link-hours over both runs, ties broken by receipts in those "
-        "link-hours (Casey, 2026-11-16, Q2 (a))"
+        "link-hours (Casey, issue #44, engine_inputs Q2 (a), 2026-11-16)"
     ) in capsys.readouterr().out.splitlines()
 
 
