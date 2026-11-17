@@ -133,9 +133,11 @@ dbt-build: dbt-deps
 	$(DBT) build $(DBT_ARGS) --target dev_wh
 
 # The real raw, staging, core and analytics schemas. The lead's target only
-# (dbt/README.md); no agent's unit runs it.
+# (dbt/README.md); no agent's unit runs it. dbt refuses a run on prod without
+# the real_build variable, so DBT_TARGET=prod alone cannot start one; this is
+# the one recipe that passes it.
 dbt-build-real: dbt-deps
-	$(DBT) build $(DBT_ARGS) --target prod
+	$(DBT) build $(DBT_ARGS) --target prod --vars '{real_build: true}'
 
 check: env lint test dbt-build
 
