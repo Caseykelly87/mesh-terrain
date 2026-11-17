@@ -43,12 +43,13 @@ from ingester.link_pairs import CaptureLinks, SelectionError, capture_links, rea
 from ingester.settings import get_ingester_settings
 from ingester.tile_selection import (
     BUSIEST_RULE,
+    FAILS_DEM,
     LAYER_EPSG,
-    Extent,
+    STRADDLES,
     PlacedNode,
+    Selection,
     Tile,
     dem_extent,
-    inside_dem,
     pair_states,
     parse_tile,
     select_nodes,
@@ -102,27 +103,40 @@ def _print_tile(links: CaptureLinks, tile: Tile) -> dict[str, int]:
     return counts
 
 
-def _print_selection(nodes: list[PlacedNode], extent: Extent) -> list[bool]:
+def _print_selection(selection: Selection) -> None:
+    """Per placed node its DEM edge check, then one line per end that drops a pair."""
     print(f"busiest two pairs: {BUSIEST_RULE}")
-    verdicts = []
-    for node in nodes:
-        inside = inside_dem((node.easting_m, node.northing_m), node.half_width_m, extent)
-        verdicts.append(inside)
+    for node in selection.placed:
+        inside = selection.dem_check[node.pseudonym]
         print(
             f"{node.pseudonym} {node.role}: box half-width {node.half_width_m:.1f} m, "
             f"precise source {str(node.precise_source).lower()}, box plus 50 m inside the DEM "
             f"(engine rule): extent {'pass' if inside else 'fail'}"
         )
-    return verdicts
+    for dropped in selection.dropped:
+        pair = dropped.pair
+        for end, reason in dropped.reasons:
+            print(f"dropped {dropped.kind} {pair.relayer} to {pair.gateway}: {end} {reason}")
 
 
-def _print_counts(links: CaptureLinks, tile: dict[str, int], verdicts: list[bool]) -> None:
+def counts_line(links: CaptureLinks, tile: dict[str, int], selection: Selection) -> str:
+    """The one line for issue #44: counts only, no pseudonym.
+
+    A pair dropped for both reasons counts once in the pairs dropped and once
+    under each reason.
+    """
     pairs = links.pair_counts
-    print(
+    verdicts = [selection.dem_check[node.pseudonym] for node in selection.placed]
+    reasons = [
+        reason for dropped in selection.dropped for reason in {r for _, r in dropped.reasons}
+    ]
+    return (
         f"counts for issue #44: pairs public {pairs['public']}, MeshSTL {pairs['meshstl']}, "
         f"shared {pairs['shared']}, union {pairs['union']}; pairs touching the tile "
         f"{tile['touched']} (both ends {tile['both ends']}); nodes selected {len(verdicts)}; "
-        f"extent pass {sum(verdicts)}, fail {len(verdicts) - sum(verdicts)}"
+        f"extent pass {sum(verdicts)}, fail {len(verdicts) - sum(verdicts)}; pairs dropped "
+        f"{len(selection.dropped)} ({STRADDLES} {reasons.count(STRADDLES)}, "
+        f"{FAILS_DEM} {reasons.count(FAILS_DEM)})"
     )
 
 
@@ -268,11 +282,14 @@ def _run(args: argparse.Namespace) -> None:
     links = capture_links(rows)
     _print_pairs(links)
     counts = _print_tile(links, tile)
-    sites, receiver = select_nodes(links, tile, args.expect_pairs)
-    verdicts = _print_selection([*sites, receiver], extent)
+    selection = select_nodes(links, tile, args.expect_pairs, extent)
+    _print_selection(selection)
+    # Casey's stop for a dropped selected pair comes here, after the drop lines
+    # and before anything with real positions is written.
+    sites, receiver = selection.layers()
     write_layers(args.out, sites, receiver)
     print(f"wrote {SITES_FILE} ({len(sites)} sites) and {RECEIVERS_FILE} (1 receiver)")
-    _print_counts(links, counts, verdicts)
+    print(counts_line(links, counts, selection))
     print(NEVER_PUBLISH)
 
 
