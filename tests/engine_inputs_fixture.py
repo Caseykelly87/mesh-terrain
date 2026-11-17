@@ -14,13 +14,19 @@ The links, relayer to gateway (positions in EPSG:26915 before quantisation):
   `pos_03`).
 - B to G2, G2 inside the tile and B east of it, public, 4 link-hours, one of
   them carried by both brokers.
-- C to G3, G3 inside the tile 45 m from its east edge (its box plus 50 m
-  reaches outside the DEM) and C east of the tile, public, 3 link-hours.
+- C to G3, G3 inside the tile 300 m from its east edge and C east of the
+  tile, public, 3 link-hours. With `g3_at_edge`, G3 sends a box 45 m from the
+  edge instead, whose box plus 50 m reaches outside the DEM.
 - D to E, both east of the tile, public, 1 link-hour.
 - M to E, public, 1 link-hour; M sends two different boxes, so it is not
   stationary and its link rests on the 30-minute rule.
 - F to G1, MeshSTL; F sends only 13-bit positions (coarse), so it never makes a
   pair.
+
+With `straddler`, one node also sends a second box on the other side of the
+tile edge (`STRADDLE_SHIFTS_M`), as a MeshSTL row outside the MeshSTL run's
+window: neither spike run sees it, so the pairs and their link-hours stay as
+above, while the node's boxes over the capture lie on both sides of the edge.
 """
 
 import hashlib
@@ -64,9 +70,11 @@ class FakeNode:
     def pseudonym(self) -> str:
         return hashlib.sha256(f"fixture-node-{self.name}".encode()).hexdigest()
 
-    def box(self, east_shift_m: float = 0.0) -> tuple[int, int, int]:
+    def box(self, east_shift_m: float = 0.0, north_shift_m: float = 0.0) -> tuple[int, int, int]:
         """(latitude_i, longitude_i, precision_bits) as firmware would send it."""
-        lon, lat = _TO_DEGREES.transform(self.easting_m + east_shift_m, self.northing_m)
+        lon, lat = _TO_DEGREES.transform(
+            self.easting_m + east_shift_m, self.northing_m + north_shift_m
+        )
         bits = self.precision_bits
         return quantise(round(lat * 1e7), bits), quantise(round(lon * 1e7), bits), bits
 
@@ -91,7 +99,7 @@ NODES = {
         FakeNode("A", 0x21, 726_500, 4_286_500, 16),
         FakeNode("G2", 0x12, 722_000, 4_283_000, 18),
         FakeNode("B", 0x22, 735_000, 4_283_000, 16),
-        FakeNode("G3", 0x13, 729_950, 4_288_000, 18),
+        FakeNode("G3", 0x13, 729_700, 4_288_000, 18),
         FakeNode("C", 0x23, 738_000, 4_288_000, 16),
         FakeNode("D", 0x24, 740_000, 4_295_000, 16),
         FakeNode("E", 0x14, 745_000, 4_295_000, 16),
@@ -99,6 +107,12 @@ NODES = {
         FakeNode("F", 0x26, 723_000, 4_287_000, 13),
     )
 }
+# East and north shifts, metres, that put a node's second box across the
+# tile edge: G2 (a busiest pair's gateway) and A (the both-ends pair's relayer)
+# east of the tile, D (an unselected pair's relayer) inside it.
+STRADDLE_SHIFTS_M = {"G2": (10_000.0, 0.0), "A": (5_000.0, 0.0), "D": (-15_000.0, -10_000.0)}
+# G3's box 45 m from the tile's east edge, as the fixture first placed it.
+G3_EDGE_SHIFT_M = 250.0
 PUBLIC = {"seen_public": True, "seen_meshstl": False}
 MESHSTL = {"seen_public": False, "seen_meshstl": True}
 BOTH = {"seen_public": True, "seen_meshstl": True}
@@ -177,7 +191,7 @@ class RowMaker:
         )
 
 
-def _positions(rows: RowMaker, moved_a: bool, one_coordinate: bool) -> None:
+def _positions(rows: RowMaker, moved_a: bool, one_coordinate: bool, g3_at_edge: bool) -> None:
     n = NODES
     for when in (at(24, 1), at(24, 4)):
         rows.position(n["G1"], n["G1"], when, MESHSTL, n["G1"].box())
@@ -190,7 +204,9 @@ def _positions(rows: RowMaker, moved_a: bool, one_coordinate: bool) -> None:
         rows.position(n["A"], n["G2"], at(23, 9), PUBLIC, n["A"].box(east_shift_m=2_000))
     for name, gateway in (("G2", "G2"), ("B", "G2")):
         rows.position(n[name], n[gateway], at(24, 1, 50), BOTH, n[name].box())
-    for name, gateway in (("G3", "G3"), ("C", "G3"), ("D", "E"), ("E", "E")):
+    g3_shift_m = G3_EDGE_SHIFT_M if g3_at_edge else 0.0
+    rows.position(n["G3"], n["G3"], at(23, 10), PUBLIC, n["G3"].box(east_shift_m=g3_shift_m))
+    for name, gateway in (("C", "G3"), ("D", "E"), ("E", "E")):
         rows.position(n[name], n[gateway], at(23, 10), PUBLIC, n[name].box())
     rows.position(n["M"], n["E"], at(23, 15, 20), PUBLIC, n["M"].box())
     rows.position(n["M"], n["E"], at(23, 20), PUBLIC, n["M"].box(east_shift_m=1_700))
@@ -209,18 +225,38 @@ def _links(rows: RowMaker) -> None:
     rows.receipts(n["M"], n["E"], at(23, 15), PUBLIC)
 
 
-def build_capture(root: Path, *, moved_a: bool = False, one_coordinate: bool = True) -> Path:
+def _straddle(rows: RowMaker, name: str) -> None:
+    """A second box across the tile edge, after the MeshSTL run's window closes."""
+    node = NODES[name]
+    east_m, north_m = STRADDLE_SHIFTS_M[name]
+    rows.position(node, node, at(25, 1), MESHSTL, node.box(east_m, north_m))
+
+
+def build_capture(
+    root: Path,
+    *,
+    moved_a: bool = False,
+    one_coordinate: bool = True,
+    g3_at_edge: bool = False,
+    straddler: str | None = None,
+) -> Path:
     """Write the synthetic capture snapshot under root and return its finished folder.
 
     Args:
         root: The snapshots folder.
         moved_a: Also give A a second box on the public broker, outside the
-            MeshSTL window, so A is stationary in the MeshSTL run but not over
-            the capture.
+            MeshSTL window, 2 km east and still inside the tile, so A is
+            stationary in the MeshSTL run but not over the capture.
         one_coordinate: Include A's Position with no latitude.
+        g3_at_edge: Place G3 45 m from the tile's east edge, where its box plus
+            50 m reaches outside the DEM.
+        straddler: A key of STRADDLE_SHIFTS_M: that node also sends a box on
+            the other side of the tile edge.
     """
     rows = RowMaker()
-    _positions(rows, moved_a, one_coordinate)
+    _positions(rows, moved_a, one_coordinate, g3_at_edge)
+    if straddler is not None:
+        _straddle(rows, straddler)
     _links(rows)
     partial = common.start_snapshot(root, SNAPSHOT_ID)
     by_hour: dict[datetime, list[dict[str, Any]]] = {}

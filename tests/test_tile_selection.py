@@ -1,4 +1,4 @@
-"""The tile's nodes, the busiest-pair rule and the DEM extent rule, on invented nodes.
+"""The tile's nodes, the busiest-pair rule, the DEM extent rule and pair drops, on invented nodes.
 
 No test reads the real snapshot.
 """
@@ -6,7 +6,13 @@ No test reads the real snapshot.
 from pathlib import Path
 
 import pytest
-from engine_inputs_fixture import NODES, FakeNode
+from engine_inputs_fixture import (
+    DEM_BOUNDS_M,
+    G3_EDGE_SHIFT_M,
+    NODES,
+    STRADDLE_SHIFTS_M,
+    FakeNode,
+)
 
 from engine.config import SnapshotIds
 from engine.errors import ConfigError
@@ -16,11 +22,21 @@ from engine.snapshots import resolve_snapshots
 from engine.terrain_build import check_covers
 from ingester.link_pairs import Box, CaptureLinks, NodePositions, PairActivity, SelectionError
 from ingester.tile_selection import (
+    BOTH_ENDS_PAIR,
+    BUSIEST_PAIR,
+    FAILS_DEM,
+    OTHER_PAIR,
+    STRADDLES,
+    DroppedPair,
+    Selection,
     busiest_two,
     dem_extent,
+    dropped_pairs,
     inside_dem,
+    pair_states,
     parse_tile,
     select_nodes,
+    tile_counts,
 )
 from terrain.draws import EndpointBox
 
@@ -51,6 +67,34 @@ def links(*pairs: PairActivity, nodes: dict[str, NodePositions] | None = None) -
 
 def activity(name: str, union: int, total: int, receipts: int) -> PairActivity:
     return PairActivity(f"r-{name}", f"g-{name}", total, 0, union, receipts)
+
+
+def two_boxes(name: str, east_m: float, north_m: float) -> dict[str, NodePositions]:
+    """The node at its own box and at a second box shifted by the given metres."""
+    node = NODES[name]
+    boxes = frozenset({Box(*node.box()), Box(*node.box(east_m, north_m))})
+    return {node.pseudonym: NodePositions(boxes, False)}
+
+
+def straddling(name: str) -> dict[str, NodePositions]:
+    """The node with a second box across the tile edge, as the capture fixture sends it."""
+    return two_boxes(name, *STRADDLE_SHIFTS_M[name])
+
+
+def g3_at_edge() -> dict[str, NodePositions]:
+    """G3 alone at a box whose run grid reaches past the DEM's east edge."""
+    box = Box(*NODES["G3"].box(east_shift_m=G3_EDGE_SHIFT_M))
+    return {pseudonym("G3"): NodePositions(frozenset({box}), False)}
+
+
+def select(found: CaptureLinks, expect_pairs: int) -> Selection:
+    return select_nodes(found, TILE, expect_pairs=expect_pairs, extent=DEM_BOUNDS_M)
+
+
+# The fixture's three selected pairs: A to G1 with both ends in the tile, and
+# B to G2 and C to G3, the two busiest, with only their gateway in it.
+SELECTED = (pair("A", "G1", 2), pair("B", "G2", 5), pair("C", "G3", 4))
+KINDS = {SELECTED[0]: BOTH_ENDS_PAIR, SELECTED[1]: BUSIEST_PAIR, SELECTED[2]: BUSIEST_PAIR}
 
 
 def test_tile_bounds_follow_the_usgs_naming() -> None:
@@ -113,7 +157,7 @@ def test_busiest_two_refuses_fewer_than_two_pairs() -> None:
 
 def test_a_gateway_in_two_selected_pairs_is_one_site_with_the_both_ends_role() -> None:
     found = links(pair("A", "G1", 2), pair("B", "G1", 5), pair("C", "G3", 4), pair("D", "E", 1))
-    sites, receiver = select_nodes(found, TILE, expect_pairs=4)
+    sites, receiver = select(found, 4).layers()
     assert [(site.pseudonym, site.role) for site in sites] == [
         (pseudonym("G1"), "both_ends_gateway"),
         (pseudonym("G3"), "busy_pair_gateway"),
@@ -123,43 +167,134 @@ def test_a_gateway_in_two_selected_pairs_is_one_site_with_the_both_ends_role() -
 
 def test_refuses_fewer_than_two_pairs_to_rank() -> None:
     with pytest.raises(SelectionError, match="1 pairs; the selection needs two busy pairs"):
-        select_nodes(links(pair("A", "G1", 2)), TILE, expect_pairs=1)
+        select(links(pair("A", "G1", 2)), 1)
 
 
 def test_refuses_a_pair_node_without_a_usable_position() -> None:
     found = links(pair("A", "G1", 1), pair("F", "G2", 5), pair("C", "G3", 4))
     with pytest.raises(SelectionError, match="no usable position"):
-        select_nodes(found, TILE, expect_pairs=3)
+        select(found, 3)
 
 
-def test_refuses_a_node_with_positions_on_both_sides_of_the_tile_edge() -> None:
-    both_sides = frozenset({Box(*NODES["A"].box()), Box(*NODES["B"].box())})
-    found = links(
-        pair("A", "G1", 1),
-        pair("B", "G2", 5),
-        pair("C", "G3", 4),
-        nodes={pseudonym("A"): NodePositions(both_sides, False)},
+def test_a_straddling_node_counts_as_in_the_tile() -> None:
+    states = pair_states(links(*SELECTED, pair("D", "E", 1), nodes=straddling("D")), TILE)
+    assert states[pair("D", "E", 1)] == ("split", "out")
+    assert tile_counts(states) == {
+        "both ends": 1,
+        "only the gateway end": 2,
+        "only the relayer end": 1,
+        "touched": 4,
+    }
+
+
+def test_a_selection_with_no_drop_gives_the_layers() -> None:
+    selection = select(links(*SELECTED, pair("D", "E", 1)), 4)
+    assert selection.dropped == ()
+    assert all(selection.dem_check.values())
+    sites, receiver = selection.layers()
+    assert [site.pseudonym for site in sites] == [pseudonym(n) for n in ("G1", "G2", "G3")]
+    assert receiver.pseudonym == pseudonym("A")
+
+
+def test_a_straddling_busiest_gateway_is_counted_then_its_pair_is_dropped() -> None:
+    selection = select(links(*SELECTED, nodes=straddling("G2")), 3)
+    assert selection.dropped == (
+        DroppedPair(pair("B", "G2", 5), BUSIEST_PAIR, (("gateway", STRADDLES),)),
     )
-    with pytest.raises(SelectionError, match="both sides of the tile edge"):
-        select_nodes(found, TILE, expect_pairs=3)
+    assert pseudonym("G2") not in {node.pseudonym for node in selection.placed}
+
+
+def test_a_straddling_both_ends_relayer_is_counted_then_its_pair_is_dropped() -> None:
+    selection = select(links(*SELECTED, nodes=straddling("A")), 3)
+    assert selection.dropped == (
+        DroppedPair(pair("A", "G1", 2), BOTH_ENDS_PAIR, (("relayer", STRADDLES),)),
+    )
+
+
+def test_a_selected_gateway_failing_the_dem_check_drops_its_pair() -> None:
+    selection = select(links(*SELECTED, nodes=g3_at_edge()), 3)
+    assert selection.dem_check[pseudonym("G3")] is False
+    assert selection.dropped == (
+        DroppedPair(pair("C", "G3", 4), BUSIEST_PAIR, (("gateway", FAILS_DEM),)),
+    )
+
+
+@pytest.mark.parametrize("nodes", [straddling("G2"), straddling("A"), g3_at_edge()])
+def test_a_dropped_selected_pair_stops_the_layers_without_naming_a_node(
+    nodes: dict[str, NodePositions],
+) -> None:
+    selection = select(links(*SELECTED, nodes=nodes), 3)
+    with pytest.raises(SelectionError) as refused:
+        selection.layers()
+    assert "selected pairs dropped" in str(refused.value)
+    assert "engine_inputs Q1 (a)" in str(refused.value)
+    assert not any(node.pseudonym in str(refused.value) for node in NODES.values())
+
+
+def test_an_unselected_pair_with_a_straddling_node_is_dropped_alone() -> None:
+    states = pair_states(links(*SELECTED, pair("D", "E", 1), nodes=straddling("D")), TILE)
+    dem_check = {pseudonym(name): True for name in ("G1", "G2", "G3", "A")}
+    assert dropped_pairs(states, KINDS, dem_check) == (
+        DroppedPair(pair("D", "E", 1), OTHER_PAIR, (("relayer", STRADDLES),)),
+    )
+
+
+def test_a_node_shared_with_a_dropped_pair_stays_in_the_kept_pair() -> None:
+    kept, dropped = pair("A", "G1", 2), pair("D", "G1", 1)
+    states = pair_states(links(kept, dropped, nodes=straddling("D")), TILE)
+    found = dropped_pairs(states, {kept: BOTH_ENDS_PAIR}, {pseudonym("G1"): True})
+    assert found == (DroppedPair(dropped, OTHER_PAIR, (("relayer", STRADDLES),)),)
+
+
+def test_a_placed_node_failing_the_dem_check_drops_every_pair_it_is_in() -> None:
+    selected, other = pair("C", "G3", 4), pair("D", "G3", 1)
+    states = pair_states(links(selected, other, nodes=g3_at_edge()), TILE)
+    found = dropped_pairs(states, {selected: BUSIEST_PAIR}, {pseudonym("G3"): False})
+    assert found == (
+        DroppedPair(selected, BUSIEST_PAIR, (("gateway", FAILS_DEM),)),
+        DroppedPair(other, OTHER_PAIR, (("gateway", FAILS_DEM),)),
+    )
+
+
+def test_a_pair_failing_at_both_ends_names_both() -> None:
+    both = pair("A", "G3", 2)
+    states = pair_states(links(both, nodes={**straddling("A"), **g3_at_edge()}), TILE)
+    found = dropped_pairs(states, {both: BOTH_ENDS_PAIR}, {pseudonym("G3"): False})
+    assert found == (
+        DroppedPair(both, BOTH_ENDS_PAIR, (("relayer", STRADDLES), ("gateway", FAILS_DEM))),
+    )
 
 
 def test_refuses_a_tile_without_exactly_one_both_ends_pair() -> None:
     found = links(pair("B", "G2", 5), pair("C", "G3", 4), pair("D", "E", 1))
     with pytest.raises(SelectionError, match="0 pairs have both ends in x72y429"):
-        select_nodes(found, TILE, expect_pairs=3)
+        select(found, 3)
 
 
 def test_refuses_busy_pairs_that_are_not_gateway_only_pairs_of_the_tile() -> None:
     found = links(pair("A", "G1", 6), pair("B", "G2", 5), pair("C", "G3", 1))
     with pytest.raises(SelectionError, match="not gateway-only pairs"):
-        select_nodes(found, TILE, expect_pairs=3)
+        select(found, 3)
 
 
 def test_refuses_other_than_three_pairs_touching_the_tile() -> None:
     found = links(pair("A", "G1", 1), pair("B", "G2", 5), pair("C", "G3", 4), pair("A", "E", 2))
     with pytest.raises(SelectionError, match="pairs touching x72y429 are not 3"):
-        select_nodes(found, TILE, expect_pairs=4)
+        select(found, 4)
+
+
+def test_an_unselected_pair_with_a_straddling_node_fails_the_touching_count() -> None:
+    """Counted as in the tile, the straddling node makes a fourth touching pair."""
+    found = links(*SELECTED, pair("D", "E", 1), nodes=straddling("D"))
+    with pytest.raises(SelectionError, match="pairs touching x72y429 are not 3"):
+        select(found, 4)
+
+
+def test_a_straddling_busiest_relayer_fails_the_one_both_ends_pair_check() -> None:
+    """Counted as in the tile, the relayer gives a busiest pair both ends in it."""
+    found = links(*SELECTED, nodes=two_boxes("B", -10_000.0, 0.0))
+    with pytest.raises(SelectionError, match="2 pairs have both ends in x72y429, not one"):
+        select(found, 3)
 
 
 def test_refuses_a_selected_node_that_sent_two_boxes_without_naming_it() -> None:
@@ -172,7 +307,7 @@ def test_refuses_a_selected_node_that_sent_two_boxes_without_naming_it() -> None
         nodes={pseudonym("A"): NodePositions(boxes, False)},
     )
     with pytest.raises(SelectionError) as refused:
-        select_nodes(found, TILE, expect_pairs=3)
+        select(found, 3)
     assert "the both_ends_relayer sent 2 boxes" in str(refused.value)
     assert pseudonym("A") not in str(refused.value)
 
