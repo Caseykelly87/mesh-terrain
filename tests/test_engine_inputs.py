@@ -4,11 +4,13 @@ Every test runs on the synthetic capture and DEM in tests/engine_inputs_fixture.
 none reads the real snapshot.
 """
 
+import math
 import re
 from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
+import pyarrow.parquet as pq
 import pytest
 from engine_fixture import no_logger_caching
 from engine_inputs_fixture import (
@@ -30,6 +32,12 @@ _ = no_logger_caching
 
 def pseudonym(name: str) -> str:
     return NODES[name].pseudonym
+
+
+def east_west_half_m(name: str) -> float:
+    """The east-west half of a node's box: Casey's inscribed square (issue #44, 1 (b))."""
+    latitude_i, _, bits = NODES[name].box()
+    return 2 ** (31 - bits) * 1e-7 * 111_320.0 * math.cos(math.radians(latitude_i / 1e7))
 
 
 def run(tmp_path: Path, expect_pairs: str = "5", out: Path | None = None) -> int:
@@ -75,14 +83,25 @@ def test_command_writes_the_layers(
             name = next(key for key, node in NODES.items() if node.pseudonym == row_id)
             assert (point.x, point.y) == pytest.approx(centre_m(name), abs=1e-6)
     assert str(sites["box_half_width_m"].dtype) == "float64"
-    assert list(sites["box_half_width_m"].round(1)) == [22.8, 91.2, 91.2]
-    assert list(receivers["box_half_width_m"].round(1)) == [364.8]
+    assert list(sites["box_half_width_m"]) == pytest.approx(
+        [east_west_half_m("G1"), east_west_half_m("G2"), east_west_half_m("G3")], abs=1e-9
+    )
+    assert list(receivers["box_half_width_m"]) == pytest.approx([east_west_half_m("A")], abs=1e-9)
     assert len(read_points(out / "tx_sites_real.parquet", "site_id")) == 3
     assert len(read_points(out / "rx_real.parquet", "rx_id")) == 1
     printed = capsys.readouterr().out
     assert re.search(rf"{pseudonym('G3')} busy_pair_gateway: .*extent fail", printed)
     assert re.search(rf"{pseudonym('G1')} both_ends_gateway: .*extent pass", printed)
     assert re.search(rf"{pseudonym('A')} both_ends_relayer: .*extent pass", printed)
+
+
+def test_both_layers_are_marked_real(tmp_path: Path, capture: Path) -> None:
+    assert run(tmp_path) == 0
+    out = tmp_path / "configs" / "x72y429"
+    for name in ("tx_sites_real.parquet", "rx_real.parquet"):
+        metadata = pq.read_metadata(out / name).metadata
+        assert metadata[b"mesh_terrain:positions"] == b"real"
+        assert b"geo" in metadata
 
 
 def test_the_counts_line_names_no_pseudonym(
