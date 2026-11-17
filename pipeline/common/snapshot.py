@@ -73,9 +73,12 @@ class PartialExistsError(SnapshotError):
 
 
 @contextmanager
-def _logged(step: str, snapshot_id: str) -> Iterator[dict[str, Any]]:
-    """Log the step's begin event, then its end event with what the block recorded."""
-    bound = log.bind(snapshot_id=snapshot_id)
+def _logged(step: str, snapshot_id: str, **context: str) -> Iterator[dict[str, Any]]:
+    """Log the step's begin event, then its end event with what the block recorded.
+
+    The snapshot id and any context fields are on both events.
+    """
+    bound = log.bind(snapshot_id=snapshot_id, **context)
     bound.info(f"{step}_begin")
     started = time.monotonic()
     details: dict[str, Any] = {}
@@ -367,7 +370,7 @@ def register(
             snapshot or differs from the file in the folder.
     """
     values = _registry_values(folder, manifest)
-    with _logged("snapshot_register", values[0]) as details:
+    with _logged("snapshot_register", values[0], schema=schema) as details:
         query = sql.SQL(
             "insert into {} "
             "(snapshot_id, capture_date, source_url, licence, manifest_path, manifest_sha256, "

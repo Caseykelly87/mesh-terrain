@@ -112,7 +112,13 @@ def load_table(
             target, names, names, staging, key
         )
     )
-    log.info("load_table", table=table, inserted=cursor.rowcount, duration_s=_since(started))
+    log.info(
+        "load_table",
+        table=table,
+        schema=schema,
+        inserted=cursor.rowcount,
+        duration_s=_since(started),
+    )
     return cursor.rowcount
 
 
@@ -138,7 +144,7 @@ def load_snapshot(
     inserted = {"snapshot": register(conn, folder, manifest, schema=schema)}
     for table in LOAD_ORDER:
         inserted[table] = load_table(conn, folder, table, schema=schema)
-    log.info("load_snapshot", snapshot_id=manifest["snapshot_id"], **inserted)
+    log.info("load_snapshot", snapshot_id=manifest["snapshot_id"], schema=schema, **inserted)
     return inserted
 
 
