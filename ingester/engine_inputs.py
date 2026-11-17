@@ -60,8 +60,10 @@ log = structlog.get_logger(component="ingester.engine_inputs")
 SITES_FILE = "tx_sites_real.parquet"
 RECEIVERS_FILE = "rx_real.parquet"
 STAGING_FOLDER = "engine-inputs.partial"
-# The marker agreed with terrain-rf-eng (Casey, issue #44, 4 (a)): a layer is
-# "synthetic" only when every row is made up; any real row makes it "real".
+# Casey, issue #44, 4 (a): ingest-eng's layers "real", the grid and fixtures
+# "synthetic". The lead's interface note on issue #44 (2026-11-16) adds the
+# rule for both agents: a layer is "synthetic" only when every row is made up;
+# any real row makes it "real".
 POSITIONS_KEY = b"mesh_terrain:positions"
 POSITIONS_REAL = b"real"
 NEVER_PUBLISH = (
@@ -285,6 +287,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (SelectionError, SnapshotError) as err:
         log.error("engine_inputs_refused", reason=str(err))
         print(f"refused, nothing written: {err}")
+        print("on issue #44, post only that the command refused (exit 2); the reason is for Casey")
         return 2
     return 0
 

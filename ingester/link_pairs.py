@@ -239,9 +239,10 @@ def box_half_width_m(precision_bits: int, latitude_deg: float) -> float:
     latitude away from the equator is the east-west half, so the engine's
     square lies inside the reported box and leaves out the strips at its north
     and south ends. In EPSG:26915 the box is also turned by the grid
-    convergence, about 1.6 degrees at x72y429. Drawing the real rectangle with
-    that rotation is a later unit (Casey's (c)); this function is the only
-    place the rule is written.
+    convergence, about 1.6 degrees at x72y429, so the square's corners reach
+    about 8 m past the box's east and west sides at 16 bits. Drawing the real
+    rectangle with that rotation is a later unit (Casey's (c)), which removes
+    that overshoot; this function is the only place the rule is written.
 
     Args:
         precision_bits: Bits of the 32-bit integer degrees the node kept.
