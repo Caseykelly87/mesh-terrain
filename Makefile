@@ -32,7 +32,7 @@ UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
-.PHONY: help env up down nuke check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-debug lint test
+.PHONY: help env up down nuke check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
 
 help:
@@ -41,7 +41,8 @@ help:
 	@echo "                (up and down are the only start and stop; no service restarts on its own)"
 	@echo "make nuke       stop the stack and delete every project volume after a typed confirmation"
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
-	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack"
+	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack,"
+	@echo "                on the development target: schemas suffixed _dev_wh, sources in raw_dev_wh"
 	@echo "make check-itm  load the ITM library in the Dagster image, reproduce the ADR 0002 figure"
 	@echo "                and run tests/test_itm.py and tests/test_path_loss.py there, failing on a skip"
 	@echo "make check-p1812 [FIXTURE=<folder> EXPECT_DB=<dB>]"
@@ -83,6 +84,11 @@ help:
 	@echo "Registering a snapshot: the one target here that writes to the warehouse."
 	@echo "make register-snapshot ID=<id>"
 	@echo "                check a finished snapshot against its manifest and record it in raw.snapshot"
+	@echo ""
+	@echo "The lead's target, which no agent runs:"
+	@echo "make dbt-build-real"
+	@echo "                dbt build on the target prod: reads the real raw schema and builds the real"
+	@echo "                staging, core and analytics schemas"
 
 env:
 	@test -f .env || cp .env.example .env
@@ -119,8 +125,17 @@ dbt-deps:
 dbt-debug: dbt-deps
 	$(DBT) debug $(DBT_ARGS)
 
+# The development target dev_wh builds into staging_dev_wh, core_dev_wh and
+# analytics_dev_wh and reads raw_dev_wh, never the real schemas
+# (dbt/macros/target_schemas.sql). It is also the profile's default; naming it
+# here keeps make check off the real schemas if the default ever changes.
 dbt-build: dbt-deps
-	$(DBT) build $(DBT_ARGS)
+	$(DBT) build $(DBT_ARGS) --target dev_wh
+
+# The real raw, staging, core and analytics schemas. The lead's target only
+# (dbt/README.md); no agent's unit runs it.
+dbt-build-real: dbt-deps
+	$(DBT) build $(DBT_ARGS) --target prod
 
 check: env lint test dbt-build
 
