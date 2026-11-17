@@ -17,8 +17,10 @@ other failure raises; either way the run leaves no layer, no staging folder and
 no output folder it created. An existing layer or staging folder is refused and
 left as it is.
 
-The layers hold real positions, precise MeshSTL ones among them: they and
-anything built from them are never published (`pos_04`, Casey on issue #44).
+The layers hold real positions, precise MeshSTL ones among them, and are
+never published (`pos_04`). Casey, issue #44, 2026-11-16: "Coverage outputs
+built from real gateway positions inherit the rule that precise MeshSTL
+positions are never published".
 The command refuses an output folder inside a git checkout and never prints or
 logs a coordinate. Its per-node lines tie pseudonyms to roles, link-hours, the
 precise flag and the DEM check, which narrows where a node is, so they are read
@@ -40,8 +42,8 @@ import structlog
 from ingester.link_pairs import CaptureLinks, SelectionError, capture_links, read_capture_rows
 from ingester.settings import get_ingester_settings
 from ingester.tile_selection import (
+    BUSIEST_RULE,
     LAYER_EPSG,
-    MEASURES,
     Extent,
     PlacedNode,
     Tile,
@@ -67,8 +69,10 @@ STAGING_FOLDER = "engine-inputs.partial"
 POSITIONS_KEY = b"mesh_terrain:positions"
 POSITIONS_REAL = b"real"
 NEVER_PUBLISH = (
-    "These layers hold real node positions, precise MeshSTL positions among them. They, and "
-    "every coverage output built from them, are never published (pos_04; Casey, issue #44). "
+    "These layers hold real node positions, precise MeshSTL positions among them, and are "
+    'never published (pos_04). Casey, issue #44, 2026-11-16: "Coverage outputs built from '
+    "real gateway positions inherit the rule that precise MeshSTL positions are never "
+    'published". '
     "The lines above that name pseudonyms are for local reading; only the counts line goes "
     "on issue #44."
 )
@@ -99,7 +103,7 @@ def _print_tile(links: CaptureLinks, tile: Tile) -> dict[str, int]:
 
 
 def _print_selection(nodes: list[PlacedNode], extent: Extent) -> list[bool]:
-    print(f"busiest two pairs, the same under every measure: {', '.join(MEASURES)}")
+    print(f"busiest two pairs: {BUSIEST_RULE}")
     verdicts = []
     for node in nodes:
         inside = inside_dem((node.easting_m, node.northing_m), node.half_width_m, extent)
