@@ -116,17 +116,22 @@ def contract_rule_ids(text: str) -> list[str]:
 
 def enforced_by(text: str) -> dict[str, str]:
     """Each rule's "Enforced by" cell, the last cell of its row; `\\|` stays in a cell."""
-    return {}
+    cells: dict[str, str] = {}
+    for line in text.splitlines():
+        if match := RULE_ROW.match(line):
+            cells[match.group(1)] = CELL_BORDER.split(line.strip())[-2].strip()
+    return cells
 
 
 def checklist_rules(text: str) -> frozenset[str]:
     """The rule ids that open a numbered or bulleted line, as in the reviewer's checklist."""
-    return frozenset()
+    return frozenset(CHECKLIST_RULE.findall(text))
 
 
 def asset_check_rules(name: str) -> frozenset[str]:
     """The rule an asset check names: `<id>` or `<id>_<what>` (ADR 0007)."""
-    return frozenset({name}) if re.fullmatch(r"[a-z]{3}_\d{2}", name) else frozenset()
+    match = LEADING_RULE.match(name)
+    return frozenset({match.group(1)}) if match else frozenset()
 
 
 def dbt_test_rules(node: dict[str, Any]) -> frozenset[str]:
@@ -219,19 +224,19 @@ def contract_problems(
 ) -> list[str]:
     """What is wrong between the contract's rules, the tests that name them and the lists."""
     named = frozenset().union(*(rules for _, rules in tests))
-    problems = [
-        f"{rule} has no test named for it" for rule in rule_ids if rule not in pending | named
-    ]
-    problems += [
-        f"{rule} has a test now; remove it from PENDING"
-        for rule in rule_ids
-        if rule in pending & named
-    ]
-    problems += [
-        f"{rule} is on PENDING but not in the contract"
-        for rule in sorted(pending)
-        if rule not in rule_ids
-    ]
+    covered = pending | review_only | named
+    problems = [f"{rule} has no test named for it" for rule in rule_ids if rule not in covered]
+    for listed, label in ((pending, "PENDING"), (review_only, "REVIEW_ONLY")):
+        problems += [
+            f"{rule} has a test now; remove it from {label}"
+            for rule in rule_ids
+            if rule in listed & named
+        ]
+        problems += [
+            f"{rule} is on {label} but not in the contract"
+            for rule in sorted(listed)
+            if rule not in rule_ids
+        ]
     return problems
 
 
@@ -242,7 +247,15 @@ def review_only_problems(
     pending: frozenset[str],
 ) -> list[str]:
     """What is wrong with REVIEW_ONLY against PENDING, the contract and the reviewer's checklist."""
-    return []
+    on_both = sorted(review_only & pending)
+    problems = [f"{rule} is on both PENDING and REVIEW_ONLY" for rule in on_both]
+    for rule in sorted(review_only):
+        cell = cells.get(rule, "")
+        if NAMES_A_TEST.search(cell):
+            problems.append(f"{rule} is on REVIEW_ONLY but the contract names a test: {cell}")
+        if rule not in checklist:
+            problems.append(f"{rule} is on REVIEW_ONLY but has no line in the reviewer's checklist")
+    return problems
 
 
 def without_rule(tests: Iterable[NamedTest], rule: str) -> list[NamedTest]:
