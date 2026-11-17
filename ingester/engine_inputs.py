@@ -7,9 +7,9 @@ spike's rules (`ingester.link_pairs`), selects the tile's nodes
 with the columns the lead agreed for the x72y429 run (issue #44):
 `tx_sites_real.parquet` (`site_id`, `geometry`, `box_half_width_m`, `role`)
 and `rx_real.parquet` (`rx_id`, `geometry`, `box_half_width_m`), each node at
-its stationary box centre. Both files carry the key `mesh_terrain:positions`
-with the value `real` in their Parquet metadata (Casey, issue #44, 4 (a)); the
-engine does not read it yet.
+its smallest box's centre with that box's half-width. Both files carry the
+key `mesh_terrain:positions` with the value `real` in their Parquet metadata
+(Casey, issue #44, 4 (a)); the engine does not read it yet.
 
 The sites are the in-tile gateway of every pair that touches the tile, as the
 2026-11-08 counts define touching, and the receiver is the relayer of the pair
@@ -17,16 +17,24 @@ with both ends in it (Casey, issue #44, busiest pair, 2026-11-17). The
 command still prints each pair's link-hours and receipts for the local
 record; no busiest-pair ranking selects anything.
 
-A node whose usable boxes lie on both sides of the tile edge counts as in the
-tile for the tile check, then drops its own pair, as a node the run places
-that fails the DEM edge check does (Casey, issue #44, engine_inputs Q1 (a),
-2026-11-17; the rule in full is in `ingester.tile_selection`). The command
-prints one line per end that drops a pair, naming both ends' pseudonyms, the
-end and the reason. Straddle lines print before the tile check's count checks
-can refuse (Casey, PR #51, (a)), so a refusal shows which pair and end caused
-it; edge-check lines print after the nodes are placed. When the both-ends pair
-or a gateway-only pair is dropped it refuses (exit 2) after those lines,
-before anything is written.
+Nodes are placed by the amended `lnk_02` (ADR 0003, Overlap amendment,
+2026-11-17): only a node's usable boxes (15 bits or more) inside the MSA,
+from either broker and either source, over the capture, are read; when they
+all overlap one another the node is stationary and is placed at its smallest
+box, and a stationary node is in or out of the tile by that box's centre.
+Coarse boxes and boxes outside the MSA are not read. The pairs still come
+from the spike's rules (`ingester.link_pairs`).
+
+A node that is not stationary and whose usable boxes lie on both sides of the
+tile edge counts as in the tile for the tile check, then drops its own pair,
+as a node the run places that fails the DEM edge check does (Casey, issue
+#44, engine_inputs Q1 (a), 2026-11-17; the rule in full is in
+`ingester.tile_selection`). The command prints one line per end that drops a
+pair, naming both ends' pseudonyms, the end and the reason. Straddle lines
+print before the tile check's count checks can refuse (Casey, PR #51, (a)),
+so a refusal shows which pair and end caused it; edge-check lines print after
+the nodes are placed. When the both-ends pair or a gateway-only pair is
+dropped it refuses (exit 2) after those lines, before anything is written.
 
 Both layers are written into a staging folder inside the output folder and
 moved to their names only when both are complete. A refusal exits 2 and any

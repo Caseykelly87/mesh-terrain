@@ -7,7 +7,7 @@ a half-width of 2^(31 - precision_bits) units on each axis.
 
 import pytest
 
-from ingester.box_overlap import TiedBoxes, boxes_overlap, stationary_box
+from ingester.box_overlap import TiedBoxesError, boxes_overlap, stationary_box
 
 
 def cell(latitude_i: int, longitude_i: int, bits: int) -> tuple[int, int, int]:
@@ -117,5 +117,5 @@ def test_overlapping_boxes_tied_for_the_most_bits_are_refused() -> None:
     first = (LATITUDE_I, LONGITUDE_I, 16)
     second = (LATITUDE_I + 100, LONGITUDE_I, 16)
     coarse = cell(LATITUDE_I, LONGITUDE_I, 15)
-    with pytest.raises(TiedBoxes, match="most precision bits"):
+    with pytest.raises(TiedBoxesError, match="most precision bits"):
         stationary_box([coarse, first, second])

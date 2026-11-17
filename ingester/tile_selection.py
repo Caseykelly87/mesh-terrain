@@ -9,12 +9,23 @@ with only the gateway end in it, and three pairs touching it, so none with
 only the relayer end in it. The sites are then the both-ends pair's gateway
 and each gateway-only pair's gateway, each gateway once with the both-ends
 role first, and the receiver is the both-ends pair's relayer, each placed at
-its stationary box centre in EPSG:26915. The 2026-11-08 note's ranking rule
-for its two busiest pairs is lost. By Casey's decision nothing selected
+the centre of its smallest box in EPSG:26915. The 2026-11-08 note's ranking
+rule for its two busiest pairs is lost. By Casey's decision nothing selected
 depends on a ranking.
 
-A node straddles the tile when its usable boxes lie on both sides of the tile
-edge; it has no stationary box. The rule for it (Casey, issue #44,
+Positions follow the amended `lnk_02` (ADR 0003, Overlap amendment,
+2026-11-17): a node's usable boxes inside the MSA, from either broker, count
+as one place when they all overlap one another, and the node is then
+stationary and placed at its smallest box (`ingester.link_pairs`,
+`NodePositions.stationary_box`). A stationary node is in or out of the tile
+by its placed box's centre, so a wider box of it that crosses the edge does
+not make it straddle. A node that is not stationary is in, out or straddling
+by the centres of all its usable boxes in the MSA. Both are the lead's
+reading of 2026-11-17, decided without Casey and listed on the pull request
+that brought the overlap rule in.
+
+A node straddles the tile when it is not stationary and its usable boxes lie
+on both sides of the tile edge. The rule for it (Casey, issue #44,
 engine_inputs Q1 (a), 2026-11-17): it is treated like a node that fails the
 DEM edge check, and only its own pair is dropped, after the check that the
 tile still matches the 2026-11-08 counts, with a straddling node counted as
@@ -23,9 +34,9 @@ straddling node counted as in the tile. Then a pair is dropped when either of
 its nodes straddles, or a node of it that the run places fails the DEM edge
 check. A node shared with another pair stays in that pair unless it fails
 there too. Dropping the both-ends pair or a gateway-only pair stops the run
-for Casey (`Selection.layers`). A selected node that does not straddle but
-still has no stationary box, two boxes inside the tile for example, is
-refused as before.
+for Casey (`Selection.layers`). A selected node that is not stationary and
+does not straddle, two boxes inside the tile that do not overlap for
+example, is refused as before.
 
 With the count check as it is, three touching pairs and all three selected,
 an unselected pair can only be dropped if it touches the tile, and a fourth
@@ -61,7 +72,6 @@ from engine.grid import run_grid
 from engine.points import Endpoint
 from engine.snapshots import resolve_snapshots
 from ingester.link_pairs import (
-    USABLE_BITS,
     CaptureLinks,
     NodePositions,
     PairActivity,
@@ -123,14 +133,14 @@ class Tile:
 
 @dataclass(frozen=True)
 class PlacedNode:
-    """A selected node at its stationary box centre.
+    """A selected node at the centre of its smallest box.
 
     Attributes:
         pseudonym: The node's pseudonym as stored in the snapshot.
         role: `both_ends_gateway`, `gateway_only_gateway` or `both_ends_relayer`.
         easting_m: Box centre easting, EPSG:26915 metres.
         northing_m: Box centre northing, EPSG:26915 metres.
-        half_width_m: Box half-width in metres, from `box_half_width_m`.
+        half_width_m: The smallest box's half-width in metres, from `box_half_width_m`.
         precise_source: Whether the node is a precise MeshSTL source (`pos_04`).
     """
 
@@ -163,8 +173,8 @@ class Selection:
     """The tile's placed nodes, their DEM edge check and the pairs dropped.
 
     Attributes:
-        placed: The selected nodes that do not straddle, at their stationary
-            box centres: the sites in order, then the receiver.
+        placed: The selected nodes that do not straddle, at their smallest
+            boxes' centres: the sites in order, then the receiver.
         dem_check: Per placed node's pseudonym, whether its box plus the
             engine's margin lies inside the DEM (`inside_dem`).
         dropped: The dropped pairs, in the capture's pair order.
@@ -299,12 +309,17 @@ def _project(latitude_i: int, longitude_i: int) -> tuple[float, float]:
 
 
 def _node_state(nodes: dict[str, NodePositions], pseudonym: str, tile: Tile) -> str:
-    """`in`, `out` or `split` for where a node's usable positions lie against the tile."""
+    """`in`, `out` or `split` for a node against the tile.
+
+    A stationary node by its smallest box's centre, any other node by the
+    centres of all its usable boxes in the MSA.
+    """
     found = nodes.get(pseudonym)
-    usable = [] if found is None else [b for b in found.boxes if b.precision_bits >= USABLE_BITS]
-    inside = {tile.contains(*_project(box.latitude_i, box.longitude_i)) for box in usable}
-    if not inside:
+    if found is None:
         raise SelectionError("a node of a pair has no usable position")
+    placed = found.stationary_box
+    boxes = found.boxes if placed is None else {placed}
+    inside = {tile.contains(*_project(box.latitude_i, box.longitude_i)) for box in boxes}
     if len(inside) == 2:
         return SPLIT
     return IN if inside == {True} else OUT
@@ -416,8 +431,8 @@ def _place(nodes: dict[str, NodePositions], pseudonym: str, role: str) -> Placed
     box = found.stationary_box
     if box is None:
         raise SelectionError(
-            f"the {role} sent {len(found.boxes)} boxes during the capture; "
-            "the layers need its one stationary box"
+            f"the {role}'s {len(found.boxes)} usable boxes in the MSA do not all overlap; "
+            "the layers need a stationary node (lnk_02)"
         )
     easting_m, northing_m = _project(box.latitude_i, box.longitude_i)
     half_width_m = box_half_width_m(box.precision_bits, box.latitude_i / 1e7)
@@ -449,7 +464,7 @@ def _tile_check(
 
 
 def _straddling(states: dict[PairActivity, PairState]) -> set[str]:
-    """The nodes whose usable boxes lie on both sides of the tile edge."""
+    """The nodes that are not stationary and whose usable boxes lie on both sides of the edge."""
     return {
         node
         for pair, state in states.items()
@@ -488,8 +503,8 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
 
     Raises:
         SelectionError: when the pairs do not reproduce the 2026-11-08 tile
-            counts, or a selected node that does not straddle sent more than
-            one box during the capture.
+            counts, a node of a pair has no usable position in the MSA, or a
+            selected node that does not straddle is not stationary.
     """
     # The pair count refuses before pair_states, so a call with a wrong count
     # and a node with no usable position names the count. The command calls
