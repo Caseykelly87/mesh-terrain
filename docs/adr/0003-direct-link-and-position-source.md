@@ -154,3 +154,22 @@ What changes in the contract:
 - `lnk_06`: RSSI in [-150, 0) dBm.
 
 The spike's figures in this ADR are not recomputed: per Q1 they stay the record, computed by the spike's own rules (run by run, looking ahead, floating-point overlap, the geodesic distance, the older `lnk_06` limits).
+
+Casey's follow-up on issue #55 (comment 6959592431), verbatim, items 1 to 3:
+
+> 1. Q9: (a). The box test reads only the receipts the hour counts. Order as you wrote it: per-receipt tests, then one box per end over those receipts or the hour is dropped and counted, then 3 packets, then the median of at least 500 m. Put this in the ADR 0003 amendment word for word.
+>
+> 2. Q6 side effect, jittering full-precision nodes: do not keep it. Add a rule in PR #58 that two positions of the same node count as the same place when they lie within a fixed floor. Propose the value (I expect about 20 m) with its source and its effect in dB at 500 m, make it a named constant, say where a node inside the floor is placed, give it a named test and a fixture case, and add it to the ADR amendment. Bring me the value and placement in your report; no real-data numbers.
+>
+> 3. Q6 side effect, finer box mid-hour: do not keep it. A stationary node uses its finest box over the whole hour. Named test and fixture case, and add it to the ADR amendment.
+
+The floor, `STATIONARY_FLOOR_M` = 20 m (`lnk_02`):
+- Why: under the overlap rule, two full-precision (32-bit) fixes overlap only when they are the same reading, and two fine cells (about 25 bits and above, a few metres wide) that are not nested do not overlap at all. So a node that does not move but reports GPS jitter would count as moving, use the 30-minute fallback, and lose most of its link-hours under Q6.
+- Source: the GNSS modules common on Meshtastic boards (u-blox NEO-6M and NEO-M8N, ATGM336H) give about 2.5 m horizontal accuracy as a circular error probable in open sky in their datasheets. That is the radius holding half of all fixes. Fixes near buildings or indoors, where many nodes sit, are commonly several times worse. 20 m covers two such fixes of one still node with margin, and it is far below the 500 m minimum link.
+- Effect at 500 m: a distance error of 20 m at one end changes free-space loss by 20 log10(520 / 500) = 0.34 dB; 20 m at both ends, 0.67 dB. Both are small beside the several dB spread the propagation models show against observations.
+- Distance: the WGS84 geodesic between stored coordinates, as `lnk_05` measures distance (Q4).
+- Stationarity becomes "every two positions count as the same place" (their boxes overlap, or they lie within the floor), which for boxes alone is the same test as before.
+- Placement: at the smallest box, as before. When more than one box shares the most `precision_bits` (only the floor allows that), at the lower median of those boxes' `latitude_i` and, separately, of their `longitude_i`, at that precision. Each median is one of the stored values, so the result stays on the firmware's grid and is the same in Python and SQL.
+- Test and fixture: `lnk_02_stationary_floor`; fixture cases: two 32-bit fixes 8 m apart (stationary, placed at the lower medians), and two 32-bit fixes 25 m apart (moved).
+
+The finest box over the hour (`lnk_02`): a stationary node uses its finest box over the positions the stationarity test reads at any of the hour's counted receipts, so a finer box that arrives during the hour applies to the whole hour, including receipts before it arrived. Test `lnk_02_finest_box_in_hour`; fixture case: a stationary node whose 20-bit box arrives between a link-hour's second and third receipts keeps the hour, placed at the 20-bit box for all of them.
