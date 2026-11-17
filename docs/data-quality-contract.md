@@ -2,7 +2,7 @@
 
 Every rule here has a dbt test or a Dagster asset check with the same identifier. A unit test in `tests/test_contract.py` parses this file and fails if a rule has no matching test. Change a rule only with an ADR and Casey's approval.
 
-Identifiers are stable. Tests are named `assert_<identifier>` (dbt singular) or declared in the model YAML with `meta: {contract: <identifier>}`.
+Identifiers are stable. Tests are named `assert_<identifier>` or `assert_<identifier>_<what>`, `<what>` being a short description of the case (dbt singular), or declared in the model YAML with `meta: {contract: <identifier>}` (Casey, issue #55, 2026-11-17, item 9; ADR 0007).
 
 ## Ingestion
 
