@@ -43,15 +43,20 @@ whose receivers are the synthetic grid alone (terrain-rf-eng's
 `--tile x72y429`, since corridor runs keep the strict checks; any other tile
 refuses before anything is read. The 2026-11-08 counts check still runs and
 prints one line, pass or every count that differs, and never refuses. The
-drop lines print as without the flag, and no dropped pair stops the run.
-The candidates are the in-tile gateways of the site rule above, with the same
-roles; one is written only when it is stationary under `lnk_02`, does not
-straddle the tile edge and passes the DEM edge check
+drop lines print at the same points as without the flag, the straddle lines
+naming their pair's kind since no count check can refuse first, and no
+dropped pair stops the run. The candidates are the in-tile gateways of the
+site rule above. Their roles follow the counted states, a straddling node
+counted as in the tile, so a straddling relayer can make a second pair a
+both-ends pair and give its gateway the `both_ends_gateway` role. A candidate
+is written only when it is stationary under `lnk_02`, does not straddle the
+tile edge and passes the DEM edge check
 (`ingester.tile_selection.select_sites`). Each gateway left out gets a local
-`left out` line with its reason, and a run with no site left refuses. No
-relayer is placed, so no receiver is chosen and only a gateway's DEM check
-can drop a pair. The counts line gains the sites written and left out and
-states that no real receiver was written.
+`left out` line with its reason. A run with no site left refuses, with its
+own message when no pair touching the tile has its gateway in it. No relayer
+is placed, so no receiver is chosen and only a gateway's DEM check can drop
+a pair. The counts line gains the sites written and left out and states that
+no real receiver was written and that relayers were not DEM-checked.
 
 The layers are written into a staging folder inside the output folder and
 moved to their names only when all are complete. A refusal exits 2 and any
@@ -111,6 +116,7 @@ from ingester.tile_selection import (
     parse_tile,
     select_nodes,
     select_sites,
+    site_straddle_drops,
     straddle_drops,
     tile_counts,
 )
@@ -232,7 +238,7 @@ def sites_only_counts_line(links: CaptureLinks, tile: dict[str, int], chosen: Si
     kept = sum(chosen.selection.dem_check.values())
     return (
         f"{counts_line(links, tile, chosen.selection)}; sites written {kept}, left out "
-        f"{len(chosen.left_out)}; no real receiver written"
+        f"{len(chosen.left_out)}; no real receiver written; relayers not DEM-checked"
     )
 
 
@@ -441,8 +447,12 @@ def _run(args: argparse.Namespace) -> None:
     counts = _print_tile(links, tile)
     # Casey, PR #51, (a): straddle drop lines print before the count checks
     # in select_nodes can refuse, so a refusal shows which pair and end caused it.
+    # A sites-only run never refuses on the counts, so its lines name the kind.
     printed: set[DropEnd] = set()
-    _print_drops(straddle_drops(links, tile, args.expect_pairs), printed)
+    if args.sites_only:
+        _print_drops(site_straddle_drops(links, tile), printed)
+    else:
+        _print_drops(straddle_drops(links, tile, args.expect_pairs), printed)
     run = _Run(args.out, args.expect_pairs, links, tile, extent, counts, printed)
     (_write_sites if args.sites_only else _write_both)(run)
     print(NEVER_PUBLISH)
