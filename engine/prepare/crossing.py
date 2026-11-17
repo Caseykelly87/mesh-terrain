@@ -31,7 +31,7 @@ from engine.grid import RunGrid
 from engine.points import Endpoint
 from engine.rasters import read_cells, windows
 from engine.snapshots import NamedSnapshot
-from engine.terrain_build import _check_projected, _first_valid, _open_source, _warped
+from engine.terrain_build import check_projected, first_valid, open_source, warped_to_grid
 
 log = structlog.get_logger(component="engine.prepare.crossing")
 
@@ -81,6 +81,7 @@ def tall_cells(
             EPSG:26915.
     """
     started = time.monotonic()
+    log.info("tall_cells_begin", dem=dem.snapshot_id, dsm=dsm.snapshot_id, threshold_m=threshold_m)
     found = [_tile_tall_cells(dem, path, dsm.snapshot_id, threshold_m) for path in dsm.rasters()]
     cells = np.unique(np.vstack([np.empty((0, 4)), *found]), axis=0)
     log.info(
@@ -98,11 +99,11 @@ def _tile_tall_cells(
     dem: NamedSnapshot, dsm_path: Path, dsm_id: str, threshold_m: float
 ) -> CellBounds:
     with ExitStack() as stack:
-        surface = stack.enter_context(_open_source(dsm_path, dsm_id))
-        _check_projected(surface, dsm_id)
+        surface = stack.enter_context(open_source(dsm_path, dsm_id))
+        check_projected(surface, dsm_id)
         grid = _tile_grid(surface)
         sources = [stack.enter_context(rasterio.open(p)) for p in dem.rasters()]
-        ground = _first_valid([stack.enter_context(_warped(s, grid)) for s in sources])
+        ground = first_valid([stack.enter_context(warped_to_grid(s, grid)) for s in sources])
         rows: list[npt.NDArray[np.intp]] = []
         cols: list[npt.NDArray[np.intp]] = []
         for window in windows(grid.height, grid.width):

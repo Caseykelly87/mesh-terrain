@@ -87,8 +87,8 @@ def dem_resolution_m(dem: NamedSnapshot) -> float:
     """
     sizes = set()
     for path in dem.rasters():
-        with _open_source(path, dem.snapshot_id) as tile:
-            _check_projected(tile, dem.snapshot_id)
+        with open_source(path, dem.snapshot_id) as tile:
+            check_projected(tile, dem.snapshot_id)
             sizes.add(float(tile.transform.a))
     if len(sizes) != 1:
         raise ConfigError(f"snapshot {dem.snapshot_id} mixes pixel sizes {sorted(sizes)}")
@@ -104,7 +104,7 @@ def check_sources(snapshots: dict[str, NamedSnapshot], grid: RunGrid) -> None:
             is off the grid's lattice.
     """
     dem = snapshots["dem"]
-    _check_covers(dem, grid)
+    check_covers(dem, grid)
     for role in ("dsm", "canopy"):
         if role in snapshots and grid.resolution_m != FINE_RESOLUTION_M:
             raise ConfigError(f"snapshots.{role} needs a 1 m DEM; {dem.snapshot_id} is not")
@@ -145,7 +145,7 @@ def build_terrain(snapshots: dict[str, NamedSnapshot], grid: RunGrid, folder: Pa
     )
 
 
-def _open_source(path: Path, snapshot_id: str) -> DatasetReader:
+def open_source(path: Path, snapshot_id: str) -> DatasetReader:
     """Open a snapshot raster, refusing one GDAL cannot read before anything is written."""
     try:
         return rasterio.open(path)
@@ -153,7 +153,12 @@ def _open_source(path: Path, snapshot_id: str) -> DatasetReader:
         raise ConfigError(f"snapshot {snapshot_id}: {path.name} does not open: {err}") from err
 
 
-def _check_projected(tile: DatasetReader, snapshot_id: str) -> None:
+def check_projected(tile: DatasetReader, snapshot_id: str) -> None:
+    """Refuse a tile that is not north-up in EPSG:26915 with square pixels.
+
+    Raises:
+        ConfigError: naming the tile.
+    """
     transform = tile.transform
     if tile.crs is None or tile.crs.to_epsg() != LAYER_CRS_EPSG:
         raise ConfigError(
@@ -166,14 +171,43 @@ def _check_projected(tile: DatasetReader, snapshot_id: str) -> None:
         )
 
 
-def _check_covers(dem: NamedSnapshot, grid: RunGrid) -> None:
+def dem_extent(dem: NamedSnapshot) -> tuple[float, float, float, float]:
+    """The bounding box of the DEM tiles: west, south, east, north in EPSG:26915 metres.
+
+    Raises:
+        ConfigError: for a tile that does not open.
+    """
     bounds = []
     for path in dem.rasters():
-        with _open_source(path, dem.snapshot_id) as tile:
+        with open_source(path, dem.snapshot_id) as tile:
             bounds.append(tile.bounds)
-    west, south = min(b.left for b in bounds), min(b.bottom for b in bounds)
-    east, north = max(b.right for b in bounds), max(b.top for b in bounds)
-    if grid.west_m < west or grid.south_m < south or grid.east_m > east or grid.north_m > north:
+    return (
+        min(b.left for b in bounds),
+        min(b.bottom for b in bounds),
+        max(b.right for b in bounds),
+        max(b.top for b in bounds),
+    )
+
+
+def grid_inside(grid: RunGrid, extent: tuple[float, float, float, float]) -> bool:
+    """Whether the grid lies inside the extent (west, south, east, north), edges included."""
+    west, south, east, north = extent
+    return (
+        grid.west_m >= west
+        and grid.south_m >= south
+        and grid.east_m <= east
+        and grid.north_m <= north
+    )
+
+
+def check_covers(dem: NamedSnapshot, grid: RunGrid) -> None:
+    """Refuse a grid that reaches beyond the DEM tiles' bounding box.
+
+    Raises:
+        ConfigError: naming the run extent and the DEM's, in metres.
+    """
+    west, south, east, north = dem_extent(dem)
+    if not grid_inside(grid, (west, south, east, north)):
         raise ConfigError(
             f"the run extent ({grid.west_m:.0f}, {grid.south_m:.0f}) to ({grid.east_m:.0f}, "
             f"{grid.north_m:.0f}) with its {grid.resolution_m:g} m grid reaches outside the DEM "
@@ -182,8 +216,8 @@ def _check_covers(dem: NamedSnapshot, grid: RunGrid) -> None:
 
 
 def _check_lattice(path: Path, snapshot_id: str, grid: RunGrid) -> None:
-    with _open_source(path, snapshot_id) as tile:
-        _check_projected(tile, snapshot_id)
+    with open_source(path, snapshot_id) as tile:
+        check_projected(tile, snapshot_id)
         transform = tile.transform
     offsets = (
         (transform.c - grid.west_m) / grid.resolution_m,
@@ -193,7 +227,7 @@ def _check_lattice(path: Path, snapshot_id: str, grid: RunGrid) -> None:
         raise ConfigError(f"snapshot {snapshot_id}: {path.name} is off the run grid's lattice")
 
 
-def _warped(source: DatasetReader, grid: RunGrid) -> WarpedVRT:
+def warped_to_grid(source: DatasetReader, grid: RunGrid) -> WarpedVRT:
     """The source on the run grid by nearest neighbour: a copy on the lattice, B1 otherwise."""
     options = {}
     if source.nodata is None:
@@ -218,8 +252,8 @@ def _mosaic_layer(snapshot: NamedSnapshot, grid: RunGrid, path: Path) -> None:
     started = time.monotonic()
     with ExitStack() as stack:
         sources = [stack.enter_context(rasterio.open(p)) for p in snapshot.rasters()]
-        vrts = [stack.enter_context(_warped(s, grid)) for s in sources]
-        write_cog(path, grid, _first_valid(vrts))
+        vrts = [stack.enter_context(warped_to_grid(s, grid)) for s in sources]
+        write_cog(path, grid, first_valid(vrts))
     log.info(
         "terrain_layer_end",
         snapshot_id=snapshot.snapshot_id,
@@ -228,7 +262,9 @@ def _mosaic_layer(snapshot: NamedSnapshot, grid: RunGrid, path: Path) -> None:
     )
 
 
-def _first_valid(vrts: list[WarpedVRT]) -> Callable[[Window], FloatArray]:
+def first_valid(vrts: list[WarpedVRT]) -> Callable[[Window], FloatArray]:
+    """Cells of a window of the grid from the first source with a value, NaN where none has."""
+
     def cells(window: Window) -> FloatArray:
         mosaic = np.full((int(window.height), int(window.width)), np.nan)
         for vrt in vrts:

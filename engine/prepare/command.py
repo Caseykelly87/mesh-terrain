@@ -12,15 +12,23 @@ It reads the two real layers another step wrote into the folder
    path's distance to them;
 4. writes `rx_points.parquet` (the real receivers, then the grid),
    `tx_sites.parquet` (the sites in the run), `crossing.md` and
-   `<tile>.yaml`, and prints `crossing.md`.
+   `<tile>.yaml` into a new temporary folder inside the folder, checks the
+   config with the engine's own `load_config`, then moves each file to its
+   name, and prints `crossing.md`.
 
-Nothing is written unless every check passes. Exit status 0 when the folder
-is written, 2 when anything was refused. No log line or message holds a
-coordinate; refusals name endpoints by id.
+Nothing is written under an output's name unless every check passes, and a
+failure at any step, the moves included, leaves the folder as it was: the
+temporary folder and any output already moved are removed. Exit status 0
+when the folder is written, 2 when anything was refused, 1 for a failure
+while writing. No log line or message holds a coordinate; refusals name
+endpoints by id.
 """
 
 import argparse
+import shutil
 import sys
+import tempfile
+import time
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
@@ -107,8 +115,10 @@ def prepare_folder(tile_name: str, folder: Path, snapshots_dir: Path) -> str:
     """
     tile = _tile(tile_name)
     _check_folder(folder, tile)
+    log.info("prepare_layers_read_begin", tile=tile.name, folder=str(folder))
     sites, roles = _read_sites(folder / REAL_SITES_FILE)
     receivers = read_points(_agreed_layer(folder / REAL_RECEIVERS_FILE, RECEIVER_COLUMNS), "rx_id")
+    log.info("prepare_layers_read_end", sites=len(sites), receivers=len(receivers))
     grid = grid_receivers(tile)
     _check_unique([r.endpoint_id for r in receivers + grid])
     snapshots = _snapshots(tile, snapshots_dir)
@@ -208,6 +218,11 @@ def _sites_in_run(
             f"snapshot {dem.snapshot_id}, so the engine would refuse the run for extent"
         )
     in_run = [s for s in sites if s.endpoint_id not in failing]
+    for site in sites:
+        if site.endpoint_id in failing:
+            # Safe to continue: the run simply has one site fewer, and
+            # crossing.md lists it as left out.
+            log.warning("prepare_site_left_out", site_id=site.endpoint_id, dem=dem.snapshot_id)
     log.info(
         "prepare_extent_checked",
         sites=len(sites),
@@ -265,24 +280,58 @@ def _layer(id_column: str, endpoints: list[Endpoint]) -> gpd.GeoDataFrame:
     return layer[[id_column, "geometry", "box_half_width_m"]]
 
 
+def move_into_place(source: Path, target: Path) -> None:
+    """Move one written file to its final name, refusing to replace an existing file."""
+    if target.exists():
+        raise FileExistsError(f"{target} appeared while the outputs were written")
+    source.rename(target)
+
+
 def _write_outputs(
     folder: Path, tile: Tile, sites: list[Endpoint], receivers: list[Endpoint], summary: str
 ) -> None:
-    _layer("rx_id", receivers).to_parquet(folder / RECEIVERS_FILE, index=False)
-    _layer("site_id", sites).to_parquet(folder / SITES_FILE, index=False)
-    (folder / CROSSING_FILE).write_text(summary, encoding="utf-8", newline="\n")
-    config = folder / config_name(tile.name)
-    config.write_text(config_text(tile.name), encoding="utf-8", newline="\n")
+    """Write the four outputs in a temporary folder, check the config, then move them in."""
+    started = time.monotonic()
+    log.info("prepare_write_begin", tile=tile.name, folder=str(folder))
+    staging = Path(tempfile.mkdtemp(prefix=".prepare-", dir=folder))
+    moved: list[Path] = []
     try:
-        load_config(config)
-    except ConfigError as err:
-        # Every check above passed, so a config the engine refuses is a bug here,
-        # a failure (exit 1) rather than a refusal of the caller's input.
-        raise RuntimeError(f"the written config fails the engine's check: {err}") from err
+        names = _write_staged(staging, tile, sites, receivers, summary)
+        for name in names:
+            move_into_place(staging / name, folder / name)
+            moved.append(folder / name)
+    except BaseException:
+        # Only files this call wrote are removed, so the folder is as it was.
+        for path in moved:
+            path.unlink(missing_ok=True)
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
     log.info(
         "prepare_written",
         tile=tile.name,
         folder=str(folder),
         sites=len(sites),
         receivers=len(receivers),
+        duration_s=round(time.monotonic() - started, 3),
     )
+
+
+def _write_staged(
+    staging: Path, tile: Tile, sites: list[Endpoint], receivers: list[Endpoint], summary: str
+) -> list[str]:
+    """Write every output into the empty staging folder; return their names, config last."""
+    _layer("rx_id", receivers).to_parquet(staging / RECEIVERS_FILE, index=False)
+    _layer("site_id", sites).to_parquet(staging / SITES_FILE, index=False)
+    with (staging / CROSSING_FILE).open("x", encoding="utf-8", newline="\n") as handle:
+        handle.write(summary)
+    config = staging / config_name(tile.name)
+    with config.open("x", encoding="utf-8", newline="\n") as handle:
+        handle.write(config_text(tile.name))
+    try:
+        load_config(config)
+    except ConfigError as err:
+        # Every check above passed, so a config the engine refuses is a bug here,
+        # a failure (exit 1) rather than a refusal of the caller's input.
+        raise RuntimeError(f"the written config fails the engine's check: {err}") from err
+    return [RECEIVERS_FILE, SITES_FILE, CROSSING_FILE, config.name]
