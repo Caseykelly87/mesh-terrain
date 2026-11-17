@@ -107,12 +107,22 @@ def test_the_throwaway_schema_is_gone_after_a_failure() -> None:
         assert not schema_exists(other, names[0])
 
 
-def test_the_lock_check_sees_a_table_the_test_read() -> None:
-    # The teardown's guard against reaching raw, shown on the throwaway schema itself.
-    with throwaway_raw_schema() as raw:
-        assert locked_relations(raw.conn, (raw.schema,)) == []
-        raw.conn.execute(sql.SQL("select 1 from {}").format(sql.Identifier(raw.schema, "snapshot")))
-        assert locked_relations(raw.conn, (raw.schema,)) == [f"{raw.schema}.snapshot"]
+def test_the_lock_check_sees_a_table_the_transaction_only_read() -> None:
+    # The teardown's guard against reaching raw, shown on a committed throwaway
+    # schema: a new transaction holds no lock on it until a select reads its table.
+    name = f"{SCHEMA_PREFIX}{secrets.token_hex(6)}"
+    probe = sql.Identifier(name, "probe")
+    with connect_or_skip() as conn:
+        try:
+            conn.execute(sql.SQL("create schema {}").format(sql.Identifier(name)))
+            conn.execute(sql.SQL("create table {} (id integer)").format(probe))
+            conn.commit()
+            assert locked_relations(conn, (name,)) == []
+            conn.execute(sql.SQL("select id from {}").format(probe))
+            assert locked_relations(conn, (name,)) == [f"{name}.probe"]
+            conn.rollback()
+        finally:
+            drop_throwaway(conn, name)
 
 
 @pytest.mark.parametrize("name", [*REAL_SCHEMAS, "public", "test_load_", "test_load_x; drop"])
