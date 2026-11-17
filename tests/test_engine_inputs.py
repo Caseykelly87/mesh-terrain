@@ -182,26 +182,41 @@ def test_the_counts_line_carries_the_drop_counts_and_no_pseudonym() -> None:
     assert not any(node.pseudonym in line for node in NODES.values())
 
 
+def names(text: str) -> str:
+    return text.format(**{name: pseudonym(name) for name in NODES})
+
+
+BUSIEST_RULE_LINE = "busiest two pairs: by link-hours"
+
+
 @pytest.mark.parametrize(
-    ("options", "line"),
+    ("options", "line", "before_selection"),
     [
         (
             {"straddler": "G2"},
             "dropped busiest pair {B} to {G2}: gateway straddles the tile edge",
+            True,
         ),
         (
             {"straddler": "A"},
             "dropped both-ends pair {A} to {G1}: relayer straddles the tile edge",
+            True,
         ),
         (
             {"g3_at_edge": True},
             "dropped busiest pair {C} to {G3}: gateway fails the DEM edge check",
+            False,
         ),
     ],
 )
 def test_a_dropped_selected_pair_stops_the_run_before_any_write(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], options: dict[str, Any], line: str
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    options: dict[str, Any],
+    line: str,
+    before_selection: bool,
 ) -> None:
+    """A straddle line prints before the selection's lines, an edge-check line after them, once."""
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", **options)
     with capture_logs() as events:
@@ -209,30 +224,54 @@ def test_a_dropped_selected_pair_stops_the_run_before_any_write(
     assert not (tmp_path / "configs").exists()
     printed = capsys.readouterr().out
     lines = printed.splitlines()
-    assert line.format(**{name: pseudonym(name) for name in NODES}) in lines
-    assert [text for text in lines if text.startswith("dropped")] == [
-        line.format(**{name: pseudonym(name) for name in NODES})
-    ]
+    assert [text for text in lines if text.startswith("dropped")] == [names(line)]
+    rule = next(index for index, text in enumerate(lines) if text.startswith(BUSIEST_RULE_LINE))
+    assert (lines.index(names(line)) < rule) is before_selection
     assert "refused, nothing written: selected pairs dropped" in printed
     assert not any(text.startswith("counts for") for text in lines)
     assert coordinates_in(printed + repr(events)) == []
 
 
-def test_a_straddling_node_in_an_unselected_pair_fails_the_touching_count(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    ("straddler", "line", "refusal", "tile_line"),
+    [
+        (
+            "D",
+            "dropped pair (kind not determined) {D} to {E}: relayer straddles the tile edge",
+            "refused, nothing written: pairs touching x72y429 are not 3",
+            "tile x72y429: pairs with both ends 1, only the gateway end 2, only the relayer end 1, "
+            "touched 4",
+        ),
+        (
+            "B",
+            "dropped pair (kind not determined) {B} to {G2}: relayer straddles the tile edge",
+            "refused, nothing written: 2 pairs have both ends in x72y429, not one",
+            "tile x72y429: pairs with both ends 2, only the gateway end 1, only the relayer end 0, "
+            "touched 3",
+        ),
+    ],
+)
+def test_a_straddle_line_prints_before_a_tile_check_refusal(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    straddler: str,
+    line: str,
+    refusal: str,
+    tile_line: str,
 ) -> None:
-    """Counted as in the tile, the node makes a fourth touching pair, so the count check refuses."""
+    """Counted as in the tile, the node fails a count check; its drop line comes first."""
     build_dem(tmp_path / "snapshots")
-    build_capture(tmp_path / "snapshots", straddler="D")
-    assert run(tmp_path) == 2
+    build_capture(tmp_path / "snapshots", straddler=straddler)
+    with capture_logs() as events:
+        assert run(tmp_path) == 2
     assert not (tmp_path / "configs").exists()
-    lines = capsys.readouterr().out.splitlines()
-    assert (
-        "tile x72y429: pairs with both ends 1, only the gateway end 2, only the relayer end 1, "
-        "touched 4"
-    ) in lines
-    assert "refused, nothing written: pairs touching x72y429 are not 3" in lines
-    assert not any(text.startswith("dropped") for text in lines)
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    assert tile_line in lines
+    assert [text for text in lines if text.startswith("dropped")] == [names(line)]
+    assert lines.index(names(line)) < lines.index(refusal)
+    assert not any(text.startswith(BUSIEST_RULE_LINE) for text in lines)
+    assert coordinates_in(printed + repr(events)) == []
 
 
 def test_command_prints_and_logs_no_coordinate(

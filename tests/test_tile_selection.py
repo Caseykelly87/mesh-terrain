@@ -25,6 +25,7 @@ from ingester.tile_selection import (
     BOTH_ENDS_PAIR,
     BUSIEST_PAIR,
     FAILS_DEM,
+    KIND_NOT_DETERMINED,
     OTHER_PAIR,
     STRADDLES,
     DroppedPair,
@@ -36,6 +37,7 @@ from ingester.tile_selection import (
     pair_states,
     parse_tile,
     select_nodes,
+    straddle_drops,
     tile_counts,
 )
 from terrain.draws import EndpointBox
@@ -254,6 +256,26 @@ def test_a_placed_node_failing_the_dem_check_drops_every_pair_it_is_in() -> None
         DroppedPair(selected, BUSIEST_PAIR, (("gateway", FAILS_DEM),)),
         DroppedPair(other, OTHER_PAIR, (("gateway", FAILS_DEM),)),
     )
+
+
+def test_straddle_drops_name_the_kind_when_the_tile_check_holds() -> None:
+    assert straddle_drops(links(*SELECTED, nodes=straddling("G2")), TILE) == (
+        DroppedPair(pair("B", "G2", 5), BUSIEST_PAIR, (("gateway", STRADDLES),)),
+    )
+
+
+@pytest.mark.parametrize(("name", "dropped"), [("D", pair("D", "E", 1)), ("B", SELECTED[1])])
+def test_straddle_drops_leave_the_kind_open_when_the_tile_check_would_refuse(
+    name: str, dropped: PairActivity
+) -> None:
+    found = links(*SELECTED, pair("D", "E", 1), nodes=straddling(name))
+    assert straddle_drops(found, TILE) == (
+        DroppedPair(dropped, KIND_NOT_DETERMINED, (("relayer", STRADDLES),)),
+    )
+
+
+def test_straddle_drops_leave_the_dem_edge_check_to_the_selection() -> None:
+    assert straddle_drops(links(*SELECTED, nodes=g3_at_edge()), TILE) == ()
 
 
 def test_a_pair_failing_at_both_ends_names_both() -> None:

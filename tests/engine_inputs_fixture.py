@@ -109,8 +109,14 @@ NODES = {
 }
 # East and north shifts, metres, that put a node's second box across the
 # tile edge: G2 (a busiest pair's gateway) and A (the both-ends pair's relayer)
-# east of the tile, D (an unselected pair's relayer) inside it.
-STRADDLE_SHIFTS_M = {"G2": (10_000.0, 0.0), "A": (5_000.0, 0.0), "D": (-15_000.0, -10_000.0)}
+# east of the tile, D (an unselected pair's relayer) and B (a busiest pair's
+# relayer) inside it.
+STRADDLE_SHIFTS_M = {
+    "G2": (10_000.0, 0.0),
+    "A": (5_000.0, 0.0),
+    "D": (-15_000.0, -10_000.0),
+    "B": (-10_000.0, 0.0),
+}
 # G3's box 45 m from the tile's east edge, as the fixture first placed it.
 G3_EDGE_SHIFT_M = 250.0
 PUBLIC = {"seen_public": True, "seen_meshstl": False}
