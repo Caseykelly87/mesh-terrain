@@ -26,6 +26,15 @@ from structlog.testing import capture_logs
 from engine import positions_marker
 from engine.points import read_points
 from ingester import engine_inputs
+from ingester.link_pairs import CaptureLinks, PairActivity
+from ingester.tile_selection import (
+    FAILS_DEM,
+    OTHER_PAIR,
+    STRADDLES,
+    DroppedPair,
+    PlacedNode,
+    Selection,
+)
 
 # The import above activates the autouse fixture for this module.
 _ = no_logger_caching
@@ -91,9 +100,10 @@ def test_command_writes_the_layers(
     assert len(read_points(out / "tx_sites_real.parquet", "site_id")) == 3
     assert len(read_points(out / "rx_real.parquet", "rx_id")) == 1
     printed = capsys.readouterr().out
-    assert re.search(rf"{pseudonym('G3')} busy_pair_gateway: .*extent fail", printed)
+    assert re.search(rf"{pseudonym('G3')} busy_pair_gateway: .*extent pass", printed)
     assert re.search(rf"{pseudonym('G1')} both_ends_gateway: .*extent pass", printed)
     assert re.search(rf"{pseudonym('A')} both_ends_relayer: .*extent pass", printed)
+    assert not any(line.startswith("dropped") for line in printed.splitlines())
 
 
 def test_both_layers_are_marked_real(tmp_path: Path, capture: Path) -> None:
@@ -140,8 +150,89 @@ def test_the_counts_line_names_no_pseudonym(
     )
     assert line == (
         "counts for issue #44: pairs public 4, MeshSTL 2, shared 1, union 5; pairs touching "
-        "the tile 3 (both ends 1); nodes selected 4; extent pass 3, fail 1"
+        "the tile 3 (both ends 1); nodes selected 4; extent pass 4, fail 0; pairs dropped 0 "
+        "(straddles the tile edge 0, fails the DEM edge check 0)"
     )
+
+
+def placed(name: str, role: str) -> PlacedNode:
+    return PlacedNode(pseudonym(name), role, *centre_m(name), east_west_half_m(name), False)
+
+
+def test_the_counts_line_carries_the_drop_counts_and_no_pseudonym() -> None:
+    """A pair dropped for both reasons counts once in the total and once under each reason."""
+    links = CaptureLinks((), {"public": 4, "meshstl": 2, "shared": 1, "union": 5}, {}, 0, 0)
+    tile = {"both ends": 1, "only the gateway end": 2, "only the relayer end": 0, "touched": 3}
+    one = PairActivity(pseudonym("D"), pseudonym("E"), 1, 0, 1, 3)
+    two = PairActivity(pseudonym("M"), pseudonym("E"), 1, 0, 1, 3)
+    selection = Selection(
+        placed=(placed("G1", "both_ends_gateway"), placed("A", "both_ends_relayer")),
+        dem_check={pseudonym("G1"): True, pseudonym("A"): False},
+        dropped=(
+            DroppedPair(one, OTHER_PAIR, (("relayer", STRADDLES),)),
+            DroppedPair(two, OTHER_PAIR, (("relayer", STRADDLES), ("gateway", FAILS_DEM))),
+        ),
+    )
+    line = engine_inputs.counts_line(links, tile, selection)
+    assert line == (
+        "counts for issue #44: pairs public 4, MeshSTL 2, shared 1, union 5; pairs touching "
+        "the tile 3 (both ends 1); nodes selected 2; extent pass 1, fail 1; pairs dropped 2 "
+        "(straddles the tile edge 2, fails the DEM edge check 1)"
+    )
+    assert not any(node.pseudonym in line for node in NODES.values())
+
+
+@pytest.mark.parametrize(
+    ("options", "line"),
+    [
+        (
+            {"straddler": "G2"},
+            "dropped busiest pair {B} to {G2}: gateway straddles the tile edge",
+        ),
+        (
+            {"straddler": "A"},
+            "dropped both-ends pair {A} to {G1}: relayer straddles the tile edge",
+        ),
+        (
+            {"g3_at_edge": True},
+            "dropped busiest pair {C} to {G3}: gateway fails the DEM edge check",
+        ),
+    ],
+)
+def test_a_dropped_selected_pair_stops_the_run_before_any_write(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], options: dict[str, Any], line: str
+) -> None:
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", **options)
+    with capture_logs() as events:
+        assert run(tmp_path) == 2
+    assert not (tmp_path / "configs").exists()
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    assert line.format(**{name: pseudonym(name) for name in NODES}) in lines
+    assert [text for text in lines if text.startswith("dropped")] == [
+        line.format(**{name: pseudonym(name) for name in NODES})
+    ]
+    assert "refused, nothing written: selected pairs dropped" in printed
+    assert not any(text.startswith("counts for") for text in lines)
+    assert coordinates_in(printed + repr(events)) == []
+
+
+def test_a_straddling_node_in_an_unselected_pair_fails_the_touching_count(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Counted as in the tile, the node makes a fourth touching pair, so the count check refuses."""
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", straddler="D")
+    assert run(tmp_path) == 2
+    assert not (tmp_path / "configs").exists()
+    lines = capsys.readouterr().out.splitlines()
+    assert (
+        "tile x72y429: pairs with both ends 1, only the gateway end 2, only the relayer end 1, "
+        "touched 4"
+    ) in lines
+    assert "refused, nothing written: pairs touching x72y429 are not 3" in lines
+    assert not any(text.startswith("dropped") for text in lines)
 
 
 def test_command_prints_and_logs_no_coordinate(
@@ -164,11 +255,20 @@ def test_a_refused_run_prints_and_logs_no_coordinate(
     assert coordinates_in(text) == []
 
 
-def test_command_refuses_a_node_that_moved_during_the_capture(tmp_path: Path) -> None:
+def test_command_refuses_a_node_that_moved_during_the_capture(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both of A's boxes lie inside the tile: it does not straddle, so no drop rule applies."""
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", moved_a=True)
     assert run(tmp_path) == 2
     assert not (tmp_path / "configs").exists()
+    lines = capsys.readouterr().out.splitlines()
+    assert (
+        "refused, nothing written: the both_ends_relayer sent 2 boxes during the capture; "
+        "the layers need its one stationary box"
+    ) in lines
+    assert not any(text.startswith("dropped") for text in lines)
 
 
 def test_command_refuses_an_unexpected_pair_count(tmp_path: Path, capture: Path) -> None:
