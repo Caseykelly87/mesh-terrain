@@ -17,7 +17,9 @@ The links, relayer to gateway (positions in EPSG:26915 before quantisation):
 - C to G3, G3 inside the tile 300 m from its east edge and C east of the
   tile, public, 3 link-hours. With `g3_at_edge`, G3 sends a box 45 m from the
   edge instead, whose box plus 50 m reaches outside the DEM.
-- D to E, both east of the tile, public, 1 link-hour.
+- D to E, both east of the tile, public, 1 link-hour. With `busy_outside_pair`,
+  6 link-hours, which makes it the busiest pair by link-hours though it does
+  not touch the tile.
 - M to E, public, 1 link-hour; M sends two different boxes, so it is not
   stationary and its link rests on the 30-minute rule.
 - F to G1, MeshSTL; F sends only 13-bit positions (coarse), so it never makes a
@@ -120,9 +122,9 @@ NODES = {
     )
 }
 # East and north shifts, metres, that put a node's second box across the
-# tile edge: G2 (a busiest pair's gateway) and A (the both-ends pair's relayer)
-# east of the tile, D (an unselected pair's relayer) and B (a busiest pair's
-# relayer) inside it.
+# tile edge: G2 (a gateway-only pair's gateway) and A (the both-ends pair's
+# relayer) east of the tile, D (an unselected pair's relayer) and B (a
+# gateway-only pair's relayer) inside it.
 STRADDLE_SHIFTS_M = {
     "G2": (10_000.0, 0.0),
     "A": (5_000.0, 0.0),
@@ -230,7 +232,7 @@ def _positions(rows: RowMaker, moved_a: bool, one_coordinate: bool, g3_at_edge: 
     rows.position(n["M"], n["E"], at(23, 20), PUBLIC, n["M"].box(east_shift_m=1_700))
 
 
-def _links(rows: RowMaker) -> None:
+def _links(rows: RowMaker, busy_outside_pair: bool) -> None:
     n = NODES
     for hour in (at(24, 2), at(24, 3)):
         rows.receipts(n["A"], n["G1"], hour, MESHSTL)
@@ -240,6 +242,9 @@ def _links(rows: RowMaker) -> None:
         rows.receipts(n["B"], n["G2"], hour, PUBLIC)
         rows.receipts(n["C"], n["G3"], hour, PUBLIC)
     rows.receipts(n["D"], n["E"], at(23, 11), PUBLIC)
+    if busy_outside_pair:
+        for hour in range(16, 21):
+            rows.receipts(n["D"], n["E"], at(23, hour), PUBLIC)
     rows.receipts(n["M"], n["E"], at(23, 15), PUBLIC)
 
 
@@ -257,6 +262,7 @@ def build_capture(
     one_coordinate: bool = True,
     g3_at_edge: bool = False,
     straddler: str | None = None,
+    busy_outside_pair: bool = False,
 ) -> Path:
     """Write the synthetic capture snapshot under root and return its finished folder.
 
@@ -270,12 +276,14 @@ def build_capture(
             50 m reaches outside the DEM.
         straddler: A key of STRADDLE_SHIFTS_M: that node also sends a box on
             the other side of the tile edge.
+        busy_outside_pair: Give D to E, which does not touch the tile, 5 more
+            link-hours, so it is the busiest pair by link-hours.
     """
     rows = RowMaker()
     _positions(rows, moved_a, one_coordinate, g3_at_edge)
     if straddler is not None:
         _straddle(rows, straddler)
-    _links(rows)
+    _links(rows, busy_outside_pair)
     partial = common.start_snapshot(root, SNAPSHOT_ID)
     by_hour: dict[datetime, list[dict[str, Any]]] = {}
     for row in rows.rows:

@@ -46,6 +46,12 @@ def pseudonym(name: str) -> str:
     return NODES[name].pseudonym
 
 
+# The both-ends gateway, then the gateway-only pairs' gateways in the capture's
+# pair order, which sorts by pseudonym: C to G3 before B to G2.
+SITE_ORDER = ("G1", "G3", "G2")
+SITE_ROLES = ["both_ends_gateway", "gateway_only_gateway", "gateway_only_gateway"]
+
+
 def east_west_half_m(name: str) -> float:
     """The east-west half of a node's box: Casey's inscribed square (issue #44, 1 (b))."""
     latitude_i, _, bits = NODES[name].box()
@@ -87,8 +93,8 @@ def test_command_writes_the_layers(
     assert list(sites.columns) == ["site_id", "geometry", "box_half_width_m", "role"]
     assert list(receivers.columns) == ["rx_id", "geometry", "box_half_width_m"]
     assert sites.crs.to_epsg() == receivers.crs.to_epsg() == 26915
-    assert list(sites["site_id"]) == [pseudonym("G1"), pseudonym("G2"), pseudonym("G3")]
-    assert list(sites["role"]) == ["both_ends_gateway", "busy_pair_gateway", "busy_pair_gateway"]
+    assert list(sites["site_id"]) == [pseudonym(name) for name in SITE_ORDER]
+    assert list(sites["role"]) == SITE_ROLES
     assert list(receivers["rx_id"]) == [pseudonym("A")]
     for frame, column in ((sites, "site_id"), (receivers, "rx_id")):
         for row_id, point in zip(frame[column], frame.geometry, strict=True):
@@ -96,13 +102,13 @@ def test_command_writes_the_layers(
             assert (point.x, point.y) == pytest.approx(centre_m(name), abs=1e-6)
     assert str(sites["box_half_width_m"].dtype) == "float64"
     assert list(sites["box_half_width_m"]) == pytest.approx(
-        [east_west_half_m("G1"), east_west_half_m("G2"), east_west_half_m("G3")], abs=1e-9
+        [east_west_half_m(name) for name in SITE_ORDER], abs=1e-9
     )
     assert list(receivers["box_half_width_m"]) == pytest.approx([east_west_half_m("A")], abs=1e-9)
     assert len(read_points(out / "tx_sites_real.parquet", "site_id")) == 3
     assert len(read_points(out / "rx_real.parquet", "rx_id")) == 1
     printed = capsys.readouterr().out
-    assert re.search(rf"{pseudonym('G3')} busy_pair_gateway: .*extent pass", printed)
+    assert re.search(rf"{pseudonym('G3')} gateway_only_gateway: .*extent pass", printed)
     assert re.search(rf"{pseudonym('G1')} both_ends_gateway: .*extent pass", printed)
     assert re.search(rf"{pseudonym('A')} both_ends_relayer: .*extent pass", printed)
     assert not any(line.startswith("dropped") for line in printed.splitlines())
@@ -123,14 +129,32 @@ def test_the_marker_matches_the_engines_definition() -> None:
     assert engine_inputs.POSITIONS_REAL == positions_marker.REAL.encode()
 
 
-def test_the_command_states_the_busiest_pair_rule(
+def test_the_command_states_the_site_rule_and_no_busiest_pairs(
     tmp_path: Path, capture: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert run(tmp_path) == 0
+    lines = capsys.readouterr().out.splitlines()
     assert (
-        "busiest two pairs: by link-hours over both runs, ties broken by receipts in those "
-        "link-hours (Casey, issue #44, engine_inputs Q2 (a), 2026-11-16)"
-    ) in capsys.readouterr().out.splitlines()
+        "sites by tile membership: the in-tile gateway of every pair touching the tile, "
+        "the both-ends pair's first (Casey, issue #44, busiest pair, 2026-11-17)"
+    ) in lines
+    assert not any("busiest" in line for line in lines)
+
+
+def test_the_busiest_pair_outside_the_tile_leaves_the_sites_as_they_are(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """D to E, the busiest pair by link-hours, does not touch the tile; the run still writes."""
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", busy_outside_pair=True)
+    assert run(tmp_path) == 0
+    printed = capsys.readouterr().out
+    assert f"pair {pseudonym('D')} to {pseudonym('E')}: link-hours over both runs 6," in printed
+    out = tmp_path / "configs" / "x72y429"
+    sites = gpd.read_parquet(out / "tx_sites_real.parquet")
+    assert list(sites["site_id"]) == [pseudonym(name) for name in SITE_ORDER]
+    assert list(sites["role"]) == SITE_ROLES
+    assert list(gpd.read_parquet(out / "rx_real.parquet")["rx_id"]) == [pseudonym("A")]
 
 
 def test_the_command_quotes_caseys_never_publish_sentence(
@@ -188,7 +212,7 @@ def names(text: str) -> str:
     return text.format(**{name: pseudonym(name) for name in NODES})
 
 
-BUSIEST_RULE_LINE = "busiest two pairs: by link-hours"
+SITE_RULE_LINE = "sites by tile membership:"
 
 
 @pytest.mark.parametrize(
@@ -196,7 +220,7 @@ BUSIEST_RULE_LINE = "busiest two pairs: by link-hours"
     [
         (
             {"straddler": "G2"},
-            "dropped busiest pair {B} to {G2}: gateway straddles the tile edge",
+            "dropped gateway-only pair {B} to {G2}: gateway straddles the tile edge",
             True,
         ),
         (
@@ -206,7 +230,7 @@ BUSIEST_RULE_LINE = "busiest two pairs: by link-hours"
         ),
         (
             {"g3_at_edge": True},
-            "dropped busiest pair {C} to {G3}: gateway fails the DEM edge check",
+            "dropped gateway-only pair {C} to {G3}: gateway fails the DEM edge check",
             False,
         ),
     ],
@@ -227,10 +251,11 @@ def test_a_dropped_selected_pair_stops_the_run_before_any_write(
     printed = capsys.readouterr().out
     lines = printed.splitlines()
     assert [text for text in lines if text.startswith("dropped")] == [names(line)]
-    rule = next(index for index, text in enumerate(lines) if text.startswith(BUSIEST_RULE_LINE))
+    rule = next(index for index, text in enumerate(lines) if text.startswith(SITE_RULE_LINE))
     assert (lines.index(names(line)) < rule) is before_selection
     if options.get("g3_at_edge"):
-        assert re.search(rf"^{pseudonym('G3')} busy_pair_gateway: .*extent fail$", printed, re.M)
+        pattern = rf"^{pseudonym('G3')} gateway_only_gateway: .*extent fail$"
+        assert re.search(pattern, printed, re.M)
     assert "refused, nothing written: selected pairs dropped" in printed
     assert not any(text.startswith("counts for") for text in lines)
     assert coordinates_in(printed + repr(events)) == []
@@ -274,7 +299,7 @@ def test_a_straddle_line_prints_before_a_tile_check_refusal(
     assert tile_line in lines
     assert [text for text in lines if text.startswith("dropped")] == [names(line)]
     assert lines.index(names(line)) < lines.index(refusal)
-    assert not any(text.startswith(BUSIEST_RULE_LINE) for text in lines)
+    assert not any(text.startswith(SITE_RULE_LINE) for text in lines)
     assert coordinates_in(printed + repr(events)) == []
 
 

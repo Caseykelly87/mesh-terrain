@@ -1,4 +1,6 @@
-"""The tile's nodes, the busiest-pair rule, the DEM extent rule and pair drops, on invented nodes.
+"""The tile's nodes by tile membership, the busiest-pair rule, the DEM extent rule and drops.
+
+Every node is invented.
 
 No test reads the real snapshot.
 """
@@ -23,8 +25,8 @@ from engine.terrain_build import check_covers
 from ingester.link_pairs import Box, CaptureLinks, NodePositions, PairActivity, SelectionError
 from ingester.tile_selection import (
     BOTH_ENDS_PAIR,
-    BUSIEST_PAIR,
     FAILS_DEM,
+    GATEWAY_ONLY_PAIR,
     KIND_NOT_DETERMINED,
     OTHER_PAIR,
     STRADDLES,
@@ -94,9 +96,27 @@ def select(found: CaptureLinks, expect_pairs: int) -> Selection:
 
 
 # The fixture's three selected pairs: A to G1 with both ends in the tile, and
-# B to G2 and C to G3, the two busiest, with only their gateway in it.
+# B to G2 and C to G3 with only their gateway in it.
 SELECTED = (pair("A", "G1", 2), pair("B", "G2", 5), pair("C", "G3", 4))
-KINDS = {SELECTED[0]: BOTH_ENDS_PAIR, SELECTED[1]: BUSIEST_PAIR, SELECTED[2]: BUSIEST_PAIR}
+KINDS = {
+    SELECTED[0]: BOTH_ENDS_PAIR,
+    SELECTED[1]: GATEWAY_ONLY_PAIR,
+    SELECTED[2]: GATEWAY_ONLY_PAIR,
+}
+
+
+def site_roles(selection: Selection) -> list[tuple[str, str]]:
+    sites, _ = selection.layers()
+    return [(site.pseudonym, site.role) for site in sites]
+
+
+def touching_sites(found: CaptureLinks) -> list[tuple[str, str]]:
+    """G1 as the both-ends gateway, then G2 and G3 in the capture's pair order."""
+    gateway_only = {pseudonym("G2"), pseudonym("G3")}
+    return [
+        (pseudonym("G1"), "both_ends_gateway"),
+        *((p.gateway, "gateway_only_gateway") for p in found.pairs if p.gateway in gateway_only),
+    ]
 
 
 def test_tile_bounds_follow_the_usgs_naming() -> None:
@@ -153,7 +173,7 @@ def test_busiest_two_refuses_a_tie_for_second_on_both_keys() -> None:
 
 
 def test_busiest_two_refuses_fewer_than_two_pairs() -> None:
-    with pytest.raises(SelectionError, match="1 pairs; the selection needs two busy pairs"):
+    with pytest.raises(SelectionError, match="1 pairs; the ranking needs two pairs"):
         busiest_two([activity("a", 4, 4, 12)])
 
 
@@ -162,14 +182,54 @@ def test_a_gateway_in_two_selected_pairs_is_one_site_with_the_both_ends_role() -
     sites, receiver = select(found, 4).layers()
     assert [(site.pseudonym, site.role) for site in sites] == [
         (pseudonym("G1"), "both_ends_gateway"),
-        (pseudonym("G3"), "busy_pair_gateway"),
+        (pseudonym("G3"), "gateway_only_gateway"),
     ]
     assert receiver.pseudonym == pseudonym("A")
 
 
-def test_refuses_fewer_than_two_pairs_to_rank() -> None:
-    with pytest.raises(SelectionError, match="1 pairs; the selection needs two busy pairs"):
-        select(links(pair("A", "G1", 2)), 1)
+def test_sites_are_the_touching_gateways_when_the_busiest_pair_is_outside_the_tile() -> None:
+    """D to E, outside the tile, is the busiest pair by link-hours and selects nothing."""
+    found = links(*SELECTED, pair("D", "E", 9))
+    assert busiest_two(found.pairs)[0] == pair("D", "E", 9)
+    selection = select(found, 4)
+    assert site_roles(selection) == touching_sites(found)
+    assert selection.layers()[1].pseudonym == pseudonym("A")
+
+
+def test_sites_follow_the_pair_order_not_the_busiest_ranking() -> None:
+    """Swapping which gateway-only pair is busier leaves the sites and their order as they were."""
+    one = links(pair("A", "G1", 2), pair("B", "G2", 5), pair("C", "G3", 4))
+    other = links(pair("A", "G1", 2), pair("B", "G2", 4), pair("C", "G3", 5))
+    assert site_roles(select(one, 3)) == site_roles(select(other, 3)) == touching_sites(one)
+
+
+def test_a_busiest_both_ends_pair_changes_nothing() -> None:
+    found = links(pair("A", "G1", 6), pair("B", "G2", 5), pair("C", "G3", 1))
+    assert site_roles(select(found, 3)) == touching_sites(found)
+
+
+def test_a_tie_for_second_busiest_does_not_refuse_the_selection() -> None:
+    found = links(pair("A", "G1", 2), pair("B", "G2", 4), pair("C", "G3", 4), pair("D", "E", 6))
+    with pytest.raises(SelectionError, match="tie for second busiest"):
+        busiest_two(found.pairs)
+    assert site_roles(select(found, 4)) == touching_sites(found)
+
+
+@pytest.mark.parametrize(
+    ("pairs", "gateway_only"),
+    [
+        ((pair("A", "G1", 2),), 0),
+        ((pair("A", "G1", 2), pair("B", "G2", 5), pair("D", "E", 1)), 1),
+        # Three touching pairs, one of them with only its relayer in the tile.
+        ((pair("A", "G1", 2), pair("B", "G2", 5), pair("A", "E", 4)), 1),
+    ],
+)
+def test_refuses_a_tile_without_two_gateway_only_pairs(
+    pairs: tuple[PairActivity, ...], gateway_only: int
+) -> None:
+    message = f"{gateway_only} pairs have only the gateway end in x72y429, not two"
+    with pytest.raises(SelectionError, match=message):
+        select(links(*pairs), len(pairs))
 
 
 def test_refuses_a_pair_node_without_a_usable_position() -> None:
@@ -193,15 +253,14 @@ def test_a_selection_with_no_drop_gives_the_layers() -> None:
     selection = select(links(*SELECTED, pair("D", "E", 1)), 4)
     assert selection.dropped == ()
     assert all(selection.dem_check.values())
-    sites, receiver = selection.layers()
-    assert [site.pseudonym for site in sites] == [pseudonym(n) for n in ("G1", "G2", "G3")]
-    assert receiver.pseudonym == pseudonym("A")
+    assert site_roles(selection) == touching_sites(links(*SELECTED))
+    assert selection.layers()[1].pseudonym == pseudonym("A")
 
 
-def test_a_straddling_busiest_gateway_is_counted_then_its_pair_is_dropped() -> None:
+def test_a_straddling_gateway_only_gateway_is_counted_then_its_pair_is_dropped() -> None:
     selection = select(links(*SELECTED, nodes=straddling("G2")), 3)
     assert selection.dropped == (
-        DroppedPair(pair("B", "G2", 5), BUSIEST_PAIR, (("gateway", STRADDLES),)),
+        DroppedPair(pair("B", "G2", 5), GATEWAY_ONLY_PAIR, (("gateway", STRADDLES),)),
     )
     assert pseudonym("G2") not in {node.pseudonym for node in selection.placed}
 
@@ -217,7 +276,7 @@ def test_a_selected_gateway_failing_the_dem_check_drops_its_pair() -> None:
     selection = select(links(*SELECTED, nodes=g3_at_edge()), 3)
     assert selection.dem_check[pseudonym("G3")] is False
     assert selection.dropped == (
-        DroppedPair(pair("C", "G3", 4), BUSIEST_PAIR, (("gateway", FAILS_DEM),)),
+        DroppedPair(pair("C", "G3", 4), GATEWAY_ONLY_PAIR, (("gateway", FAILS_DEM),)),
     )
 
 
@@ -251,16 +310,16 @@ def test_a_node_shared_with_a_dropped_pair_stays_in_the_kept_pair() -> None:
 def test_a_placed_node_failing_the_dem_check_drops_every_pair_it_is_in() -> None:
     selected, other = pair("C", "G3", 4), pair("D", "G3", 1)
     states = pair_states(links(selected, other, nodes=g3_at_edge()), TILE)
-    found = dropped_pairs(states, {selected: BUSIEST_PAIR}, {pseudonym("G3"): False})
+    found = dropped_pairs(states, {selected: GATEWAY_ONLY_PAIR}, {pseudonym("G3"): False})
     assert found == (
-        DroppedPair(selected, BUSIEST_PAIR, (("gateway", FAILS_DEM),)),
+        DroppedPair(selected, GATEWAY_ONLY_PAIR, (("gateway", FAILS_DEM),)),
         DroppedPair(other, OTHER_PAIR, (("gateway", FAILS_DEM),)),
     )
 
 
 def test_straddle_drops_name_the_kind_when_the_tile_check_holds() -> None:
     assert straddle_drops(links(*SELECTED, nodes=straddling("G2")), TILE, 3) == (
-        DroppedPair(pair("B", "G2", 5), BUSIEST_PAIR, (("gateway", STRADDLES),)),
+        DroppedPair(pair("B", "G2", 5), GATEWAY_ONLY_PAIR, (("gateway", STRADDLES),)),
     )
 
 
@@ -303,12 +362,6 @@ def test_refuses_a_tile_without_exactly_one_both_ends_pair() -> None:
         select(found, 3)
 
 
-def test_refuses_busy_pairs_that_are_not_gateway_only_pairs_of_the_tile() -> None:
-    found = links(pair("A", "G1", 6), pair("B", "G2", 5), pair("C", "G3", 1))
-    with pytest.raises(SelectionError, match="not gateway-only pairs"):
-        select(found, 3)
-
-
 def test_refuses_other_than_three_pairs_touching_the_tile() -> None:
     found = links(pair("A", "G1", 1), pair("B", "G2", 5), pair("C", "G3", 4), pair("A", "E", 2))
     with pytest.raises(SelectionError, match="pairs touching x72y429 are not 3"):
@@ -322,8 +375,8 @@ def test_an_unselected_pair_with_a_straddling_node_fails_the_touching_count() ->
         select(found, 4)
 
 
-def test_a_straddling_busiest_relayer_fails_the_one_both_ends_pair_check() -> None:
-    """Counted as in the tile, the relayer gives a busiest pair both ends in it."""
+def test_a_straddling_gateway_only_relayer_fails_the_one_both_ends_pair_check() -> None:
+    """Counted as in the tile, the relayer gives a gateway-only pair both ends in it."""
     found = links(*SELECTED, nodes=two_boxes("B", -10_000.0, 0.0))
     with pytest.raises(SelectionError, match="2 pairs have both ends in x72y429, not one"):
         select(found, 3)
