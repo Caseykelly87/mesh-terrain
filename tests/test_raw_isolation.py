@@ -35,8 +35,8 @@ import psycopg
 import pytest
 import raw_schema
 from psycopg import sql
+from raw_schema import REAL_SCHEMAS as WATCHED
 from raw_schema import (
-    REAL_SCHEMAS,
     SCHEMA_PREFIX,
     connect_or_skip,
     drop_throwaway,
@@ -46,7 +46,7 @@ from raw_schema import (
 )
 
 TESTS = Path(__file__).resolve().parent
-QUALIFIED = re.compile(rf'\b({"|".join(REAL_SCHEMAS)})"?\.["\w]')
+QUALIFIED = re.compile(rf'\b({"|".join(WATCHED)})"?\.["\w]')
 NAMES = frozenset({"RAW_SCHEMA"})
 REAL_TARGET_TEST = "test_the_real_target_builds_the_real_schemas_and_reads_the_real_raw"
 # Matches that are not SQL, by (file, enclosing function or <module>), with
@@ -138,7 +138,7 @@ class _Scan(ast.NodeVisitor):
 
     def visit_Constant(self, node: ast.Constant) -> None:
         if isinstance(node.value, str) and id(node) not in self.skip:
-            if node.value in REAL_SCHEMAS:
+            if node.value in WATCHED:
                 self._hit(node, f"constant {node.value!r}")
             else:
                 self._text(node, node.value)
@@ -184,23 +184,61 @@ PROBES = {
     "RAW_SCHEMA attribute": 'load.row_counts(conn, "x", schema=load.RAW_SCHEMA)',
     "RAW_SCHEMA name": 'load.row_counts(conn, "x", schema=RAW_SCHEMA)',
     "RAW_SCHEMA import": "from ingester.load import RAW_SCHEMA as default",
+    "upper case": 'conn.execute("SELECT 1 FROM ^.SNAPSHOT")',
+    "upper case constant": 'sql.Identifier("^", "snapshot")',
+    "space around the dot": 'conn.execute("select 1 from @ . snapshot")',
+    "trailing qualified prefix": 'conn.execute("delete from @." + table)',
+    "trailing quoted prefix": "conn.execute('select 1 from \"@\".' + table)",
+    "search_path set": 'conn.execute("set search_path to @")',
+    "search_path list": 'conn.execute("set search_path = public, @")',
+    "search_path option": 'psycopg.connect(options="-c search_path=@")',
+    "f-string name part": 'name = f"@{SUFFIX}"',
+    "f-string ending in the name": 'q = f"select * from @{dot}snapshot"',
+    "string ending in the name": 'q = "select * from @" + "." + table',
+    "bytes literal": 'conn.execute(b"select 1 from @.snapshot")',
+    "REAL_SCHEMAS name": "touched = locked_relations(conn, REAL_SCHEMAS)",
+    "REAL_SCHEMAS attribute": "names = raw_schema.REAL_SCHEMAS",
+    "REAL_SCHEMAS import": "from raw_schema import REAL_SCHEMAS as watched",
+}
+# What the scan does not see; each probe shows it passes unseen. The database
+# role queued for platform-eng is the guard for these.
+NOT_SEEN = {
+    "name built from pieces": 's = "r" + "aw"\nconn.execute(f"select 1 from {s}.snapshot")',
+    "name joined at run time": 's = "".join(["r", "aw"])\nsql.Identifier(s, "snapshot")',
+    "name from the environment": 's = os.environ["TEST_SCHEMA"]\nsql.Identifier(s, "snapshot")',
+    "name from settings": 'sql.Identifier(settings.test_schema, "snapshot")',
+    "name from a file": 's = Path("schema.txt").read_text()\nsql.Identifier(s, "snapshot")',
+    "getattr on a built name": 's = getattr(load, "RAW_" + "SCHEMA")',
+    "loader call without schema=": 'load.row_counts(conn, "x")',
+    "register call without schema=": "register_verified(conn, folder)",
+    "SQL read from another file": 'conn.execute(Path("fixture.sql").read_text())',
 }
 
 
-@pytest.mark.parametrize("schema", REAL_SCHEMAS)
+def probe(source: str, schema: str) -> str:
+    """The probe for one watched name: @ as written, ^ in upper case."""
+    return source.replace("@", schema).replace("^", schema.upper())
+
+
+@pytest.mark.parametrize("schema", WATCHED)
 @pytest.mark.parametrize("form", sorted(PROBES))
 def test_the_scan_finds_each_form(form: str, schema: str) -> None:
-    assert real_schema_uses(PROBES[form].replace("@", schema)), form
+    assert real_schema_uses(probe(PROBES[form], schema)), form
+
+
+@pytest.mark.parametrize("form", sorted(NOT_SEEN))
+def test_the_scan_does_not_see_these_forms(form: str) -> None:
+    assert real_schema_uses(NOT_SEEN[form]) == [], form
 
 
 def test_the_scan_leaves_docstrings_and_other_words_alone() -> None:
-    docstring = '"""Loads into @.snapshot."""\n'.replace("@", REAL_SCHEMAS[0])
+    docstring = '"""Loads into @.snapshot."""\n'.replace("@", WATCHED[0])
     others = 'draw.ground = 1\nname = "rawness"\nkey = "raw_bucket"\nrawdata.x = 1\n'
     assert real_schema_uses(docstring + others) == []
 
 
 def test_the_scan_names_the_enclosing_function() -> None:
-    source = 'def test_one():\n    s = "@"\n'.replace("@", REAL_SCHEMAS[0])
+    source = 'def test_one():\n    s = "@"\n'.replace("@", WATCHED[0])
     assert real_schema_uses(source) == [("test_one", "constant 'raw'", 2)]
 
 
@@ -288,7 +326,7 @@ def test_the_teardown_fails_a_test_that_read_a_watched_schema(
             drop_throwaway(setup, name)
 
 
-@pytest.mark.parametrize("name", [*REAL_SCHEMAS, "public", "test_load_", "test_load_x; drop"])
+@pytest.mark.parametrize("name", [*WATCHED, "public", "test_load_", "test_load_x; drop"])
 def test_only_a_throwaway_name_is_ever_dropped(name: str) -> None:
     # The refusal comes before any SQL, so no connection is needed.
     with pytest.raises(ValueError, match="never dropped"):
