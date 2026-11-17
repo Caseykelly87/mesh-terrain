@@ -77,6 +77,7 @@ def apply_ddl(conn: psycopg.Connection, *, schema: str = RAW_SCHEMA) -> None:
     """Create the raw tables in the schema when they are missing.
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
         schema: The schema holding the raw tables; raw unless a test passes its own.
     """
     conn.execute(raw_ddl(schema))
@@ -86,6 +87,7 @@ def check_columns(conn: psycopg.Connection, *, schema: str = RAW_SCHEMA) -> None
     """Refuse when a raw table's columns differ from the allowlist.
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
         schema: The schema holding the raw tables; raw unless a test passes its own.
 
     Raises:
@@ -108,6 +110,10 @@ def load_table(
     """Copy one table's files into the raw table of that name; returns the rows inserted.
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
+        folder: A finished snapshot folder, `<root>/<id>/`.
+        table: The landed table to copy: mqtt_message, mqtt_copy_count or
+            mqtt_dropped_count.
         schema: The schema holding the raw tables; raw unless a test passes its own.
     """
     started = time.monotonic()
@@ -149,6 +155,8 @@ def load_snapshot(
     """Load one finished snapshot folder; returns rows inserted per table.
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
+        folder: A finished snapshot folder, `<root>/<id>/`.
         schema: The schema holding the raw tables; raw unless a test passes its own.
 
     Raises:
@@ -174,6 +182,8 @@ def row_counts(
     """Rows per raw table for one snapshot.
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
+        snapshot_id: The snapshot whose rows are read.
         schema: The schema holding the raw tables; raw unless a test passes its own.
     """
     counts: dict[str, int] = {}
@@ -202,6 +212,8 @@ def reconcile(conn: psycopg.Connection, folder: Path, *, schema: str = RAW_SCHEM
     manifest's sums over both brokers.
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
+        folder: A finished snapshot folder, `<root>/<id>/`.
         schema: The schema holding the raw tables; raw unless a test passes its own.
 
     Returns:
@@ -301,6 +313,8 @@ def decode_rates(
     """ing_04: ok over stored radio deliveries with a payload, per broker flag.
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
+        snapshot_id: The snapshot whose rows are read.
         schema: The schema holding the raw tables; raw unless a test passes its own.
     """
     query = sql.SQL(
@@ -332,6 +346,8 @@ def zero_positions(
     field); a missing coordinate is null and is never read as 0 (Casey, 2026-11-14).
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
+        snapshot_id: The snapshot whose rows are read.
         schema: The schema holding the raw tables; raw unless a test passes its own.
     """
     query = sql.SQL(
@@ -370,6 +386,8 @@ def content_hashes(
     which differs on every load.
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
+        snapshot_id: The snapshot whose rows are read.
         schema: The schema holding the raw tables; raw unless a test passes its own.
     """
     columns_by_table = {table: allowlist(table) for table in LOAD_ORDER}
@@ -394,6 +412,8 @@ def hash_problems(conn: psycopg.Connection, folder: Path, *, schema: str = RAW_S
     """snp_01: one `content_hash: table` line per raw table whose hash differs from the manifest.
 
     Args:
+        conn: An open warehouse connection; the caller owns the transaction.
+        folder: A finished snapshot folder, `<root>/<id>/`.
         schema: The schema holding the raw tables; raw unless a test passes its own.
     """
     manifest = read_manifest(folder)
