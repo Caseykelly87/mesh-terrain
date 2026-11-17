@@ -14,7 +14,7 @@ which sites are chosen.
 
 The DEM check uses the engine's rule: `engine.grid.run_grid` builds the grid
 for one box plus the engine's 50 m margin, and the comparison of
-`engine.terrain_build._check_covers` is mirrored on the DEM snapshot's bounds,
+`engine.terrain_build.check_covers` is mirrored on the DEM snapshot's bounds,
 read through the engine's own snapshot reader. Nothing here prints, logs or
 puts a coordinate in an error message.
 """
@@ -195,7 +195,7 @@ def inside_dem(centre_xy_m: tuple[float, float], half_width_m: float, extent: Ex
         extent: The DEM's west, south, east and north edges, from `dem_extent`.
 
     Returns:
-        False exactly when engine.terrain_build._check_covers would refuse a
+        False exactly when engine.terrain_build.check_covers would refuse a
         run with this box alone.
     """
     box = EndpointBox(centre_xy_m=centre_xy_m, half_width_m=half_width_m)
