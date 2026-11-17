@@ -24,7 +24,9 @@ example, is refused as before.
 With the count check as it is, three touching pairs and all three selected,
 an unselected pair can only be dropped if it touches the tile, and a fourth
 touching pair fails the count check first. A drop that reaches the drop step
-is therefore always of a selected pair, and stops the run.
+is therefore always of a selected pair, and stops the run. `straddle_drops`
+finds the straddle drops before those checks run, so the command can print
+them first (Casey, PR #51, (a)).
 
 The measurements file does not say how it ranked the busiest pairs.
 `busiest_two` ranks them by link-hours over both runs, ties broken by
