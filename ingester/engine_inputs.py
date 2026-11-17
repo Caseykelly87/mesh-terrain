@@ -16,8 +16,11 @@ tile for the tile check, then drops its own pair, as a node the run places
 that fails the DEM edge check does (Casey, issue #44, engine_inputs Q1 (a),
 2026-11-17; the rule in full is in `ingester.tile_selection`). The command
 prints one line per end that drops a pair, naming both ends' pseudonyms, the
-end and the reason. When the both-ends pair or a busiest pair is dropped it
-refuses (exit 2) after those lines, before anything is written.
+end and the reason. Straddle lines print before the tile check's count checks
+can refuse (Casey, PR #51, (a)), so a refusal shows which pair and end caused
+it; edge-check lines print after the nodes are placed. When the both-ends pair
+or a busiest pair is dropped it refuses (exit 2) after those lines, before
+anything is written.
 
 Both layers are written into a staging folder inside the output folder and
 moved to their names only when both are complete. A refusal exits 2 and any
