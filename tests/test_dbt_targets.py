@@ -10,10 +10,8 @@ to the target `prod`, which only the lead runs (`make dbt-build-real`).
 from typing import Any
 
 import yaml
-from dbt_listing import DBT_DIR, dbt_nodes
+from dbt_listing import DBT_DIR, DEVELOPMENT_TARGET, REAL_TARGET, dbt_nodes
 
-DEVELOPMENT_TARGET = "dev_wh"
-REAL_TARGET = "prod"
 SUFFIX = f"_{DEVELOPMENT_TARGET}"
 REAL_SCHEMAS = {"raw", "staging", "core", "analytics"}
 BUILT_TYPES = {"model", "seed", "snapshot", "test"}

@@ -21,6 +21,10 @@ from dagster_dbt import DbtProject
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DBT_DIR = REPO_ROOT / "dbt"
+# make check and make dbt-build use the development target; the lead runs
+# the real one (dbt/profiles.yml, dbt/README.md).
+DEVELOPMENT_TARGET = "dev_wh"
+REAL_TARGET = "prod"
 OUTPUT_KEYS = ("unique_id", "name", "resource_type", "schema", "original_file_path", "config")
 
 
