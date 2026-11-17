@@ -7,9 +7,8 @@ Each value names where it comes from:
   its `frequency_mhz` row;
 - the five models `docs/INTERFACE.md` lists, all of which the lead's brief
   for this run names (issue #44);
-- `mesh_node` at the receivers; the profile at the gateway sites is open
-  for Casey (PR #48) and set in `SITE_PROFILE` alone, so his answer is a
-  one-line change;
+- `mesh_node` at both ends, gateway sites included: Casey's decision 2 (a)
+  on issue #44, which extends ADR 0006 decision 5.1 to this run;
 - 16 endpoint draws (`docs/PLAN.md`, Phase 3 tasks; ADR 0006 item 10);
 - the five snapshots registered for the tile (issue #44, PR #46);
 - `output_dir: /runs`, the folder `make engine` mounts (PR #43).
@@ -24,7 +23,7 @@ from terrain.path_loss import MODELS
 
 FREQUENCY_MHZ = 906.875
 SITE_PROFILE = "mesh_node"
-"""Profile at the gateway sites: open for Casey on PR #48 (mesh_node or site_gateway)."""
+"""Profile at the gateway sites (Casey, issue #44, decision 2 (a))."""
 RECEIVER_PROFILE = "mesh_node"
 ENDPOINT_DRAWS = 16
 SEED = 20261108
@@ -74,7 +73,7 @@ def config_text(tile: str) -> str:
         "# Coverage outputs built from real gateway positions "
         f"{NEVER_PUBLISHED} (Casey, issue #44).",
         "# Frequency: US LongFast (docs/PLAN.md, Objective; docs/INTERFACE.md, frequency_mhz).",
-        "# Profiles: the site profile is open for Casey (PR #48).",
+        "# Profiles: mesh_node at both ends (Casey, issue #44, decision 2 (a)).",
         f"run_id: {tile}",
         f"frequency_mhz: {FREQUENCY_MHZ}",
         f"models: [{', '.join(MODELS)}]",

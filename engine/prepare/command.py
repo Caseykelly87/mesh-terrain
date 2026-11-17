@@ -12,7 +12,9 @@ It reads the two real layers another step wrote into the folder
    path's distance to them;
 4. writes `rx_points.parquet` (the real receivers, then the grid),
    `tx_sites.parquet` (the sites in the run), `crossing.md` and
-   `<tile>.yaml` into a new temporary folder inside the folder, checks the
+   `<tile>.yaml` into a new temporary folder inside the folder, stamps the
+   two point layers with the positions marker (`real` unless every input
+   row is marked `synthetic`; `engine.positions_marker`), checks the
    config with the engine's own `load_config`, then moves each file to its
    name, and prints `crossing.md`.
 
@@ -42,6 +44,13 @@ from shapely.geometry import Point
 from engine.config import SnapshotIds, load_config
 from engine.errors import ConfigError
 from engine.points import Endpoint, read_points
+from engine.positions_marker import (
+    POSITIONS_KEY,
+    REAL,
+    SYNTHETIC,
+    positions_marker,
+    stamp_positions,
+)
 from engine.prepare.crossing import CROSSING_DISTANCE_M, TALL_CELL_M, path_crossings, tall_cells
 from engine.prepare.extent import outside_extent
 from engine.prepare.report import CrossingReport, Site, crossing_markdown
@@ -118,14 +127,18 @@ def prepare_folder(tile_name: str, folder: Path, snapshots_dir: Path) -> str:
     log.info("prepare_layers_read_begin", tile=tile.name, folder=str(folder))
     sites, roles = _read_sites(folder / REAL_SITES_FILE)
     receivers = read_points(_agreed_layer(folder / REAL_RECEIVERS_FILE, RECEIVER_COLUMNS), "rx_id")
-    log.info("prepare_layers_read_end", sites=len(sites), receivers=len(receivers))
+    markers = {
+        SITES_FILE: _input_marker(folder / REAL_SITES_FILE),
+        RECEIVERS_FILE: _input_marker(folder / REAL_RECEIVERS_FILE),
+    }
+    log.info("prepare_layers_read_end", sites=len(sites), receivers=len(receivers), **markers)
     grid = grid_receivers(tile)
     _check_unique([r.endpoint_id for r in receivers + grid])
     snapshots = _snapshots(tile, snapshots_dir)
     in_run = _sites_in_run(sites, receivers, grid, snapshots["dem"])
     report = _crossing_report(tile, snapshots, sites, roles, in_run, receivers, grid)
     summary = crossing_markdown(report)
-    _write_outputs(folder, tile, in_run, receivers + grid, summary)
+    _write_outputs(folder, tile, in_run, receivers + grid, summary, markers)
     return summary
 
 
@@ -189,6 +202,20 @@ def _read_sites(path: Path) -> tuple[list[Endpoint], dict[str, str]]:
                 f"{path.name}: site_id {site.endpoint_id!r} cannot name a coverage file"
             )
     return sites, roles
+
+
+def _input_marker(path: Path) -> str:
+    """The positions marker the outputs from this layer carry: unmarked counts as real.
+
+    The grid is made up, so a receiver layer stays `synthetic` only when the
+    real receivers' file says every one of its rows is.
+    """
+    marker = positions_marker(path)
+    if marker is None:
+        return REAL
+    if marker not in (REAL, SYNTHETIC):
+        raise ConfigError(f"{path.name}: {POSITIONS_KEY} is {marker!r}, not {REAL} or {SYNTHETIC}")
+    return marker
 
 
 def _check_unique(rx_ids: list[str]) -> None:
@@ -288,7 +315,12 @@ def move_into_place(source: Path, target: Path) -> None:
 
 
 def _write_outputs(
-    folder: Path, tile: Tile, sites: list[Endpoint], receivers: list[Endpoint], summary: str
+    folder: Path,
+    tile: Tile,
+    sites: list[Endpoint],
+    receivers: list[Endpoint],
+    summary: str,
+    markers: dict[str, str],
 ) -> None:
     """Write the four outputs in a temporary folder, check the config, then move them in."""
     started = time.monotonic()
@@ -296,7 +328,7 @@ def _write_outputs(
     staging = Path(tempfile.mkdtemp(prefix=".prepare-", dir=folder))
     moved: list[Path] = []
     try:
-        names = _write_staged(staging, tile, sites, receivers, summary)
+        names = _write_staged(staging, tile, sites, receivers, summary, markers)
         for name in names:
             move_into_place(staging / name, folder / name)
             moved.append(folder / name)
@@ -318,11 +350,18 @@ def _write_outputs(
 
 
 def _write_staged(
-    staging: Path, tile: Tile, sites: list[Endpoint], receivers: list[Endpoint], summary: str
+    staging: Path,
+    tile: Tile,
+    sites: list[Endpoint],
+    receivers: list[Endpoint],
+    summary: str,
+    markers: dict[str, str],
 ) -> list[str]:
     """Write every output into the empty staging folder; return their names, config last."""
     _layer("rx_id", receivers).to_parquet(staging / RECEIVERS_FILE, index=False)
     _layer("site_id", sites).to_parquet(staging / SITES_FILE, index=False)
+    for name, marker in markers.items():
+        stamp_positions(staging / name, marker)
     with (staging / CROSSING_FILE).open("x", encoding="utf-8", newline="\n") as handle:
         handle.write(summary)
     config = staging / config_name(tile.name)
