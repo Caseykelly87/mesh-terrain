@@ -29,12 +29,20 @@ Run:
     - text where `search_path` is followed, before the next semicolon or line end, by either name as a whole word (`set search_path to public, raw`, `options="-c search_path=raw"`);
     - a string or bytes literal, or an f-string's literal part, that is, or ends with, either name as a whole word not preceded by a dot (`"raw"`, `f"raw{SUFFIX}"`, `"select * from raw" + "." + table`), however it is then used;
     - any name, attribute or import called `RAW_SCHEMA` or `REAL_SCHEMAS`.
-  - What it does not see (each has a probe in `NOT_SEEN` that passes unseen):
+  - What it does not see, each with a probe in `NOT_SEEN` that passes unseen (the last has its own test, `test_an_allowed_match_used_as_sql_adds_no_match`). This list holds every gap found so far; it is not a proof that nothing else gets past the scan. The database role (platform-eng, next) is the guard.
     - a name built from pieces at run time (`"r" + "aw"`, `"".join(["r", "aw"])`);
     - a name read from the environment, settings or a file;
     - `getattr` with an attribute name built at run time;
     - a loader or register call without `schema=`, which falls back to `raw` (the throwaway fixture's lock check catches this on its own connection only);
-    - SQL read from a file that is not Python.
+    - SQL read from a file that is not Python;
+    - `set schema 'raw'`;
+    - a multi-line string with `search_path` and the name on different lines and SQL after;
+    - a database-qualified name at the end of a string (`"delete from mesh.raw" + ".snapshot"`);
+    - an f-string with a replacement field directly before the name (`f"delete from {p}raw.snapshot"`);
+    - a SQL comment between the name and the dot (`raw/**/.snapshot`);
+    - a Unicode-escaped identifier (`U&"\0072aw"`);
+    - the `schema` default read at run time (`inspect.signature`, `__kwdefaults__`);
+    - an alias or variable holding an ALLOWED match later used as SQL: ALLOWED counts matches, not uses.
   - The scan is capped (Casey, issue #55, 2026-11-17, item 4): a gap found later goes into this list, not into new code. The database role with no INSERT, UPDATE, DELETE or TRUNCATE on `raw` or `raw_dev_wh`, next in platform-eng's queue (Casey, issue #55 comment 6961809084, item 10), is the guard for everything the scan cannot see.
 - Reduction: `uv run --frozen python -I -m ingester.reduce`. It ran once, on 2026-11-14, and cannot run again: its input archive was deleted that day.
 - Load: `uv run --frozen python -m ingester.load <snapshot id>`.

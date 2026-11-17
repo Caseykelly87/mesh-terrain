@@ -1,4 +1,4 @@
-"""No test sends SQL to the real raw tables, and the throwaway schema is gone after each use.
+r"""No test sends SQL to the real raw tables, and the throwaway schema is gone after each use.
 
 Casey, issue #55 comment 6960283869, item 10: the loader tests use their own
 throwaway schema, never `raw` and never `raw_dev_wh`. The source scan reads
@@ -18,14 +18,30 @@ What the scan matches in every test module, outside docstrings, ignoring case:
   used;
 - any name, attribute or import called `RAW_SCHEMA` or `REAL_SCHEMAS`.
 
-What it does not see (each has a probe in `NOT_SEEN` that passes unseen):
+What it does not see, each with a probe in `NOT_SEEN` that passes unseen (the
+last has its own test, `test_an_allowed_match_used_as_sql_adds_no_match`). This
+list holds every gap found so far; it is not a proof that nothing else gets
+past the scan. The database role (platform-eng, next) is the guard.
 
 - a name built from pieces at run time (`"r" + "aw"`, `"".join(["r", "aw"])`);
 - a name read from the environment, settings or a file;
 - `getattr` with an attribute name built at run time;
 - a loader or register call without `schema=`, which falls back to `raw` (the
   throwaway fixture's lock check catches this on its own connection only);
-- SQL read from a file that is not Python.
+- SQL read from a file that is not Python;
+- `set schema 'raw'`;
+- a multi-line string with `search_path` and the name on different lines and
+  SQL after;
+- a database-qualified name at the end of a string (`"delete from mesh.raw" +
+  ".snapshot"`);
+- an f-string with a replacement field directly before the name (`f"delete from
+  {p}raw.snapshot"`);
+- a SQL comment between the name and the dot (`raw/**/.snapshot`);
+- a Unicode-escaped identifier (`U&"\0072aw"`);
+- the `schema` default read at run time (`inspect.signature`,
+  `__kwdefaults__`);
+- an alias or variable holding an ALLOWED match later used as SQL: ALLOWED
+  counts matches, not uses.
 
 The scan is capped (Casey, issue #55, 2026-11-17, item 4): a gap found later
 goes into this list, not into new code. The database role with no INSERT,
