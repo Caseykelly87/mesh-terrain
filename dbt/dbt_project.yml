@@ -13,11 +13,16 @@ clean-targets:
   - target
   - dbt_packages
 
+# Creates the development target's raw, staging, core and analytics schemas
+# when absent; does nothing on prod (macros/target_schemas.sql).
+on-run-start:
+  - "{{ create_target_schemas() }}"
+
 models:
   mesh_terrain:
     # Schema names here must stay equal to the schemas the warehouse init SQL
-    # creates; the custom generate_schema_name macro makes dbt use them as-is
-    # instead of prefixing the target schema.
+    # creates. On prod the schema macro uses them as they are; every other
+    # target suffixes them with its own name (macros/target_schemas.sql).
     staging:
       +schema: staging
       +materialized: view
