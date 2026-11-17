@@ -10,7 +10,8 @@ only the relayer end in it. The sites are then the both-ends pair's gateway
 and each gateway-only pair's gateway, each gateway once with the both-ends
 role first, and the receiver is the both-ends pair's relayer, each placed at
 its stationary box centre in EPSG:26915. The 2026-11-08 note's ranking rule
-for its two busiest pairs is lost, so nothing selected depends on a ranking.
+for its two busiest pairs is lost. By Casey's decision nothing selected
+depends on a ranking.
 
 A node straddles the tile when its usable boxes lie on both sides of the tile
 edge; it has no stationary box. The rule for it (Casey, issue #44,
