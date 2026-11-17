@@ -46,37 +46,55 @@ from raw_schema import (
 )
 
 TESTS = Path(__file__).resolve().parent
-QUALIFIED = re.compile(rf'\b({"|".join(WATCHED)})"?\.["\w]')
-NAMES = frozenset({"RAW_SCHEMA"})
+# The longer name first, so raw_dev_wh is not read as raw followed by text.
+_WATCHED = "|".join(sorted(WATCHED, key=len, reverse=True))
+# A watched name, quoted or not, then a dot, spaces allowed around it, then
+# a name, a quote or the end of the text ("delete from raw." + table).
+QUALIFIED = re.compile(rf'(?<![\w$])"?({_WATCHED})"?\s*\.\s*(?:["\w]|$)', re.IGNORECASE)
+# search_path set to a list that holds a watched name, in SQL or a connect option.
+SEARCH_PATH = re.compile(
+    rf'search_path\W[^;\n]*?(?<![\w$])"?({_WATCHED})"?(?![\w$])', re.IGNORECASE
+)
+# Text that is, or ends with, a watched name as a whole word: "raw", f"raw{SUFFIX}",
+# "select * from raw" + "." + table.
+ENDING = re.compile(rf'(?<![\w$.])"?({_WATCHED})"?\s*$', re.IGNORECASE)
+NAMES = frozenset({"RAW_SCHEMA", "REAL_SCHEMAS"})
+DEV_SOURCE_TEST = "test_every_source_on_the_development_target_reads_the_synthetic_raw_schema"
 REAL_TARGET_TEST = "test_the_real_target_builds_the_real_schemas_and_reads_the_real_raw"
+SCANNER_TEST = "test_the_scanner_finds_schema_names_written_into_sql"
 # Matches that are not SQL, by (file, enclosing function or <module>), with
 # every match expected there; any other match, or a different set, fails.
 ALLOWED: dict[tuple[str, str], list[str]] = {
-    # The two names the scan and the lock check look for.
-    ("raw_schema.py", "<module>"): ["constant 'raw'", "constant 'raw_dev_wh'"],
+    # The two names the scan and the lock check look for, and the lock check itself.
+    ("raw_schema.py", "<module>"): [
+        "name REAL_SCHEMAS",
+        "constant 'raw'",
+        "constant 'raw_dev_wh'",
+    ],
+    ("raw_schema.py", "throwaway_raw_schema"): ["name REAL_SCHEMAS"],
+    # This file reads the two names under another name, to build its probes.
+    ("test_raw_isolation.py", "<module>"): ["import REAL_SCHEMAS"],
     # A Dagster asset key and an S3 bucket name, not schemas.
     ("test_assets.py", "test_the_raw_snapshot_asset_and_its_checks_are_defined"): [
         "constant 'raw'"
     ],
     ("test_settings.py", "<module>"): ["constant 'raw'"],
-    # warehouse-eng's dbt target checks: schema names in dbt's manifest, and a
-    # text its own SQL scanner reads; none is sent to the database.
-    ("test_dbt_targets.py", "<module>"): ["constant 'raw'"],
-    (
-        "test_dbt_targets.py",
-        "test_the_real_target_builds_the_real_schemas_and_reads_the_real_raw",
-    ): [
+    # warehouse-eng's dbt target checks (informed by the lead): schema names in
+    # dbt's manifest, its own REAL_SCHEMAS set, and a text its own SQL scanner
+    # reads; none is sent to the database.
+    ("test_dbt_targets.py", "<module>"): ["name REAL_SCHEMAS", "constant 'raw'"],
+    ("test_dbt_targets.py", DEV_SOURCE_TEST): ["constant 'raw'"],
+    ("test_dbt_targets.py", REAL_TARGET_TEST): [
+        "name REAL_SCHEMAS",
         "constant 'raw'",
         "constant 'raw'",
     ],
-    ("test_dbt_targets.py", "test_the_scanner_finds_schema_names_written_into_sql"): [
-        "qualified raw",
-        "constant 'raw'",
-    ],
+    ("test_dbt_targets.py", SCANNER_TEST): ["raw qualified", "constant 'raw'"],
     # The production default, checked on signatures, rendered text and log fields only.
     ("test_load.py", "test_every_loader_query_takes_a_schema_that_defaults_to_raw"): [
         "constant 'raw'"
     ],
+    ("test_load.py", "test_the_ddl_names_only_the_schema_it_is_given"): ["raw qualified"],
     ("test_common_snapshot.py", "test_registration_takes_a_schema_that_defaults_to_raw"): [
         "constant 'raw'"
     ],
@@ -84,7 +102,7 @@ ALLOWED: dict[tuple[str, str], list[str]] = {
         "constant 'raw'"
     ],
     ("test_common_snapshot.py", "test_register_inserts_into_the_schema_it_is_given"): [
-        "qualified raw"
+        "raw qualified"
     ],
 }
 
@@ -126,22 +144,38 @@ class _Scan(ast.NodeVisitor):
         self._scoped(node)
 
     def _text(self, node: ast.AST, text: str) -> None:
-        if match := QUALIFIED.search(text):
-            self._hit(node, f"qualified {match.group(1)}")
+        """Hit a qualified name or a search_path anywhere in the text."""
+        for kind, pattern in (("qualified", QUALIFIED), ("search_path", SEARCH_PATH)):
+            if match := pattern.search(text):
+                self._hit(node, f"{match.group(1).lower()} {kind}")
+                return
+
+    def _literal(self, node: ast.AST, text: str) -> None:
+        """Hit a literal that is or ends with a watched name, else check its text."""
+        if text.strip().strip('"').lower() in WATCHED:
+            self._hit(node, f"constant {text!r}")
+        elif match := ENDING.search(text):
+            self._hit(node, f"{match.group(1).lower()} ending")
+        else:
+            self._text(node, text)
 
     def visit_JoinedStr(self, node: ast.JoinedStr) -> None:
-        parts = [part.value if isinstance(part, ast.Constant) else "x" for part in node.values]
-        self._text(node, "".join(str(part) for part in parts))
+        texts = [part.value if isinstance(part, ast.Constant) else "x" for part in node.values]
+        self._text(node, "".join(str(text) for text in texts))
         for part in node.values:
-            if isinstance(part, ast.FormattedValue):
+            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                if part.value.strip().strip('"').lower() in WATCHED or ENDING.search(part.value):
+                    self._literal(part, part.value)
+            elif isinstance(part, ast.FormattedValue):
                 self.visit(part)
 
     def visit_Constant(self, node: ast.Constant) -> None:
-        if isinstance(node.value, str) and id(node) not in self.skip:
-            if node.value in WATCHED:
-                self._hit(node, f"constant {node.value!r}")
-            else:
-                self._text(node, node.value)
+        if id(node) in self.skip:
+            return
+        if isinstance(node.value, str):
+            self._literal(node, node.value)
+        elif isinstance(node.value, bytes):
+            self._literal(node, node.value.decode("latin-1"))
 
     def visit_Name(self, node: ast.Name) -> None:
         if node.id in NAMES:
