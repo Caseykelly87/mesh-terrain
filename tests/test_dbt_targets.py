@@ -40,6 +40,15 @@ SQL_COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
 SCHEMA_REFERENCE = re.compile(
     r'(?<![\w."])"?(raw|staging|core|analytics|features)"?\s*\.\s*"?[a-z_]', re.IGNORECASE
 )
+MAKE_MODIFIERS = r"(?:(?:export|override|private)[ \t]+)*"
+MAKE_VARIABLE = r"([A-Za-z_][\w.-]*)"
+# An optional target list before the variable makes it target-specific; the
+# lookahead keeps `NAME := value` from reading as target `NAME`.
+MAKE_ASSIGNMENT = (
+    rf"^(?:[^\s:#=][^:#=\n]*:(?!:*=)[ \t]*)?{MAKE_MODIFIERS}{MAKE_VARIABLE}"
+    r"[ \t]*(?::{1,3}|[+?!])?=(.*)$"
+)
+MAKE_DEFINE = rf"^{MAKE_MODIFIERS}define[ \t]+{MAKE_VARIABLE}[^\n]*\n(.*?)^endef\b"
 
 
 def in_target_schemas(nodes: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
@@ -84,23 +93,48 @@ def schema_hook(target: str, *extra: str, environment: dict[str, str] | None = N
     return "" if result.returncode == 0 else result.stdout + result.stderr
 
 
+def variable_assignments(makefile: str) -> list[tuple[str, str]]:
+    """Every (name, value) a Makefile assigns, in the forms GNU make accepts.
+
+    It reads `=`, `:=`, `::=`, `:::=`, `?=`, `+=` and `!=`, with any
+    `export`, `override` or `private` prefix, after a target as a
+    target-specific variable, across backslash-continued lines, and
+    `define` blocks up to `endef`. It does not see a variable set inside
+    `$(eval ...)`, in an included file, or under a computed name such as
+    `$(PREFIX)_FLAG`.
+    """
+    joined = makefile.replace("\\\n", " ")
+    return [
+        *re.findall(MAKE_ASSIGNMENT, joined, re.MULTILINE),
+        *re.findall(MAKE_DEFINE, joined, re.MULTILINE | re.DOTALL),
+    ]
+
+
+def references(text: str, name: str) -> bool:
+    """Whether text expands the variable: `$(NAME)`, `${NAME}`, `$(NAME:a=b)`, or `$N`."""
+    pattern = rf"\$[({{]{re.escape(name)}[:)}}]"
+    if len(name) == 1:
+        pattern += rf"|\${re.escape(name)}"
+    return re.search(pattern, text) is not None
+
+
 def recipes_using(makefile: str, word: str) -> list[str]:
     """The Makefile targets whose recipe holds the word, directly or through a variable.
 
-    A variable holds the word when its value does, or names a variable that
+    A variable holds the word when its value does, or expands a variable that
     holds it, so `FLAG := --vars '{real_build: true}'` and a recipe using
-    `$(FLAG)` count as passing it.
+    `$(FLAG)` count as passing it. A target-specific variable counts for every
+    recipe that expands it, which can only add targets. The limits are those of
+    `variable_assignments`.
     """
-    assignments = re.findall(r"^([A-Za-z_][\w]*)\s*[:+?!]?=(.*)$", makefile, re.MULTILINE)
+    assignments = variable_assignments(makefile)
     holding: set[str] = set()
     changed = True
     while changed:
         changed = False
         for name, value in assignments:
-            if name in holding:
-                continue
-            if word in value or any(
-                f"$({held})" in value or f"${{{held}}}" in value for held in holding
+            if name not in holding and (
+                word in value or any(references(value, held) for held in holding)
             ):
                 holding.add(name)
                 changed = True
@@ -108,8 +142,7 @@ def recipes_using(makefile: str, word: str) -> list[str]:
     return [
         name
         for name, recipe in recipes
-        if word in recipe
-        or any(f"$({held})" in recipe or f"${{{held}}}" in recipe for held in holding)
+        if word in recipe or any(references(recipe, held) for held in holding)
     ]
 
 
