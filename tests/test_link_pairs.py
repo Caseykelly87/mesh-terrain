@@ -3,6 +3,7 @@
 No test reads the real snapshot.
 """
 
+import math
 import sys
 from pathlib import Path
 
@@ -11,7 +12,13 @@ from engine_fixture import no_logger_caching
 from engine_inputs_fixture import NODES, build_capture
 
 from ingester import link_pairs
-from ingester.link_pairs import Box, SelectionError, capture_links, read_capture_rows
+from ingester.link_pairs import (
+    Box,
+    SelectionError,
+    box_half_width_m,
+    capture_links,
+    read_capture_rows,
+)
 
 # The import above activates the autouse fixture for this module.
 _ = no_logger_caching
@@ -122,3 +129,13 @@ def test_missing_spike_scripts_are_refused(
     monkeypatch.setattr(link_pairs, "SPIKE_DIR", tmp_path / "no-spike")
     with pytest.raises(SelectionError, match="analyze.py, figures.py not found"):
         capture_links(rows)
+
+
+@pytest.mark.parametrize("bits", [13, 16, 18, 20])
+def test_box_half_width_is_the_inscribed_square(bits: int) -> None:
+    """Casey, issue #44, 1 (b): "an inscribed square that trims the long side"."""
+    latitude_deg = 38.7
+    north_south_m = 2 ** (31 - bits) * 1e-7 * 111_320.0
+    east_west_m = north_south_m * math.cos(math.radians(latitude_deg))
+    assert box_half_width_m(bits, latitude_deg) == pytest.approx(east_west_m, abs=1e-9)
+    assert box_half_width_m(bits, latitude_deg) < north_south_m
