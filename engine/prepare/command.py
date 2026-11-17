@@ -22,7 +22,8 @@ With `--no-real-receivers` it reads only `tx_sites_real.parquet` and refuses
 a folder that holds `rx_real.parquet`, so a folder prepared for a run with a
 real receiver never loses it silently. The receivers are then the grid
 alone, `rx_points.parquet` is stamped `synthetic`, and `crossing.md` says the
-run has no real receiver; every other step is as above.
+run has no real receiver; every other step is as above. The flag is refused
+for any tile but x72y429, the one run Casey decided to prepare so.
 
 Nothing is written under an output's name unless every check passes, and a
 failure at any step, the moves included, leaves the folder as it was: the
@@ -82,6 +83,8 @@ CROSSING_FILE = "crossing.md"
 SITE_COLUMNS = ("site_id", "geometry", "box_half_width_m", "role")
 RECEIVER_COLUMNS = ("rx_id", "geometry", "box_half_width_m")
 SITE_ROLES = ("both_ends_gateway", "gateway_only_gateway")
+GRID_ONLY_TILES = ("x72y429",)
+"""Tiles whose run may take the grid alone as receivers (Casey, engine_inputs (c), 2026-11-17)."""
 LAYER_CRS = "EPSG:26915"
 
 
@@ -144,6 +147,7 @@ def prepare_folder(
         ConfigError: for any refusal; nothing is written then.
     """
     tile = _tile(tile_name)
+    _check_grid_only(tile, real_receivers)
     _check_folder(folder, tile, real_receivers)
     log.info(
         "prepare_layers_read_begin",
@@ -162,7 +166,9 @@ def prepare_folder(
     _check_unique([r.endpoint_id for r in receivers + grid])
     snapshots = _snapshots(tile, snapshots_dir)
     in_run = _sites_in_run(sites, receivers, grid, snapshots["dem"])
-    report = _crossing_report(tile, snapshots, sites, roles, in_run, receivers, grid)
+    report = _crossing_report(
+        tile, snapshots, sites, roles, in_run, receivers, grid, real_receivers=real_receivers
+    )
     summary = crossing_markdown(report)
     _write_outputs(folder, tile, in_run, receivers + grid, summary, markers)
     return summary
@@ -178,6 +184,15 @@ def _tile(name: str) -> Tile:
             f"no run is defined for tile {tile.name}; known: {sorted(TILE_SNAPSHOTS)}"
         )
     return tile
+
+
+def _check_grid_only(tile: Tile, real_receivers: bool) -> None:
+    """Refuse `--no-real-receivers` for a tile whose run Casey has not decided to run so."""
+    if not real_receivers and tile.name not in GRID_ONLY_TILES:
+        raise ConfigError(
+            f"--no-real-receivers is decided for {', '.join(GRID_ONLY_TILES)} only, "
+            f"not {tile.name}; that tile's run needs its real receivers"
+        )
 
 
 def _outputs(folder: Path, tile: Tile) -> list[Path]:
@@ -312,6 +327,8 @@ def _crossing_report(
     in_run: list[Endpoint],
     receivers: list[Endpoint],
     grid: list[Endpoint],
+    *,
+    real_receivers: bool,
 ) -> CrossingReport:
     cells = tall_cells(snapshots["dem"], snapshots["dsm"], TALL_CELL_M)
     run_ids = {s.endpoint_id for s in in_run}
@@ -334,6 +351,7 @@ def _crossing_report(
         receiver_half_widths={r.endpoint_id: r.box.half_width_m for r in receivers},
         real=path_crossings(in_run, receivers, cells),
         grid=path_crossings(in_run, grid, cells),
+        real_receivers=real_receivers,
     )
 
 
