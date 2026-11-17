@@ -3,9 +3,28 @@
 The test tile is defined by three pairs (PLAN Phase 3,
 docs/measurements-2026-11-08.md): the one pair with both ends in the tile,
 whose gateway is a site and whose relayer is a receiver, and the two busiest
-pairs, whose gateway ends in the tile are sites. `select_nodes` returns those
+pairs, whose gateway ends in the tile are sites. `select_nodes` places those
 nodes at their stationary box centres in EPSG:26915, or refuses when the pairs
 do not reproduce that check.
+
+A node straddles the tile when its usable boxes lie on both sides of the tile
+edge; it has no stationary box. The rule for it (Casey, issue #44,
+engine_inputs Q1 (a), 2026-11-17): it is treated like a node that fails the
+DEM edge check, and only its own pair is dropped, after the check that the
+tile still matches the 2026-11-08 counts, with a straddling node counted as
+touching the tile. So the counts and the busiest-pair ranking run first, over
+every pair, with a straddling node counted as in the tile. Then a pair is
+dropped when either of its nodes straddles, or a node of it that the run
+places fails the DEM edge check. A node shared with another pair stays in
+that pair unless it fails there too. Dropping the both-ends pair or a busiest
+pair stops the run for Casey (`Selection.layers`). A selected node that does
+not straddle but still has no stationary box, two boxes inside the tile for
+example, is refused as before.
+
+With the count check as it is, three touching pairs and all three selected,
+an unselected pair can only be dropped if it touches the tile, and a fourth
+touching pair fails the count check first. A drop that reaches the drop step
+is therefore always of a selected pair, and stops the run.
 
 The measurements file does not say how it ranked the busiest pairs.
 `busiest_two` ranks them by link-hours over both runs, ties broken by
@@ -47,6 +66,13 @@ LAYER_EPSG = 26915
 BOTH_ENDS_GATEWAY = "both_ends_gateway"
 BUSY_PAIR_GATEWAY = "busy_pair_gateway"
 BOTH_ENDS_RELAYER = "both_ends_relayer"
+BOTH_ENDS_PAIR = "both-ends pair"
+BUSIEST_PAIR = "busiest pair"
+OTHER_PAIR = "other pair"
+STRADDLES = "straddles the tile edge"
+FAILS_DEM = "fails the DEM edge check"
+IN, OUT, SPLIT = "in", "out", "split"
+ENDS = ("relayer", "gateway")
 TILE_SIZE_M = 10_000.0
 TILE_PATTERN = re.compile(r"x(\d+)y(\d+)")
 # The tile check of 2026-11-08: one pair with both ends in the tile plus the
@@ -60,7 +86,7 @@ _TO_METRES = Transformer.from_crs(4326, LAYER_EPSG, always_xy=True)
 Extent = tuple[float, float, float, float]
 """West, south, east, north in EPSG:26915 metres."""
 PairState = tuple[str, str]
-"""Where a pair's relayer and gateway lie against the tile: `in` or `out` each."""
+"""Where a pair's relayer and gateway lie against the tile: `in`, `out` or `split` each."""
 
 
 @dataclass(frozen=True)
@@ -98,6 +124,56 @@ class PlacedNode:
     northing_m: float
     half_width_m: float
     precise_source: bool
+
+
+@dataclass(frozen=True)
+class DroppedPair:
+    """A pair the run drops, and why.
+
+    Attributes:
+        pair: The pair.
+        kind: BOTH_ENDS_PAIR or BUSIEST_PAIR when the run selected it, else OTHER_PAIR.
+        reasons: (end, reason) for each end that drops it, relayer first; the
+            end is `relayer` or `gateway`, the reason STRADDLES or FAILS_DEM.
+    """
+
+    pair: PairActivity
+    kind: str
+    reasons: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class Selection:
+    """The tile's placed nodes, their DEM edge check and the pairs dropped.
+
+    Attributes:
+        placed: The selected nodes that do not straddle, at their stationary
+            box centres: the sites in order, then the receiver.
+        dem_check: Per placed node's pseudonym, whether its box plus the
+            engine's margin lies inside the DEM (`inside_dem`).
+        dropped: The dropped pairs, in the capture's pair order.
+    """
+
+    placed: tuple[PlacedNode, ...]
+    dem_check: dict[str, bool]
+    dropped: tuple[DroppedPair, ...]
+
+    def layers(self) -> tuple[list[PlacedNode], PlacedNode]:
+        """The site rows and the receiver row, unless a selected pair was dropped.
+
+        Raises:
+            SelectionError: when the both-ends pair or a busiest pair was
+                dropped: the run stops for Casey (issue #44, engine_inputs Q1 (a)).
+        """
+        stopped = [dropped.kind for dropped in self.dropped if dropped.kind != OTHER_PAIR]
+        if stopped:
+            raise SelectionError(
+                f"selected pairs dropped: {', '.join(stopped)}; Casey decides before "
+                "engine.prepare (issue #44, engine_inputs Q1 (a))"
+            )
+        sites = [node for node in self.placed if node.role != BOTH_ENDS_RELAYER]
+        receivers = [node for node in self.placed if node.role == BOTH_ENDS_RELAYER]
+        return sites, receivers[0]
 
 
 def parse_tile(name: str) -> Tile:
@@ -214,41 +290,81 @@ def _node_state(nodes: dict[str, NodePositions], pseudonym: str, tile: Tile) -> 
     if not inside:
         raise SelectionError("a node of a pair has no usable position")
     if len(inside) == 2:
-        return "split"
-    return "in" if inside == {True} else "out"
+        return SPLIT
+    return IN if inside == {True} else OUT
 
 
 def pair_states(links: CaptureLinks, tile: Tile) -> dict[PairActivity, PairState]:
-    """Where each pair's relayer and gateway lie against the tile.
+    """Where each pair's relayer and gateway lie against the tile, `split` for a straddling node.
 
     Raises:
-        SelectionError: if a node has no usable position, or usable positions
-            on both sides of the tile edge.
+        SelectionError: if a node has no usable position.
     """
-    states = {
+    return {
         pair: (
             _node_state(links.nodes, pair.relayer, tile),
             _node_state(links.nodes, pair.gateway, tile),
         )
         for pair in links.pairs
     }
-    split = [state for state in states.values() if "split" in state]
-    if split:
-        raise SelectionError(
-            f"{len(split)} pairs have a node with positions on both sides of the tile edge"
-        )
-    return states
+
+
+def counted(state: PairState) -> PairState:
+    """The state the tile check counts: a straddling node counts as in the tile (Q1 (a))."""
+    relayer, gateway = (IN if end == SPLIT else end for end in state)
+    return relayer, gateway
 
 
 def tile_counts(states: dict[PairActivity, PairState]) -> dict[str, int]:
-    """Pairs with both ends, only the gateway end, only the relayer end in the tile, and touched."""
-    values = list(states.values())
+    """Pairs with both ends, only the gateway end, only the relayer end in the tile, and touched.
+
+    A straddling node counts as in the tile (Casey, issue #44, engine_inputs Q1 (a), 2026-11-17).
+    """
+    values = [counted(state) for state in states.values()]
     return {
-        "both ends": values.count(("in", "in")),
-        "only the gateway end": values.count(("out", "in")),
-        "only the relayer end": values.count(("in", "out")),
-        "touched": sum(1 for state in values if "in" in state),
+        "both ends": values.count((IN, IN)),
+        "only the gateway end": values.count((OUT, IN)),
+        "only the relayer end": values.count((IN, OUT)),
+        "touched": sum(1 for state in values if IN in state),
     }
+
+
+def _drop_reason(node: str, state: str, dem_check: dict[str, bool]) -> str | None:
+    if state == SPLIT:
+        return STRADDLES
+    if dem_check.get(node) is False:
+        return FAILS_DEM
+    return None
+
+
+def dropped_pairs(
+    states: dict[PairActivity, PairState],
+    kinds: dict[PairActivity, str],
+    dem_check: dict[str, bool],
+) -> tuple[DroppedPair, ...]:
+    """The pairs dropped under engine_inputs Q1 (a), each with every end that drops it.
+
+    Args:
+        states: Every pair's state from `pair_states`.
+        kinds: BOTH_ENDS_PAIR or BUSIEST_PAIR for each selected pair; any
+            other pair is OTHER_PAIR.
+        dem_check: Per node the run places, whether it passes the DEM edge check.
+
+    Returns:
+        A pair is dropped when either end straddles the tile edge, or an end the
+        run places fails the DEM edge check; the other pairs are not listed.
+    """
+    dropped = []
+    for pair, state in states.items():
+        ends = zip(ENDS, (pair.relayer, pair.gateway), state, strict=True)
+        reasons = tuple(
+            (end, reason)
+            for end, node, node_state in ends
+            if (reason := _drop_reason(node, node_state, dem_check)) is not None
+        )
+        if reasons:
+            dropped.append(DroppedPair(pair, kinds.get(pair, OTHER_PAIR), reasons))
+    return tuple(dropped)
 
 
 def _place(nodes: dict[str, NodePositions], pseudonym: str, role: str) -> PlacedNode:
@@ -264,38 +380,69 @@ def _place(nodes: dict[str, NodePositions], pseudonym: str, role: str) -> Placed
     return PlacedNode(pseudonym, role, easting_m, northing_m, half_width_m, found.precise_source)
 
 
-def select_nodes(
-    links: CaptureLinks, tile: Tile, expect_pairs: int
-) -> tuple[list[PlacedNode], PlacedNode]:
-    """The tile's real sites and the both-ends pair's relayer, as the 2026-11-08 check found them.
+def _selected_pairs(
+    links: CaptureLinks, states: dict[PairActivity, PairState], tile: Tile
+) -> dict[PairActivity, str]:
+    """The both-ends pair and the two busiest pairs, after the 2026-11-08 tile check."""
+    counts = {pair: counted(state) for pair, state in states.items()}
+    both = [pair for pair, state in counts.items() if state == (IN, IN)]
+    if len(both) != 1:
+        raise SelectionError(f"{len(both)} pairs have both ends in {tile.name}, not one")
+    busy = busiest_two(links.pairs)
+    if both[0] in busy or any(counts[pair] != (OUT, IN) for pair in busy):
+        raise SelectionError(f"the two busiest pairs are not gateway-only pairs of {tile.name}")
+    if tile_counts(states)["touched"] != PAIRS_TOUCHED:
+        raise SelectionError(f"pairs touching {tile.name} are not {PAIRS_TOUCHED}")
+    return {both[0]: BOTH_ENDS_PAIR, busy[0]: BUSIEST_PAIR, busy[1]: BUSIEST_PAIR}
+
+
+def _roles(kinds: dict[PairActivity, str]) -> list[tuple[str, str]]:
+    """(pseudonym, role) per selected node: each gateway once, both-ends first, then receiver."""
+    sites: dict[str, str] = {}
+    for pair, kind in kinds.items():
+        sites.setdefault(
+            pair.gateway, BOTH_ENDS_GATEWAY if kind == BOTH_ENDS_PAIR else BUSY_PAIR_GATEWAY
+        )
+    receiver = next(pair.relayer for pair, kind in kinds.items() if kind == BOTH_ENDS_PAIR)
+    return [*sites.items(), (receiver, BOTH_ENDS_RELAYER)]
+
+
+def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Extent) -> Selection:
+    """The tile's real sites and receiver as the 2026-11-08 check found them, and the pairs dropped.
 
     Args:
         links: The capture's pairs and node positions.
         tile: The engine run's tile.
         expect_pairs: The union of pairs the tile check counted, 8 on 2026-11-08.
+        extent: The DEM's edges in EPSG:26915 metres, from `dem_extent`.
 
     Returns:
-        The sites (the both-ends pair's gateway, then the busy pairs' gateways,
-        each gateway once, with the both-ends role first) and the receiver.
+        The placed nodes (the both-ends pair's gateway, then the busy pairs'
+        gateways, each gateway once, with the both-ends role first, then the
+        both-ends pair's relayer), less any that straddle the tile edge, with
+        their DEM edge check and the dropped pairs. `Selection.layers` refuses
+        when a selected pair was dropped.
 
     Raises:
         SelectionError: when the pairs do not reproduce the tile check, two
-            pairs tie for second busiest on both keys, or a selected node sent
-            more than one box during the capture.
+            pairs tie for second busiest on both keys, or a selected node that
+            does not straddle sent more than one box during the capture.
     """
     if len(links.pairs) != expect_pairs:
         raise SelectionError(f"{len(links.pairs)} pairs, not the {expect_pairs} expected")
     states = pair_states(links, tile)
-    both = [pair for pair, state in states.items() if state == ("in", "in")]
-    if len(both) != 1:
-        raise SelectionError(f"{len(both)} pairs have both ends in {tile.name}, not one")
-    busy = busiest_two(links.pairs)
-    if both[0] in busy or any(states[pair] != ("out", "in") for pair in busy):
-        raise SelectionError(f"the two busiest pairs are not gateway-only pairs of {tile.name}")
-    if tile_counts(states)["touched"] != PAIRS_TOUCHED:
-        raise SelectionError(f"pairs touching {tile.name} are not {PAIRS_TOUCHED}")
-    roles = {both[0].gateway: BOTH_ENDS_GATEWAY}
-    for pair in busy:
-        roles.setdefault(pair.gateway, BUSY_PAIR_GATEWAY)
-    sites = [_place(links.nodes, node, role) for node, role in roles.items()]
-    return sites, _place(links.nodes, both[0].relayer, BOTH_ENDS_RELAYER)
+    kinds = _selected_pairs(links, states, tile)
+    straddling = {
+        node
+        for pair, state in states.items()
+        for node, end_state in zip((pair.relayer, pair.gateway), state, strict=True)
+        if end_state == SPLIT
+    }
+    placed = tuple(
+        _place(links.nodes, node, role) for node, role in _roles(kinds) if node not in straddling
+    )
+    dem_check = {
+        node.pseudonym: inside_dem((node.easting_m, node.northing_m), node.half_width_m, extent)
+        for node in placed
+    }
+    return Selection(placed, dem_check, dropped_pairs(states, kinds, dem_check))
