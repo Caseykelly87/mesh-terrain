@@ -255,7 +255,30 @@ NOT_SEEN = {
     "loader call without schema=": 'load.row_counts(conn, "x")',
     "register call without schema=": "register_verified(conn, folder)",
     "SQL read from another file": 'conn.execute(Path("fixture.sql").read_text())',
+    "set schema by name": "conn.execute(\"set schema '@'\")",
+    "search_path on another line": (
+        'conn.execute("set search_path to\\n@;\\nselect 1 from snapshot")'
+    ),
+    "database-qualified name at the end": 'conn.execute("delete from mesh.@" + ".snapshot")',
+    "replacement field before the name": 'conn.execute(f"delete from {p}@.snapshot")',
+    "SQL comment before the dot": 'conn.execute("select 1 from @/**/.snapshot")',
+    "Unicode-escaped identifier": "conn.execute('select 1 from U&\"\\\\0072aw\".snapshot')",
+    "default read by inspect.signature": (
+        's = inspect.signature(load.row_counts).parameters["schema"].default\n'
+        'sql.Identifier(s, "snapshot")'
+    ),
+    "default read by __kwdefaults__": (
+        's = load.row_counts.__kwdefaults__["schema"]\nsql.Identifier(s, "snapshot")'
+    ),
 }
+# ALLOWED counts matches, not uses: an allowed match later used as SQL adds no match.
+ALLOWED_THEN_USED = (
+    "def test_the_raw_snapshot_asset_and_its_checks_are_defined():\n"
+    '    key = AssetKey(["@", "mqtt_snapshot"])\n'
+)
+SQL_USE = (
+    '    conn.execute(sql.SQL("select 1 from {}.snapshot").format(sql.Identifier(key.path[0])))\n'
+)
 
 
 def probe(source: str, schema: str) -> str:
@@ -271,7 +294,13 @@ def test_the_scan_finds_each_form(form: str, schema: str) -> None:
 
 @pytest.mark.parametrize("form", sorted(NOT_SEEN))
 def test_the_scan_does_not_see_these_forms(form: str) -> None:
-    assert real_schema_uses(NOT_SEEN[form]) == [], form
+    assert real_schema_uses(probe(NOT_SEEN[form], WATCHED[0])) == [], form
+
+
+def test_an_allowed_match_used_as_sql_adds_no_match() -> None:
+    allowed = probe(ALLOWED_THEN_USED, WATCHED[0])
+    assert real_schema_uses(allowed + SQL_USE) == real_schema_uses(allowed)
+    assert len(real_schema_uses(allowed)) == 1
 
 
 def test_the_scan_leaves_docstrings_and_other_words_alone() -> None:
