@@ -74,12 +74,19 @@ def raw_ddl(schema: str = RAW_SCHEMA) -> sql.Composed:
 
 
 def apply_ddl(conn: psycopg.Connection, *, schema: str = RAW_SCHEMA) -> None:
-    """Create the raw tables in the schema when they are missing."""
+    """Create the raw tables in the schema when they are missing.
+
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
+    """
     conn.execute(raw_ddl(schema))
 
 
 def check_columns(conn: psycopg.Connection, *, schema: str = RAW_SCHEMA) -> None:
     """Refuse when a raw table's columns differ from the allowlist.
+
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
 
     Raises:
         SchemaDriftError: naming the first table that differs.
@@ -98,7 +105,11 @@ def check_columns(conn: psycopg.Connection, *, schema: str = RAW_SCHEMA) -> None
 def load_table(
     conn: psycopg.Connection, folder: Path, table: str, *, schema: str = RAW_SCHEMA
 ) -> int:
-    """Copy one table's files into the raw table of that name; returns the rows inserted."""
+    """Copy one table's files into the raw table of that name; returns the rows inserted.
+
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
+    """
     started = time.monotonic()
     columns = allowlist(table)
     # A fresh name per load: temporary tables live until the session ends, and a
@@ -137,6 +148,9 @@ def load_snapshot(
 ) -> dict[str, int]:
     """Load one finished snapshot folder; returns rows inserted per table.
 
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
+
     Raises:
         SnapshotError: if the folder has no manifest or a file differs from it;
             from register, if the folder is `.partial`, the manifest lacks one
@@ -157,7 +171,11 @@ def load_snapshot(
 def row_counts(
     conn: psycopg.Connection, snapshot_id: str, *, schema: str = RAW_SCHEMA
 ) -> dict[str, int]:
-    """Rows per raw table for one snapshot."""
+    """Rows per raw table for one snapshot.
+
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
+    """
     counts: dict[str, int] = {}
     for table in ("snapshot", *LOAD_ORDER):
         query = sql.SQL("select count(*) from {} where snapshot_id = %s").format(
@@ -182,6 +200,9 @@ def reconcile(conn: psycopg.Connection, folder: Path, *, schema: str = RAW_SCHEM
     from its stored plus merged_cross_broker deliveries over the snapshot;
     `stored: hour` and `counted: hour` when raw rows or counts differ from the
     manifest's sums over both brokers.
+
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
 
     Returns:
         One line per problem, sorted; empty when everything balances.
@@ -277,7 +298,11 @@ def _counted_per_hour(conn: psycopg.Connection, snapshot_id: str, schema: str) -
 def decode_rates(
     conn: psycopg.Connection, snapshot_id: str, *, schema: str = RAW_SCHEMA
 ) -> dict[str, float]:
-    """ing_04: ok over stored radio deliveries with a payload, per broker flag."""
+    """ing_04: ok over stored radio deliveries with a payload, per broker flag.
+
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
+    """
     query = sql.SQL(
         "select topic, decode_status, seen_public, seen_meshstl, count(*) "
         "from {} where snapshot_id = %s and not via_mqtt group by 1, 2, 3, 4"
@@ -305,6 +330,9 @@ def zero_positions(
 
     A position the sender set to 0, 0 is stored as sent (the decoder keeps a set
     field); a missing coordinate is null and is never read as 0 (Casey, 2026-11-14).
+
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
     """
     query = sql.SQL(
         "select seen_public, seen_meshstl, position_source, count(*) from {} "
@@ -340,6 +368,9 @@ def content_hashes(
     The three landed tables hash as their Parquet files do (ingester.parquet),
     so they compare with the manifest; raw.snapshot leaves out registered_at,
     which differs on every load.
+
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
     """
     columns_by_table = {table: allowlist(table) for table in LOAD_ORDER}
     columns_by_table["snapshot"] = list(SNAPSHOT_CONTENT_COLUMNS)
@@ -360,7 +391,11 @@ def content_hashes(
 
 
 def hash_problems(conn: psycopg.Connection, folder: Path, *, schema: str = RAW_SCHEMA) -> list[str]:
-    """snp_01: one `content_hash: table` line per raw table whose hash differs from the manifest."""
+    """snp_01: one `content_hash: table` line per raw table whose hash differs from the manifest.
+
+    Args:
+        schema: The schema holding the raw tables; raw unless a test passes its own.
+    """
     manifest = read_manifest(folder)
     found = content_hashes(conn, manifest["snapshot_id"], schema=schema)
     expected = manifest["content_hashes"]
