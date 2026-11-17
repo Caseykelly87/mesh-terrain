@@ -45,6 +45,14 @@ is therefore always of a selected pair, and stops the run. `straddle_drops`
 finds the straddle drops before those checks run, so the command can print
 them first (Casey, PR #51, (a)).
 
+`select_sites` is the x72y429 run with no real receiver (Casey, 2026-11-17,
+engine_inputs (c)): the same candidates and roles, counted with a straddling
+node in the tile, but no count check, no stop on a dropped pair and no
+receiver. A gateway is kept only when it is stationary, does not straddle
+and passes the DEM edge check; the others are returned with their reason.
+`count_differences` lists every count that differs from 2026-11-08, so that
+run can report them; `select_nodes` refuses on the first.
+
 `busiest_two` ranks pairs by link-hours over both runs, ties broken by
 receipts in those link-hours (Casey, issue #44, engine_inputs Q2 (a),
 2026-11-16), and refuses when second and third place are still equal on
@@ -96,6 +104,8 @@ SITE_RULE = (
 KIND_NOT_DETERMINED = "pair (kind not determined)"
 STRADDLES = "straddles the tile edge"
 FAILS_DEM = "fails the DEM edge check"
+# Why a sites-only run leaves a gateway out, beside STRADDLES and FAILS_DEM.
+NOT_STATIONARY = "is not stationary under lnk_02"
 IN, OUT, SPLIT = "in", "out", "split"
 ENDS = ("relayer", "gateway")
 TILE_SIZE_M = 10_000.0
@@ -439,28 +449,64 @@ def _place(nodes: dict[str, NodePositions], pseudonym: str, role: str) -> Placed
     return PlacedNode(pseudonym, role, easting_m, northing_m, half_width_m, found.precise_source)
 
 
+def count_differences(
+    links: CaptureLinks, states: dict[PairActivity, PairState], tile: Tile, expect_pairs: int
+) -> list[str]:
+    """Each way the tile differs from the 2026-11-08 counts, in the order the checks run.
+
+    Args:
+        links: The capture's pairs.
+        states: Every pair's state from `pair_states`.
+        tile: The engine run's tile.
+        expect_pairs: The union of pairs the tile check counted, 8 on 2026-11-08.
+
+    Returns:
+        One message per count that differs: the pair count, one pair with both
+        ends in the tile, two with only the gateway end, three touching. Empty
+        when the tile matches.
+    """
+    counts = tile_counts(states)
+    pairs = len(links.pairs)
+    both, gateway_only = counts["both ends"], counts["only the gateway end"]
+    checks = (
+        (pairs == expect_pairs, f"{pairs} pairs, not the {expect_pairs} expected"),
+        (both == 1, f"{both} pairs have both ends in {tile.name}, not one"),
+        (
+            gateway_only == GATEWAY_ONLY_PAIRS,
+            f"{gateway_only} pairs have only the gateway end in {tile.name}, not two",
+        ),
+        (counts["touched"] == PAIRS_TOUCHED, f"pairs touching {tile.name} are not {PAIRS_TOUCHED}"),
+    )
+    return [message for passed, message in checks if not passed]
+
+
+def _gateway_pairs(states: dict[PairActivity, PairState]) -> dict[PairActivity, str]:
+    """Every pair whose gateway counts as in the tile, by kind.
+
+    The pairs with both ends in the tile come first, then those with only the
+    gateway end, each in the capture's pair order; a straddling node counts as
+    in the tile (Q1 (a)).
+    """
+    counted = {pair: _counted(state) for pair, state in states.items()}
+    both = [pair for pair, state in counted.items() if state == (IN, IN)]
+    gateway_only = [pair for pair, state in counted.items() if state == (OUT, IN)]
+    return {**dict.fromkeys(both, BOTH_ENDS_PAIR), **dict.fromkeys(gateway_only, GATEWAY_ONLY_PAIR)}
+
+
 def _tile_check(
     links: CaptureLinks, states: dict[PairActivity, PairState], tile: Tile, expect_pairs: int
 ) -> dict[PairActivity, str] | str:
     """The pairs touching the tile by kind, or the reason the 2026-11-08 counts refuse.
 
     The both-ends pair comes first, then the gateway-only pairs in the
-    capture's pair order. The reason is returned, not raised, so
-    `straddle_drops` can ask without catching anything; `select_nodes`
-    raises it.
+    capture's pair order. The reason, the first count that differs, is
+    returned, not raised, so `straddle_drops` can ask without catching
+    anything; `select_nodes` raises it.
     """
-    if len(links.pairs) != expect_pairs:
-        return f"{len(links.pairs)} pairs, not the {expect_pairs} expected"
-    counts = {pair: _counted(state) for pair, state in states.items()}
-    both = [pair for pair, state in counts.items() if state == (IN, IN)]
-    if len(both) != 1:
-        return f"{len(both)} pairs have both ends in {tile.name}, not one"
-    gateway_only = [pair for pair, state in counts.items() if state == (OUT, IN)]
-    if len(gateway_only) != GATEWAY_ONLY_PAIRS:
-        return f"{len(gateway_only)} pairs have only the gateway end in {tile.name}, not two"
-    if tile_counts(states)["touched"] != PAIRS_TOUCHED:
-        return f"pairs touching {tile.name} are not {PAIRS_TOUCHED}"
-    return {both[0]: BOTH_ENDS_PAIR, **dict.fromkeys(gateway_only, GATEWAY_ONLY_PAIR)}
+    differences = count_differences(links, states, tile, expect_pairs)
+    if differences:
+        return differences[0]
+    return _gateway_pairs(states)
 
 
 def _straddling(states: dict[PairActivity, PairState]) -> set[str]:
@@ -473,15 +519,20 @@ def _straddling(states: dict[PairActivity, PairState]) -> set[str]:
     }
 
 
-def _roles(kinds: dict[PairActivity, str]) -> list[tuple[str, str]]:
-    """(pseudonym, role) per selected node: each gateway once, both-ends first, then receiver."""
+def _site_roles(kinds: dict[PairActivity, str]) -> list[tuple[str, str]]:
+    """(pseudonym, role) per site: each gateway once, in the order of kinds, both-ends first."""
     sites: dict[str, str] = {}
     for pair, kind in kinds.items():
         sites.setdefault(
             pair.gateway, BOTH_ENDS_GATEWAY if kind == BOTH_ENDS_PAIR else GATEWAY_ONLY_GATEWAY
         )
+    return list(sites.items())
+
+
+def _roles(kinds: dict[PairActivity, str]) -> list[tuple[str, str]]:
+    """(pseudonym, role) per selected node: each gateway once, both-ends first, then receiver."""
     receiver = next(pair.relayer for pair, kind in kinds.items() if kind == BOTH_ENDS_PAIR)
-    return [*sites.items(), (receiver, BOTH_ENDS_RELAYER)]
+    return [*_site_roles(kinds), (receiver, BOTH_ENDS_RELAYER)]
 
 
 def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Extent) -> Selection:
@@ -519,8 +570,109 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
     placed = tuple(
         _place(links.nodes, node, role) for node, role in _roles(kinds) if node not in straddling
     )
-    dem_check = {
+    dem_check = _dem_check(placed, extent)
+    return Selection(placed, dem_check, dropped_pairs(states, kinds, dem_check))
+
+
+def _dem_check(placed: Sequence[PlacedNode], extent: Extent) -> dict[str, bool]:
+    return {
         node.pseudonym: inside_dem((node.easting_m, node.northing_m), node.half_width_m, extent)
         for node in placed
     }
-    return Selection(placed, dem_check, dropped_pairs(states, kinds, dem_check))
+
+
+@dataclass(frozen=True)
+class LeftOutSite:
+    """An in-tile gateway a sites-only run does not write, and why.
+
+    Attributes:
+        pseudonym: The gateway's pseudonym.
+        role: The role it would have had, `both_ends_gateway` or `gateway_only_gateway`.
+        reason: STRADDLES, NOT_STATIONARY or FAILS_DEM.
+    """
+
+    pseudonym: str
+    role: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class SiteSelection:
+    """The sites of a sites-only run, the gateways left out and the pairs dropped.
+
+    Attributes:
+        selection: The gateways placed (stationary, not straddling), their DEM
+            edge check and the pairs dropped; no receiver is placed.
+        left_out: The gateways not written, in site order.
+    """
+
+    selection: Selection
+    left_out: tuple[LeftOutSite, ...]
+
+    def sites(self) -> list[PlacedNode]:
+        """The placed gateways that pass the DEM edge check, in site order.
+
+        Raises:
+            SelectionError: when no site is left.
+        """
+        kept = [node for node in self.selection.placed if self.selection.dem_check[node.pseudonym]]
+        if not kept:
+            raise SelectionError(
+                f"no site left; all {len(self.left_out)} in-tile gateways were left out"
+            )
+        return kept
+
+
+def _place_sites(
+    links: CaptureLinks, roles: list[tuple[str, str]], straddling: set[str], extent: Extent
+) -> tuple[tuple[PlacedNode, ...], dict[str, bool], tuple[LeftOutSite, ...]]:
+    """Place each gateway that can be placed; the rest, and DEM failures, are left out."""
+    placed: list[PlacedNode] = []
+    reasons: dict[str, str] = {}
+    for node, role in roles:
+        if node in straddling:
+            reasons[node] = STRADDLES
+        elif links.nodes[node].stationary_box is None:
+            reasons[node] = NOT_STATIONARY
+        else:
+            placed.append(_place(links.nodes, node, role))
+    dem_check = _dem_check(placed, extent)
+    reasons.update({node: FAILS_DEM for node, inside in dem_check.items() if not inside})
+    left_out = tuple(
+        LeftOutSite(node, role, reasons[node]) for node, role in roles if node in reasons
+    )
+    return tuple(placed), dem_check, left_out
+
+
+def select_sites(links: CaptureLinks, tile: Tile, extent: Extent) -> SiteSelection:
+    """The tile's real sites alone, for the x72y429 run with no real receiver.
+
+    Casey, 2026-11-17, engine_inputs (c): the site rule of `select_nodes`
+    without its count check, its stop on a dropped pair or its receiver. The
+    candidates are the in-tile gateway of every pair touching the tile, a
+    straddling node counted as in the tile, each gateway once with the
+    both-ends role first; roles follow those counted states. A candidate is
+    written only when it is stationary under `lnk_02`, does not straddle the
+    tile edge and passes the DEM edge check. The relayers are not placed, so
+    only a gateway's DEM check can drop a pair.
+
+    Args:
+        links: The capture's pairs and node positions.
+        tile: The engine run's tile.
+        extent: The DEM's edges in EPSG:26915 metres, from `dem_extent`.
+
+    Returns:
+        The placed gateways with their DEM edge check, the pairs dropped
+        under engine_inputs Q1 (a) and the gateways left out with their
+        reasons. `SiteSelection.sites` refuses when no site is left.
+
+    Raises:
+        SelectionError: if a node of a pair has no usable position in the MSA.
+    """
+    states = pair_states(links, tile)
+    kinds = _gateway_pairs(states)
+    placed, dem_check, left_out = _place_sites(
+        links, _site_roles(kinds), _straddling(states), extent
+    )
+    selection = Selection(placed, dem_check, dropped_pairs(states, kinds, dem_check))
+    return SiteSelection(selection, left_out)
