@@ -15,6 +15,7 @@ MeshSTL broker, from `https://meshstl.org` (section `#mqtt-settings` for the ser
 - Denominators: every rate divides by observed hours, the sum of the capture's segments. A segment is a run of records with no gap over 15 minutes; a gap is not observed time. Weekly figures are weighted: the weekday hourly rate times 120 plus the weekend hourly rate times 48, with weekday and weekend taken as local days (CDT, UTC minus 5, for the whole capture). The flat figure (overall hourly rate times 168) is printed beside it.
 - `Dockerfile`: the spike analysis image, with spike-only pins. The capture command runs from the repository with uv, not in this image.
 - `reproduce_from_snapshot.py`: the reproduction gate (below).
+- Runtime dependency: `analyze.py` and `figures.py` are imported by `ingester.link_pairs` (PR #49), which runs the spike's pair rules on a capture snapshot for the engine's real site and receiver layers. A change to either script changes those layers; `tests/test_link_pairs.py` checks the pairs against the gate's.
 
 ## The capture command
 
