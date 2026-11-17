@@ -43,7 +43,9 @@ columns:
               contract: lnk_08
 ```
 
-`contract` can also be a list of ids. An asset check names a rule only when its name is exactly the rule id, such as `pos_03`; the existing checks are named with a description after the id (`pos_03_not_both_zero`), which the contract does not provide for, so they do not count until Casey answers that question (`docs/STATUS.md`). Rules without a test yet are on the `PENDING` list in that file, all 33 today; a rule leaves it in the change that adds its test, and the test fails if it stays. `PENDING` must stay inside `PENDING_AT_B1`, the rules pending when the test was written, so the list cannot grow. A new contract rule enters both `PENDING_AT_B1` and `PENDING` in the pull request that adds it to the contract, unless it lands with its test.
+`contract` can also be a list of ids. A Dagster asset check names a rule when its name is the rule id or the rule id followed by `_<what>`, such as `pos_03_not_both_zero` for `pos_03` (Casey, issue #55, D11; ADR 0007). Rules without a test yet are on the `PENDING` list in that file, 27 today; a rule leaves it in the change that adds its test, and the test fails if it stays. `PENDING` must stay inside `PENDING_AT_B1`, the rules pending when the test was written, so the list cannot grow. A new contract rule enters both `PENDING_AT_B1` and `PENDING` in the pull request that adds it to the contract, unless it lands with its test.
+
+A rule the contract enforces by the reviewer alone is on a second list, `REVIEW_ONLY`, never on `PENDING`; today that is `val_02` (Casey, issue #55, D12). It needs no named test. The check fails when a rule is on both lists, when the contract's "Enforced by" cell for a `REVIEW_ONLY` rule names a dbt test or an asset check, when such a rule gains a named test, and when `.claude/agents/reviewer.md` has no checklist line that opens with the rule's id, such as "11. `val_02`: every headline number ...".
 
 ## Layout
 
