@@ -14,6 +14,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 import yaml
 from engine_fixture import no_logger_caching  # noqa: F401
@@ -25,8 +26,8 @@ import engine.prepare.command as command
 from engine.config import load_config
 from engine.grid import run_grid
 from engine.points import read_points
+from engine.positions_marker import positions_marker, stamp_positions
 from engine.prepare.command import main
-from engine.prepare.run_config import SITE_PROFILE
 from engine.terrain_build import check_sources, dem_resolution_m
 
 DEM_ID = "3dep-1m-mo-saintlouis-2017-x72y429"
@@ -188,9 +189,8 @@ def test_the_config_names_the_run_the_interface_needs(tmp_path: Path) -> None:
     assert config.run_id == "x72y429"
     assert config.frequency_mhz == 906.875
     assert config.models == ("fspl", "knife_edge", "hata", "itm", "p1812")
-    # The site profile waits on Casey (PR #48); the answer changes SITE_PROFILE only.
-    assert config.tx_profile.name == SITE_PROFILE
-    assert config.rx_profile.name == "mesh_node"
+    # Casey, issue #44, decision 2 (a): mesh_node at both ends for this run.
+    assert config.tx_profile.name == config.rx_profile.name == "mesh_node"
     assert config.tx_sites == folder / "tx_sites.parquet"
     assert config.rx_points == folder / "rx_points.parquet"
     assert config.snapshots.named() == {
@@ -386,3 +386,48 @@ def test_a_failure_while_moving_outputs_into_place_leaves_nothing_behind(
     with pytest.raises(OSError, match="disk full"):
         run(folder)
     assert sorted(p.name for p in folder.iterdir()) == ["rx_real.parquet", "tx_sites_real.parquet"]
+
+
+@pytest.mark.usefixtures("env")
+@pytest.mark.parametrize("marker", [None, "real"])
+def test_outputs_from_real_or_unmarked_layers_are_stamped_real(
+    tmp_path: Path, marker: str | None
+) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    if marker is not None:
+        for name in ("tx_sites_real.parquet", "rx_real.parquet"):
+            stamp_positions(folder / name, marker)
+    assert run(folder) == 0
+    assert positions_marker(folder / "rx_points.parquet") == "real"
+    assert positions_marker(folder / "tx_sites.parquet") == "real"
+
+
+@pytest.mark.usefixtures("env")
+def test_outputs_are_synthetic_only_when_every_input_row_is(tmp_path: Path) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    stamp_positions(folder / "tx_sites_real.parquet", "synthetic")
+    stamp_positions(folder / "rx_real.parquet", "real")
+    assert run(folder) == 0
+    assert positions_marker(folder / "tx_sites.parquet") == "synthetic"
+    # The grid is made up, but the one real receiver makes the layer real.
+    assert positions_marker(folder / "rx_points.parquet") == "real"
+
+
+@pytest.mark.usefixtures("env")
+def test_all_synthetic_inputs_give_synthetic_outputs(tmp_path: Path) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    for name in ("tx_sites_real.parquet", "rx_real.parquet"):
+        stamp_positions(folder / name, "synthetic")
+    assert run(folder) == 0
+    assert positions_marker(folder / "rx_points.parquet") == "synthetic"
+    assert positions_marker(folder / "tx_sites.parquet") == "synthetic"
+
+
+@pytest.mark.usefixtures("env")
+def test_an_input_marker_other_than_real_or_synthetic_is_refused(tmp_path: Path) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    path = folder / "rx_real.parquet"
+    table = pq.read_table(path)
+    metadata = {**table.schema.metadata, b"mesh_terrain:positions": b"maybe"}
+    pq.write_table(table.replace_schema_metadata(metadata), path)
+    assert "mesh_terrain:positions" in refusal(folder)
