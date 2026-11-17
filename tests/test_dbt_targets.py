@@ -190,6 +190,40 @@ def test_the_makefile_scan_follows_variables() -> None:
     assert recipes_using(makefile, "real_build") == ["via-variable", "direct"]
 
 
+FLAG_VALUE = "--vars '{real_build: true}'"
+
+
+@pytest.mark.parametrize(
+    "assignment",
+    [
+        f"FLAG ::= {FLAG_VALUE}\n",
+        f"FLAG :::= {FLAG_VALUE}\n",
+        f"FLAG != echo {FLAG_VALUE}\n",
+        f"export FLAG := {FLAG_VALUE}\n",
+        f"override FLAG = {FLAG_VALUE}\n",
+        f"override export FLAG += {FLAG_VALUE}\n",
+        f"uses: FLAG = {FLAG_VALUE}\n",
+        f"other another: export FLAG := {FLAG_VALUE}\n",
+        "FLAG := --vars \\\n  '{real_build: true}'\n",
+        f"define FLAG\n{FLAG_VALUE}\nendef\n",
+        f"override define FLAG :=\n  --quiet\n  {FLAG_VALUE}\nendef\n",
+    ],
+)
+def test_the_makefile_scan_reads_every_assignment_form(assignment: str) -> None:
+    makefile = f"{assignment}uses:\n\t$(DBT) build $(FLAG)\nplain:\n\tdbt build --quiet\n"
+    assert recipes_using(makefile, "real_build") == ["uses"]
+
+
+def test_the_makefile_scan_reads_substitution_references() -> None:
+    makefile = f"FLAG = {FLAG_VALUE}\nuses:\n\tdbt build $(FLAG:x=y)\n"
+    assert recipes_using(makefile, "real_build") == ["uses"]
+
+
+def test_the_makefile_scan_ignores_an_assignment_in_a_comment() -> None:
+    makefile = f"# FLAG = {FLAG_VALUE}\nplain:\n\tdbt build $(FLAG)\n"
+    assert recipes_using(makefile, "real_build") == []
+
+
 def test_only_make_dbt_build_real_passes_the_real_build_flag() -> None:
     makefile = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
     assert recipes_using(makefile, "real_build") == ["dbt-build-real"]
