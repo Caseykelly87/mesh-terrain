@@ -1,19 +1,21 @@
 """Every rule in docs/data-quality-contract.md has a test named for it.
 
-A test names the rule `lnk_03` in one of four ways:
+The contract (its opening lines and ADR 0007) accepts a dbt test or a Dagster
+asset check, so a test names the rule `lnk_03` in one of three ways:
 
-- a dbt singular test file `assert_lnk_03.sql` or `assert_lnk_03_<what_must_be_true>.sql`;
+- a dbt singular test file `assert_lnk_03.sql` or `assert_lnk_03_<what>.sql`;
 - a dbt generic test in model YAML with `config: {meta: {contract: lnk_03}}`, or a
   list of ids when one test enforces several rules;
-- a Dagster asset check whose name holds `lnk_03` as a whole word between
-  underscores, as in `lnk_03_relayer_is_not_gateway`;
-- a pytest function whose name does the same, as in `test_lnk_03_drops_a_self_link`.
+- a Dagster asset check named `lnk_03` or `lnk_03_<what>`, as the existing
+  `ing_04_decode_rate` is.
 
-Rules that no test names yet are on PENDING. The check fails when a rule off
-the list has no test, and when a rule on the list has one, so a rule leaves
-the list in the same change that adds its test, and the list only shrinks. It
-checks that each rule has at least one test, not that the tests cover every
-item of the contract's "Enforced by" column; the reviewer checks that.
+A pytest function does not count, whatever its name: the contract does not
+accept one. Rules that no test names yet are on PENDING. The check fails when
+a rule off the list has no test, and when a rule on the list has one, so a
+rule leaves the list in the same change that adds its test. PENDING may never
+hold a rule that was not pending when the list was made (PENDING_AT_B1), so it
+only shrinks. The check needs one named test per rule, not every item of the
+contract's "Enforced by" column; the reviewer checks that.
 """
 
 import ast
@@ -26,17 +28,31 @@ from dbt_listing import DEVELOPMENT_TARGET, REPO_ROOT, dbt_nodes
 
 CONTRACT = REPO_ROOT / "docs" / "data-quality-contract.md"
 RULE_ROW = re.compile(r"^\| `([a-z]{3}_\d{2})` \|", re.MULTILINE)
-WORD_RULE = re.compile(r"(?:^|_)([a-z]{3}_\d{2})(?=_|$)")
+LEADING_RULE = re.compile(r"^([a-z]{3}_\d{2})(?:_|$)")
 SINGULAR_RULE = re.compile(r"^assert_([a-z]{3}_\d{2})(?:_|$)")
 ASSET_CHECK_PACKAGES = ("ingester", "pipeline", "engine", "terrain")
 ASSET_CHECK_CALLS = {"AssetCheckSpec", "asset_check"}
 
-# Rules with no test named for them yet. Remove a rule in the change that adds
-# its test; never add one except with a new contract rule.
+# The rules pending when this test was written (issue #55, B1, 2026-11-17).
+# PENDING must stay a subset of it; do not edit this set.
+PENDING_AT_B1 = frozenset(
+    {
+        *("ing_01", "ing_02", "ing_05", "ing_06"),
+        *("pos_01", "pos_02", "pos_04"),
+        *("lnk_01", "lnk_02", "lnk_03", "lnk_04", "lnk_05", "lnk_06", "lnk_07", "lnk_08"),
+        *("prv_01", "prv_02", "prv_03"),
+        *("ter_01", "ter_02", "ter_03", "ter_04", "ter_05", "ter_06", "ter_07"),
+        *("val_01", "val_02", "val_03"),
+    }
+)
+
+# Rules with no dbt test or asset check named for them yet. Remove a rule in
+# the change that adds its test.
 PENDING = frozenset(
     {
-        # ing_01 has its known-answer test in tests/test_keys.py and ing_05 its
-        # loader refusal in tests/test_load.py, under names without the id.
+        # ing_01 (key derivation), ing_05 (loader refusal) and prv_01
+        # (allowlist) have pytest tests today, which the contract does not
+        # count; each needs a dbt test or an asset check named for it.
         "ing_01",
         "ing_02",
         "ing_05",
@@ -52,7 +68,6 @@ PENDING = frozenset(
         "lnk_06",
         "lnk_07",
         "lnk_08",
-        # prv_01's allowlist test is tests/test_allowlist.py, named without the id.
         "prv_01",
         "prv_02",
         "prv_03",
@@ -63,8 +78,10 @@ PENDING = frozenset(
         "ter_05",
         "ter_06",
         "ter_07",
+        # val_01 and val_03 name a pytest on a Python function, and val_02 the
+        # reviewer; none can leave PENDING until the contract or the rule
+        # names a dbt test or an asset check for it.
         "val_01",
-        # val_02 is enforced by review; a test would read docs/results.md.
         "val_02",
         "val_03",
     }
@@ -78,9 +95,10 @@ def contract_rule_ids(text: str) -> list[str]:
     return RULE_ROW.findall(text)
 
 
-def rules_in_word(name: str) -> frozenset[str]:
-    """The rule ids a Python name holds as whole words between underscores."""
-    return frozenset(WORD_RULE.findall(name))
+def asset_check_rules(name: str) -> frozenset[str]:
+    """The rule an asset check names: `<id>` or `<id>_<what>`."""
+    match = LEADING_RULE.match(name)
+    return frozenset({match.group(1)}) if match else frozenset()
 
 
 def dbt_test_rules(node: dict[str, Any]) -> frozenset[str]:
@@ -155,26 +173,14 @@ def python_sources(folders: Iterable[Path], pattern: str) -> Iterator[tuple[Path
 def asset_checks() -> list[NamedTest]:
     folders = [REPO_ROOT / package for package in ASSET_CHECK_PACKAGES]
     return [
-        (f"asset check {name} ({path.relative_to(REPO_ROOT).as_posix()})", rules_in_word(name))
+        (f"asset check {name} ({path.relative_to(REPO_ROOT).as_posix()})", asset_check_rules(name))
         for path, tree in python_sources(folders, "*.py")
         for name in asset_check_names(tree)
     ]
 
 
-def pytest_functions() -> list[NamedTest]:
-    tests_dir = REPO_ROOT / "tests"
-    return [
-        (f"{path.relative_to(REPO_ROOT).as_posix()}::{node.name}", rules_in_word(node.name))
-        for path, tree in python_sources([tests_dir], "test_*.py")
-        if path.name != Path(__file__).name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
-        and node.name.startswith("test_")
-    ]
-
-
 def all_named_tests() -> list[NamedTest]:
-    return [*dbt_tests(dbt_nodes(DEVELOPMENT_TARGET)), *asset_checks(), *pytest_functions()]
+    return [*dbt_tests(dbt_nodes(DEVELOPMENT_TARGET)), *asset_checks()]
 
 
 def contract_problems(
@@ -248,12 +254,20 @@ def test_generic_dbt_tests_name_rules_by_meta() -> None:
     assert dbt_test_rules(generic({})) == frozenset()
 
 
-def test_python_names_hold_a_rule_as_a_whole_word() -> None:
-    assert rules_in_word("pos_03_not_both_zero") == {"pos_03"}
-    assert rules_in_word("test_the_snp_01_fields") == {"snp_01"}
-    assert rules_in_word("test_lnk_03_and_lnk_04") == {"lnk_03", "lnk_04"}
-    assert rules_in_word("test_xlnk_03") == frozenset()
-    assert rules_in_word("test_lnk_031") == frozenset()
+def test_asset_checks_name_a_rule_by_leading_id() -> None:
+    assert asset_check_rules("pos_03_not_both_zero") == {"pos_03"}
+    assert asset_check_rules("lnk_03") == {"lnk_03"}
+    assert asset_check_rules("decode_rate_ing_04") == frozenset()
+    assert asset_check_rules("lnk_031_x") == frozenset()
+
+
+def test_a_pytest_name_does_not_count_as_a_rules_test() -> None:
+    labels = [label for label, _ in all_named_tests()]
+    assert not [label for label in labels if "::test_" in label]
+
+
+def test_pending_only_shrinks() -> None:
+    assert PENDING <= PENDING_AT_B1
 
 
 def test_asset_checks_are_read_from_specs_and_decorators() -> None:

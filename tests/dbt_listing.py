@@ -36,8 +36,10 @@ def dbt_executable() -> str:
     return found
 
 
-def run_dbt(arguments: list[str], work_dir: Path) -> str:
-    """Run one dbt command against the project, writing its files under work_dir."""
+def dbt_result(
+    arguments: list[str], work_dir: Path, environment: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Run one dbt command against the project, writing its logs under work_dir."""
     command = [
         dbt_executable(),
         "--quiet",
@@ -50,7 +52,12 @@ def run_dbt(arguments: list[str], work_dir: Path) -> str:
         "--log-path",
         str(work_dir),
     ]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    return subprocess.run(command, capture_output=True, text=True, check=False, env=environment)
+
+
+def run_dbt(arguments: list[str], work_dir: Path) -> str:
+    """Run one dbt command and return its output, raising when it fails."""
+    result = dbt_result(arguments, work_dir)
     if result.returncode != 0:
         raise RuntimeError(f"dbt {arguments[0]} failed:\n{result.stdout}\n{result.stderr}")
     return result.stdout
