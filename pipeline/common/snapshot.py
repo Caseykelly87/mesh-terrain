@@ -31,10 +31,14 @@ from typing import Any
 
 import psycopg
 import structlog
+from psycopg import sql
 
 log = structlog.get_logger(component="pipeline.common.snapshot")
 
 PARTIAL_SUFFIX = ".partial"
+# The schema register writes to. Only tests pass another, a throwaway schema
+# built from the same DDL (Casey, issue #55, item 10).
+RAW_SCHEMA = "raw"
 MANIFEST_NAME = "manifest.json"
 SNAPSHOT_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]*")
 # snp_01: an id, a capture date, a source URL and a licence, and the seed of
@@ -333,7 +337,13 @@ def _registry_values(folder: Path, manifest: Mapping[str, Any]) -> tuple[str, ..
     )
 
 
-def register(conn: psycopg.Connection, folder: Path, manifest: Mapping[str, Any]) -> int:
+def register(
+    conn: psycopg.Connection,
+    folder: Path,
+    manifest: Mapping[str, Any],
+    *,
+    schema: str = RAW_SCHEMA,
+) -> int:
     """Insert the raw.snapshot row of a finished snapshot.
 
     The caller verifies the folder against its manifest first (register_verified
@@ -344,6 +354,8 @@ def register(conn: psycopg.Connection, folder: Path, manifest: Mapping[str, Any]
         conn: An open warehouse connection where raw.snapshot exists.
         folder: The finished `<root>/<id>/` folder.
         manifest: Its parsed manifest, as read from the folder.
+        schema: The schema holding the snapshot table; raw unless a test passes
+            its throwaway schema.
 
     Returns:
         1 when the row is new, 0 when the snapshot id was already registered.
@@ -356,18 +368,18 @@ def register(conn: psycopg.Connection, folder: Path, manifest: Mapping[str, Any]
     """
     values = _registry_values(folder, manifest)
     with _logged("snapshot_register", values[0]) as details:
-        cursor = conn.execute(
-            "insert into raw.snapshot "
+        query = sql.SQL(
+            "insert into {} "
             "(snapshot_id, capture_date, source_url, licence, manifest_path, manifest_sha256, "
             "registered_at) values (%s, %s, %s, %s, %s, %s, now()) "
-            "on conflict (snapshot_id) do nothing",
-            values,
-        )
+            "on conflict (snapshot_id) do nothing"
+        ).format(sql.Identifier(schema, "snapshot"))
+        cursor = conn.execute(query, values)
         details["inserted"] = cursor.rowcount
     return cursor.rowcount
 
 
-def register_verified(conn: psycopg.Connection, folder: Path) -> int:
+def register_verified(conn: psycopg.Connection, folder: Path, *, schema: str = RAW_SCHEMA) -> int:
     """Register a finished snapshot whose every file matches its manifest (ing_05, snp_01).
 
     Returns:
@@ -379,4 +391,4 @@ def register_verified(conn: psycopg.Connection, folder: Path) -> int:
     """
     if folder.name.endswith(PARTIAL_SUFFIX):
         raise SnapshotError(f"{folder} is an unfinished run; it is never registered")
-    return register(conn, folder, verified_manifest(folder))
+    return register(conn, folder, verified_manifest(folder), schema=schema)

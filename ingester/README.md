@@ -7,7 +7,7 @@ Modules:
 - `keys.py`: the node pseudonym (HMAC-SHA-256 of the node number as 4 bytes big-endian under `NODE_ID_HMAC_KEY`, 64 hex characters), the low id byte, and the delivery key (`"delivery"`, the topic's byte length as 4 bytes big-endian, the UTF-8 topic and the payload). Known-answer tests in `tests/test_keys.py` fix both encodings; changing one after a snapshot exists is a key rotation.
 - `topics.py`: topic class, the landed topic (every `!xxxxxxxx` node id replaced by its pseudonym) and the modem preset, by the channel names firmware v2.7.11 gives default channels.
 - `decoder.py`: one delivery in, one allowlisted row, internet copy or counted drop out, with the `ing_03` decode status. Default-key decryption only.
-- `allowlist.py` and `sql/raw_tables.sql`: the columns that may land and the `raw` tables that hold them; a test keeps the two equal.
+- `allowlist.py` and `sql/raw_tables.sql`: the columns that may land and the `raw` tables that hold them; a test keeps the two equal. The DDL names its schema as `{schema}`, which `load.raw_ddl` fills with `raw` for every real load; every loader function that sends SQL takes a keyword-only `schema`, `raw` by default, and only the tests pass another.
 - `counts.py` and `sightings.py`: copy, dropped and per-hour per-broker counts, and the broker flags and merged deliveries of `ing_01` and `ing_03`.
 - `snapshot.py`, `parquet.py`, `finalise.py`, `readme.py`: hour file names, zstd Parquet with the allowlist schema, data content hashes, the merge at exit, coverage, README and the capture manifest's run fields and checks. The `<id>.partial/` folder, the sha256 manifest, verification and `raw.snapshot` registration are shared with every snapshot in `pipeline/common/snapshot.py`.
 - `reduce.py`: the batch reduction of the 2026-10-22 archive into snapshot `meshtastic-capture-2026-10-22`. Its command is wired to that archive's folders, snapshot id and MeshSTL window. It ran once, on 2026-11-14, and cannot run again because its input was deleted the same day (ADR 0003, Consequences). `reduce_capture` takes any folders of capture JSON lines, and the tests run it on the synthetic fixtures. No future capture goes through it, since ADR 0005 limits the reduction to that one archive and capture runs pseudonymise in memory; `capture.py` imports only its `LICENCE` constant.
@@ -23,7 +23,7 @@ Modules:
 
 Run:
 
-- Tests: `make check` (the loader tests need the local stack and skip without it).
+- Tests: `make check` (the loader tests need the local stack and skip without it). The database tests never touch `raw` or `raw_dev_wh`: each builds the raw tables from `sql/raw_tables.sql` in its own `test_load_<12 hex>` schema inside a transaction that is rolled back, then drops that schema, and fails if its connection locked any table in `raw` or `raw_dev_wh` (`tests/raw_schema.py`; Casey, issue #55, item 10). `tests/test_raw_isolation.py` scans every test module for SQL against those two schemas.
 - Reduction: `uv run --frozen python -I -m ingester.reduce`. It ran once, on 2026-11-14, and cannot run again: its input archive was deleted that day.
 - Load: `uv run --frozen python -m ingester.load <snapshot id>`.
 - Capture and gate: `docs/adr/0003-spike/README.md`.
