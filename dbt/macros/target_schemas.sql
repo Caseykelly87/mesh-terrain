@@ -30,8 +30,9 @@
   The on-run-start hook, so it runs before any node of a build, seed, run,
   snapshot or test, and a failure stops the run with nothing built.
 
-  On prod it refuses unless the run passes --vars '{real_build: true}', which
-  only make dbt-build-real does: DBT_TARGET=prod in an agent's shell, in a
+  On prod it refuses unless the run passes --vars '{real_build: true}', the
+  boolean true and nothing else that reads as true, which only
+  make dbt-build-real does: DBT_TARGET=prod in an agent's shell, in a
   .env or in the Dagster container would otherwise rebuild the real schemas.
   The check waits for execute because dbt also renders hooks while parsing,
   and dbt ls and dbt parse must still work on prod.
@@ -46,7 +47,7 @@
 #}
 {% macro create_target_schemas() -%}
     {%- if target.name == 'prod' -%}
-        {%- if execute and not var('real_build', false) -%}
+        {%- if execute and var('real_build', false) is not sameas true -%}
             {{ exceptions.raise_compiler_error(
                 "dbt on the target prod rebuilds the real staging, core and analytics "
                 ~ "schemas; only the lead runs it, through make dbt-build-real. Use the "
