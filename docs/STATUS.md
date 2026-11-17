@@ -8,6 +8,7 @@ Phase 0 complete with PR #14 (the tag is described in `docs/PLAN.md`, Phase 0). 
 
 ## Deviations from the plan still in effect
 
+- `engine_inputs` (PR #54) places nodes by the overlap rule only; it does not yet apply the Link-rule amendment's floor, tie placement or one box per end for the hour (ADR 0003, Link-rule amendment, 2026-11-17), so the x72y429 run follows the overlap rule alone. Owner: ingest-eng, in the item 4 unit. Closes when `engine_inputs` applies all of `lnk_02`.
 - The DSM COG is written with GDAL's COG driver through rasterio (`rasterio.shutil.copy`, driver `COG`), not with rio-cogeo, which the plan's stack table names: rio-cogeo's `cog_profiles.get` is unannotated, so a call to it fails mypy strict (PR #39). The output is a Cloud Optimized GeoTIFF either way.
 - The engine milestone of Phase 3 runs ahead of Phase 2's exit, by Casey's order: "The run is the priority" (PR #24 comment 6896602098). Closes when Phase 2's exit criteria are met.
 - The object store is `bitnamilegacy/minio` pinned by digest, not `minio/minio`. Upstream MinIO archived the community server and client in 2026 and withdrew the images and binaries from Docker Hub, quay.io and dl.min.io; the Bitnami legacy build of the last community release is the only pullable image. It is frozen and may be removed; kept by decision in ADR 0004. The plan's stack table still says MinIO; nothing else in the design depends on the vendor, since the raw zone is S3-shaped.
