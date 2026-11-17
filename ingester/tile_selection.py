@@ -309,7 +309,7 @@ def pair_states(links: CaptureLinks, tile: Tile) -> dict[PairActivity, PairState
     }
 
 
-def counted(state: PairState) -> PairState:
+def _counted(state: PairState) -> PairState:
     """The state the tile check counts: a straddling node counts as in the tile (Q1 (a))."""
     relayer, gateway = (IN if end == SPLIT else end for end in state)
     return relayer, gateway
@@ -320,7 +320,7 @@ def tile_counts(states: dict[PairActivity, PairState]) -> dict[str, int]:
 
     A straddling node counts as in the tile (Casey, issue #44, engine_inputs Q1 (a), 2026-11-17).
     """
-    values = [counted(state) for state in states.values()]
+    values = [_counted(state) for state in states.values()]
     return {
         "both ends": values.count((IN, IN)),
         "only the gateway end": values.count((OUT, IN)),
@@ -384,7 +384,7 @@ def _selected_pairs(
     links: CaptureLinks, states: dict[PairActivity, PairState], tile: Tile
 ) -> dict[PairActivity, str]:
     """The both-ends pair and the two busiest pairs, after the 2026-11-08 tile check."""
-    counts = {pair: counted(state) for pair, state in states.items()}
+    counts = {pair: _counted(state) for pair, state in states.items()}
     both = [pair for pair, state in counts.items() if state == (IN, IN)]
     if len(both) != 1:
         raise SelectionError(f"{len(both)} pairs have both ends in {tile.name}, not one")
@@ -394,6 +394,16 @@ def _selected_pairs(
     if tile_counts(states)["touched"] != PAIRS_TOUCHED:
         raise SelectionError(f"pairs touching {tile.name} are not {PAIRS_TOUCHED}")
     return {both[0]: BOTH_ENDS_PAIR, busy[0]: BUSIEST_PAIR, busy[1]: BUSIEST_PAIR}
+
+
+def _straddling(states: dict[PairActivity, PairState]) -> set[str]:
+    """The nodes whose usable boxes lie on both sides of the tile edge."""
+    return {
+        node
+        for pair, state in states.items()
+        for node, end_state in zip((pair.relayer, pair.gateway), state, strict=True)
+        if end_state == SPLIT
+    }
 
 
 def _roles(kinds: dict[PairActivity, str]) -> list[tuple[str, str]]:
@@ -432,12 +442,7 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
         raise SelectionError(f"{len(links.pairs)} pairs, not the {expect_pairs} expected")
     states = pair_states(links, tile)
     kinds = _selected_pairs(links, states, tile)
-    straddling = {
-        node
-        for pair, state in states.items()
-        for node, end_state in zip((pair.relayer, pair.gateway), state, strict=True)
-        if end_state == SPLIT
-    }
+    straddling = _straddling(states)
     placed = tuple(
         _place(links.nodes, node, role) for node, role in _roles(kinds) if node not in straddling
     )
