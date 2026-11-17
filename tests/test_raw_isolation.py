@@ -10,10 +10,19 @@ text names `raw.` or `raw_dev_wh.` (quoted or not, f-string values read as
 used afterwards (a variable, `.format`, `%`, `+`, an Identifier); and any
 name, attribute or import called `RAW_SCHEMA`. Each match is reported with
 the function (or `<module>`) it sits in, and ALLOWED lists the ones that are
-not SQL. It does not see a name built at run time (`"r" + "aw"`, a join, a
-value read from settings or a file, `getattr`), nor a production function
-called without `schema=`, which falls back to `raw`: the throwaway fixture's
-lock check catches that last case on its own connection.
+not SQL. PROBES holds one case per form the PR #61 review found the first
+scan missed (`schema=load.RAW_SCHEMA`, `schema=RAW_SCHEMA`, `.format("raw")`,
+`% "raw"`, concatenation, a variable holding `raw.snapshot` or `raw` used in
+an f-string, a bare `Identifier("raw", ...)`, `sql.Identifier(S, ...)` with
+`S = "raw"`) and each is caught now.
+
+It does not see a name built at run time (`"r" + "aw"`, a join, a value read
+from settings, the environment or a file, `getattr`), a test in another
+language, nor a production function called without `schema=`, which falls
+back to `raw`; the throwaway fixture's lock check catches that last case, on
+its own connection only. A database role with no write on `raw` or
+`raw_dev_wh` for the tests is queued for platform-eng (Casey, issue #55
+comment 6961809084, item 10); it refuses a write however it is written.
 """
 
 import ast
@@ -39,6 +48,7 @@ from raw_schema import (
 TESTS = Path(__file__).resolve().parent
 QUALIFIED = re.compile(rf'\b({"|".join(REAL_SCHEMAS)})"?\.["\w]')
 NAMES = frozenset({"RAW_SCHEMA"})
+REAL_TARGET_TEST = "test_the_real_target_builds_the_real_schemas_and_reads_the_real_raw"
 # Matches that are not SQL, by (file, enclosing function or <module>), with
 # every match expected there; any other match, or a different set, fails.
 ALLOWED: dict[tuple[str, str], list[str]] = {
@@ -49,6 +59,20 @@ ALLOWED: dict[tuple[str, str], list[str]] = {
         "constant 'raw'"
     ],
     ("test_settings.py", "<module>"): ["constant 'raw'"],
+    # warehouse-eng's dbt target checks: schema names in dbt's manifest, and a
+    # text its own SQL scanner reads; none is sent to the database.
+    ("test_dbt_targets.py", "<module>"): ["constant 'raw'"],
+    (
+        "test_dbt_targets.py",
+        "test_the_real_target_builds_the_real_schemas_and_reads_the_real_raw",
+    ): [
+        "constant 'raw'",
+        "constant 'raw'",
+    ],
+    ("test_dbt_targets.py", "test_the_scanner_finds_schema_names_written_into_sql"): [
+        "qualified raw",
+        "constant 'raw'",
+    ],
     # The production default, checked on signatures, rendered text and log fields only.
     ("test_load.py", "test_every_loader_query_takes_a_schema_that_defaults_to_raw"): [
         "constant 'raw'"
