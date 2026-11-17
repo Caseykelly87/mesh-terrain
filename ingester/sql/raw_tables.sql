@@ -8,6 +8,8 @@
 -- schema there as a quoted identifier, "raw" for every real load and a
 -- throwaway test_load_<hex> schema in the tests, so the tests build the same
 -- tables the warehouse holds. Run it through raw_ddl, not psql.
+-- raw_ddl formats the whole file with psycopg's sql.SQL.format, comments
+-- included, so a literal brace anywhere here must be doubled.
 
 create table if not exists {schema}.snapshot (
     snapshot_id text not null,

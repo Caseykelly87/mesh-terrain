@@ -12,7 +12,9 @@ transaction that is always rolled back, so nothing is ever committed; a guarded
 committed. Before the rollback the connection must hold no lock on any relation
 in `raw` or `raw_dev_wh`: every statement that reads, writes or alters a table
 takes one, so this catches a test that reached the real tables through a
-default argument.
+default argument. It cannot see a statement made inside a savepoint that was
+rolled back, since that releases the savepoint's locks; the tests that use this
+fixture open no savepoint.
 """
 
 import re
@@ -77,6 +79,8 @@ def drop_throwaway(conn: psycopg.Connection, schema: str) -> None:
     """Drop one throwaway schema and commit; any other name is refused before any SQL is sent."""
     if not THROWAWAY_PATTERN.fullmatch(schema):
         raise ValueError(f"{schema!r} is not a throwaway test schema; it is never dropped")
+    # Ends whatever the caller left open, so the drop runs in a transaction of its own.
+    conn.rollback()
     conn.execute(sql.SQL("drop schema if exists {} cascade").format(sql.Identifier(schema)))
     conn.commit()
 

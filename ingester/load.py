@@ -42,6 +42,7 @@ from ingester.parquet import read_rows, row_digest
 from ingester.settings import get_ingester_settings
 from ingester.topics import topic_class
 from pipeline.common.snapshot import (
+    RAW_SCHEMA,
     SNAPSHOT_COLUMNS,
     read_manifest,
     register,
@@ -52,7 +53,6 @@ from pipeline.common.snapshot import (
 log = structlog.get_logger(component="ingester.load")
 
 DDL_PATH = Path(__file__).with_name("sql") / "raw_tables.sql"
-RAW_SCHEMA = "raw"
 SNAPSHOT_CONTENT_COLUMNS = tuple(name for name in SNAPSHOT_COLUMNS if name != "registered_at")
 LOAD_ORDER = ("mqtt_message", "mqtt_copy_count", "mqtt_dropped_count")
 
@@ -62,7 +62,13 @@ class SchemaDriftError(RuntimeError):
 
 
 def raw_ddl(schema: str = RAW_SCHEMA) -> sql.Composed:
-    """The raw DDL with its tables in the given schema, which must exist."""
+    """The raw DDL from raw_tables.sql with its tables in the given schema.
+
+    Args:
+        schema: The schema the tables are created in, which must exist; raw
+            unless a test passes its throwaway schema. It goes in as a quoted
+            identifier, never as text.
+    """
     template = DDL_PATH.read_text(encoding="utf-8")
     return sql.SQL(template).format(schema=sql.Identifier(schema))
 

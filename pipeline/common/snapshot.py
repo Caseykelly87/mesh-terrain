@@ -385,6 +385,12 @@ def register(
 def register_verified(conn: psycopg.Connection, folder: Path, *, schema: str = RAW_SCHEMA) -> int:
     """Register a finished snapshot whose every file matches its manifest (ing_05, snp_01).
 
+    Args:
+        conn: An open warehouse connection where the schema's snapshot table exists.
+        folder: The finished `<root>/<id>/` folder.
+        schema: The schema holding the snapshot table; raw unless a test passes
+            its throwaway schema.
+
     Returns:
         1 when the row is new, 0 when the snapshot id was already registered.
 
