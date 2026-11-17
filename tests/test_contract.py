@@ -33,7 +33,6 @@ from dbt_listing import DEVELOPMENT_TARGET, REPO_ROOT, dbt_nodes
 CONTRACT = REPO_ROOT / "docs" / "data-quality-contract.md"
 RULE_ROW = re.compile(r"^\| `([a-z]{3}_\d{2})` \|", re.MULTILINE)
 RULE_ID = re.compile(r"[a-z]{3}_\d{2}")
-LEADING_RULE = re.compile(r"^([a-z]{3}_\d{2})(?:_|$)")
 SINGULAR_RULE = re.compile(r"^assert_([a-z]{3}_\d{2})(?:_|$)")
 ASSET_CHECK_PACKAGES = ("ingester", "pipeline", "engine", "terrain")
 ASSET_CHECK_CALLS = {"AssetCheckSpec", "asset_check"}
@@ -113,9 +112,8 @@ def contract_rule_ids(text: str) -> list[str]:
 
 
 def asset_check_rules(name: str) -> frozenset[str]:
-    """The rule an asset check names: `<id>` or `<id>_<what>`."""
-    match = LEADING_RULE.match(name)
-    return frozenset({match.group(1)}) if match else frozenset()
+    """The rule an asset check names: only a name that is exactly a rule id."""
+    return frozenset({name}) if RULE_ID.fullmatch(name) else frozenset()
 
 
 def dbt_test_rules(node: dict[str, Any]) -> frozenset[str]:
