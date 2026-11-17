@@ -14,6 +14,17 @@ spike's by construction. As in the spike, relayer candidates and the
 stationarity test see the whole run, not the trailing 24 hours and 7 days the
 warehouse applies (ADR 0003, Terms).
 
+Where a node is placed follows the amended `lnk_02` (ADR 0003, Overlap
+amendment, 2026-11-17), not the spike: `node_positions` reads only a node's
+usable positions (15 bits or more) inside the MSA polygon, from either broker
+and either source, over the whole capture, which stands in for the 7-day
+window. The node is stationary when all of them overlap one another, tested
+in whole numbers (`ingester.box_overlap`), and is placed at its smallest box.
+The pairs themselves still come from the spike's rules, which test
+stationarity per run with one box per node and overlap in floating point;
+moving those rules into tested ingester code is a later unit (Casey, PR #52,
+4).
+
 What a position is follows the contract, not the gate: a row needs both
 coordinates (`pos_01`), and one at 0, 0 is none (`pos_03`). The gate puts a
 missing coordinate back as 0 to match the spike's archive reading (Casey,
@@ -29,7 +40,7 @@ at import, so the rest of the ingester and the Dagster image do not need
 import importlib
 import sys
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -38,6 +49,7 @@ from typing import Any, NamedTuple
 import pyarrow.parquet as pq
 import structlog
 
+from ingester.box_overlap import TiedBoxesError, stationary_box
 from ingester.topics import topic_class, topic_root
 from pipeline.common.snapshot import verified_manifest
 
@@ -74,20 +86,43 @@ class Box(NamedTuple):
     precision_bits: int
 
 
+InArea = Callable[[int, int], bool]
+"""Whether latitude_i and longitude_i (1e-7 degrees, EPSG:4326) lie inside an area."""
+
+
 @dataclass(frozen=True)
 class NodePositions:
-    """Every position a node sent in the capture, either broker, any area, either source."""
+    """A node's distinct usable boxes inside the MSA over the capture, either broker or source.
+
+    Attributes:
+        boxes: At least one box, each of 15 bits or more (lnk_02).
+        precise_source: Whether one of them is 20 bits or more on a MeshSTL
+            delivery (`pos_04`).
+
+    Raises:
+        ValueError: if boxes is empty or holds a box under 15 bits.
+    """
 
     boxes: frozenset[Box]
     precise_source: bool
 
+    def __post_init__(self) -> None:
+        if not self.boxes or any(box.precision_bits < USABLE_BITS for box in self.boxes):
+            raise ValueError(f"a node needs one or more usable boxes, {USABLE_BITS} bits or more")
+
     @property
     def stationary_box(self) -> Box | None:
-        """The node's one box when every position it sent is that box and it is usable (lnk_02)."""
-        if len(self.boxes) != 1:
-            return None
-        (box,) = self.boxes
-        return box if box.precision_bits >= USABLE_BITS else None
+        """The node's smallest box when all its boxes overlap one another, else None (lnk_02).
+
+        Raises:
+            SelectionError: if overlapping boxes tie for the most precision
+                bits, which firmware boxes cannot; the message names no
+                coordinate.
+        """
+        try:
+            return stationary_box(self.boxes)
+        except TiedBoxesError as err:
+            raise SelectionError(str(err)) from err
 
 
 @dataclass(frozen=True)
@@ -174,8 +209,9 @@ def capture_links(rows: Sequence[dict[str, Any]]) -> CaptureLinks:
         SelectionError: if the spike scripts are not in the checkout.
     """
     figures = _spike()
+    msa = _msa(figures)
     ids = StandIns()
-    keys = {broker: _stationary_link_hours(figures, rows, ids, broker) for broker in RUNS}
+    keys = {broker: _stationary_link_hours(figures, rows, ids, broker, msa) for broker in RUNS}
     pairs = _pair_activity(keys, ids)
     public, meshstl = ({(k[0], k[1]) for k in keys[b]} for b in RUNS)
     counts = {
@@ -191,16 +227,28 @@ def capture_links(rows: Sequence[dict[str, Any]]) -> CaptureLinks:
         if row["position_source"] is not None
         and (row["latitude_i"] is None) != (row["longitude_i"] is None)
     )
-    return CaptureLinks(pairs, counts, node_positions(rows), len(rows), missing)
+    return CaptureLinks(pairs, counts, node_positions(rows, msa.contains), len(rows), missing)
 
 
-def node_positions(rows: Iterable[dict[str, Any]]) -> dict[str, NodePositions]:
-    """Every node's boxes over the whole capture, and whether one is a precise source (pos_04)."""
+def node_positions(rows: Iterable[dict[str, Any]], inside: InArea) -> dict[str, NodePositions]:
+    """Every node's usable boxes in the area over the whole capture (lnk_02).
+
+    Args:
+        rows: Delivery rows from read_capture_rows, from either broker.
+        inside: The area test, `msa_contains()` for the MSA.
+
+    Returns:
+        Per node with at least one usable box in the area, its boxes and
+        whether one is a precise source (`pos_04`). Coarse boxes and boxes
+        outside the area are not read, so a node with no other box is absent.
+    """
     boxes: dict[str, set[Box]] = {}
     precise: set[str] = set()
     for row in rows:
         box = position_of(row)
-        if box is None:
+        if box is None or box.precision_bits < USABLE_BITS:
+            continue
+        if not inside(box.latitude_i, box.longitude_i):
             continue
         node = row["origin_pseudonym"]
         boxes.setdefault(node, set()).add(box)
@@ -255,6 +303,21 @@ def box_half_width_m(precision_bits: int, latitude_deg: float) -> float:
     return float(min(north_south_m, east_west_m))
 
 
+def msa_contains() -> InArea:
+    """The MSA's point test, from the polygon the spike reads (CBSA 41180, the dbt seed).
+
+    Raises:
+        SelectionError: if the spike scripts are not in the checkout.
+    """
+    contains: InArea = _msa(_spike()).contains
+    return contains
+
+
+def _msa(figures: ModuleType) -> Any:
+    """The spike's Area for the MSA, whose `contains` takes 1e-7 degree integers."""
+    return figures.az.Area("the MSA", figures.az.load_area(figures.MSA_CSV, {MSA_GEOID}))
+
+
 def _spike() -> ModuleType:
     """The spike's figures module, which imports analyze.py as `az`.
 
@@ -283,7 +346,7 @@ LinkHour = tuple[int, int, int]
 
 
 def _stationary_link_hours(
-    figures: ModuleType, rows: Sequence[dict[str, Any]], ids: StandIns, broker: str
+    figures: ModuleType, rows: Sequence[dict[str, Any]], ids: StandIns, broker: str, msa: Any
 ) -> dict[LinkHour, int]:
     """Link-hours of a run at 500 m under the stationarity rule, MSA, with their receipt counts."""
     az = figures.az
@@ -297,7 +360,6 @@ def _stationary_link_hours(
         return tally
 
     tally = figures.run_tallies(load, RUNS[broker])
-    msa = az.Area("the MSA", az.load_area(figures.MSA_CSV, {MSA_GEOID}))
     positions = az.area_positions(tally, msa)
     result = az.apply_rules(tally, positions, stationary=True)["combined"]
     return {key: len(result.windows[key]) for key in result.link_hours(az.MIN_DISTANCE_M)}
