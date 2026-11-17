@@ -23,7 +23,19 @@ Modules:
 
 Run:
 
-- Tests: `make check` (the loader tests need the local stack and skip without it). The database tests never touch `raw` or `raw_dev_wh`: each builds the raw tables from `sql/raw_tables.sql` in its own `test_load_<12 hex>` schema inside a transaction that is rolled back, then drops that schema, and fails if its connection locked any table in `raw` or `raw_dev_wh` (`tests/raw_schema.py`; Casey, issue #55, item 10). The lock check does not see a read made inside a savepoint that was rolled back, since that releases its locks. `tests/test_raw_isolation.py` scans every test module. Outside docstrings it matches a string or f-string whose text names `raw.` or `raw_dev_wh.`, quoted or not; a string that is exactly `raw` or `raw_dev_wh`, whatever it is then used for (a variable, `.format`, `%`, `+`, an `Identifier`); and any name, attribute or import called `RAW_SCHEMA`. Its `ALLOWED` list names, by file and function, the matches that are not SQL. It does not see a name built at run time (`"r" + "aw"`, a join, a value from settings or a file, `getattr`), nor a production function that falls back to `raw` because a test passed no `schema=`; only the fixture's lock check catches that, on its own connection. Each form the PR #61 review found the first scan missed has a probe case in that file and is caught. A database role for the tests with no write on `raw` or `raw_dev_wh`, which refuses a write however it is written, is queued for platform-eng (Casey, issue #55, item 10 of comment 6961809084).
+- Tests: `make check` (the loader tests need the local stack and skip without it). The database tests never touch `raw` or `raw_dev_wh`: each builds the raw tables from `sql/raw_tables.sql` in its own `test_load_<12 hex>` schema inside a transaction that is rolled back, then drops that schema, and fails if its connection locked any table in `raw` or `raw_dev_wh` (`tests/raw_schema.py`; Casey, issue #55, item 10). The lock check does not see a read made inside a savepoint that was rolled back, since that releases its locks. `tests/test_raw_isolation.py` holds the scan; its `ALLOWED` list names, by file and function, the matches that are not SQL.
+  - What the scan matches in every test module, outside docstrings, ignoring case:
+    - text in a string, bytes or f-string literal where either name, as a whole word and quoted or not, is followed by a dot, with or without spaces before it, including a dot at the end of the text (`"delete from raw." + table`);
+    - text where `search_path` is followed, before the next semicolon or line end, by either name as a whole word (`set search_path to public, raw`, `options="-c search_path=raw"`);
+    - a string or bytes literal, or an f-string's literal part, that is, or ends with, either name as a whole word not preceded by a dot (`"raw"`, `f"raw{SUFFIX}"`, `"select * from raw" + "." + table`), however it is then used;
+    - any name, attribute or import called `RAW_SCHEMA` or `REAL_SCHEMAS`.
+  - What it does not see (each has a probe in `NOT_SEEN` that passes unseen):
+    - a name built from pieces at run time (`"r" + "aw"`, `"".join(["r", "aw"])`);
+    - a name read from the environment, settings or a file;
+    - `getattr` with an attribute name built at run time;
+    - a loader or register call without `schema=`, which falls back to `raw` (the throwaway fixture's lock check catches this on its own connection only);
+    - SQL read from a file that is not Python.
+  - The database role with no INSERT, UPDATE, DELETE or TRUNCATE on `raw` or `raw_dev_wh`, queued for platform-eng (Casey, issue #55 comment 6961809084, item 10), is the guard for everything the scan cannot see.
 - Reduction: `uv run --frozen python -I -m ingester.reduce`. It ran once, on 2026-11-14, and cannot run again: its input archive was deleted that day.
 - Load: `uv run --frozen python -m ingester.load <snapshot id>`.
 - Capture and gate: `docs/adr/0003-spike/README.md`.
