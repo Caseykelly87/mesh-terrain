@@ -445,3 +445,247 @@ def test_a_failure_keeps_an_output_folder_that_existed(
     with pytest.raises(OSError):
         run(tmp_path)
     assert [path.name for path in out.iterdir()] == ["x72y429.yaml"]
+
+
+# --sites-only: the x72y429 run with its real sites and no real receiver
+# (Casey, 2026-11-17, engine_inputs (c)).
+
+# A DEM 10 m square, far from every fixture node, so every gateway fails the edge check.
+FAR_DEM_BOUNDS_M = (700_000.0, 4_250_000.0, 700_010.0, 4_250_010.0)
+COUNTS_PASS = "counts check against 2026-11-08: pass"
+NO_RECEIVER = "no real receiver written"
+
+
+def run_sites_only(tmp_path: Path, expect_pairs: str = "5", tile: str = "x72y429") -> int:
+    argv = ["--snapshot", SNAPSHOT_ID, "--snapshots-dir", str(tmp_path / "snapshots")]
+    argv += ["--tile", tile, "--dem-snapshot", DEM_SNAPSHOT_ID]
+    argv += ["--out", str(tmp_path / "configs" / "x72y429"), "--expect-pairs", expect_pairs]
+    return engine_inputs.main([*argv, "--sites-only"])
+
+
+def counts_for_issue(lines: list[str]) -> str:
+    return next(text for text in lines if text.startswith("counts for"))
+
+
+def assert_sites(tmp_path: Path, kept: tuple[str, ...]) -> None:
+    """Only the site layer was written, with the kept gateways in site order, marked real."""
+    out = tmp_path / "configs" / "x72y429"
+    assert [path.name for path in out.iterdir()] == ["tx_sites_real.parquet"]
+    sites = gpd.read_parquet(out / "tx_sites_real.parquet")
+    assert list(sites.columns) == ["site_id", "geometry", "box_half_width_m", "role"]
+    assert sites.crs.to_epsg() == 26915
+    roles = dict(zip(SITE_ORDER, SITE_ROLES, strict=True))
+    assert list(sites["site_id"]) == [pseudonym(name) for name in kept]
+    assert list(sites["role"]) == [roles[name] for name in kept]
+    for point, name in zip(sites.geometry, kept, strict=True):
+        assert (point.x, point.y) == pytest.approx(centre_m(name), abs=1e-6)
+    assert list(sites["box_half_width_m"]) == pytest.approx(
+        [east_west_half_m(name) for name in kept], abs=1e-9
+    )
+    metadata = pq.read_metadata(out / "tx_sites_real.parquet").metadata
+    assert metadata[b"mesh_terrain:positions"] == b"real"
+
+
+def test_sites_only_is_refused_on_another_tile(
+    tmp_path: Path, capture: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Casey's decision is for the x72y429 run; corridor runs keep the strict checks."""
+    assert run_sites_only(tmp_path, tile="x71y428") == 2
+    assert not (tmp_path / "configs").exists()
+    lines = capsys.readouterr().out.splitlines()
+    assert (
+        "refused, nothing written: --sites-only is accepted only with --tile x72y429 "
+        "(Casey, 2026-11-17: this run only; corridor runs keep the strict checks)"
+    ) in lines
+    assert not any(text.startswith("snapshot ") for text in lines)
+
+
+def test_sites_only_writes_the_sites_and_no_receiver(
+    tmp_path: Path, capture: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with capture_logs() as events:
+        assert run_sites_only(tmp_path) == 0
+    assert_sites(tmp_path, SITE_ORDER)
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    assert COUNTS_PASS in lines
+    assert engine_inputs.SITES_ONLY_RULE in lines
+    assert (
+        "wrote tx_sites_real.parquet (3 sites); no rx_real.parquet: no real receiver written "
+        "(--sites-only)"
+    ) in lines
+    assert counts_for_issue(lines) == (
+        "counts for issue #44: pairs public 4, MeshSTL 2, shared 1, union 5; pairs touching "
+        "the tile 3 (both ends 1); nodes selected 3; extent pass 3, fail 0; pairs dropped 0 "
+        "(straddles the tile edge 0, fails the DEM edge check 0); sites written 3, left out 0; "
+        "no real receiver written"
+    )
+    assert "both_ends_relayer" not in printed
+    assert not any(text.startswith(("dropped", "left out")) for text in lines)
+    assert coordinates_in(printed + repr(events)) == []
+
+
+def test_sites_only_writes_the_gateway_of_a_both_ends_pair_its_relayer_drops(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A straddles, so A to G1 is dropped; G1 is still a site, and the run does not stop."""
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", straddler="A")
+    with capture_logs() as events:
+        assert run_sites_only(tmp_path) == 0
+    assert_sites(tmp_path, SITE_ORDER)
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    assert [text for text in lines if text.startswith("dropped")] == [
+        names("dropped both-ends pair {A} to {G1}: relayer straddles the tile edge")
+    ]
+    assert not any(text.startswith("left out") for text in lines)
+    assert counts_for_issue(lines).endswith(
+        "pairs dropped 1 (straddles the tile edge 1, fails the DEM edge check 0); "
+        f"sites written 3, left out 0; {NO_RECEIVER}"
+    )
+    assert coordinates_in(printed + repr(events)) == []
+
+
+@pytest.mark.parametrize(
+    ("options", "left_out", "kept", "dropped", "counts"),
+    [
+        (
+            {"straddler": "G2"},
+            "left out {G2} gateway_only_gateway: straddles the tile edge",
+            ("G1", "G3"),
+            ["dropped gateway-only pair {B} to {G2}: gateway straddles the tile edge"],
+            "nodes selected 2; extent pass 2, fail 0; pairs dropped 1 (straddles the tile "
+            "edge 1, fails the DEM edge check 0); sites written 2, left out 1",
+        ),
+        (
+            {"g3_at_edge": True},
+            "left out {G3} gateway_only_gateway: fails the DEM edge check",
+            ("G1", "G2"),
+            ["dropped gateway-only pair {C} to {G3}: gateway fails the DEM edge check"],
+            "nodes selected 3; extent pass 2, fail 1; pairs dropped 1 (straddles the tile "
+            "edge 0, fails the DEM edge check 1); sites written 2, left out 1",
+        ),
+        (
+            {"moved_g3": True},
+            "left out {G3} gateway_only_gateway: is not stationary under lnk_02",
+            ("G1", "G2"),
+            [],
+            "nodes selected 2; extent pass 2, fail 0; pairs dropped 0 (straddles the tile "
+            "edge 0, fails the DEM edge check 0); sites written 2, left out 1",
+        ),
+    ],
+)
+def test_sites_only_leaves_out_a_gateway_with_its_reason(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    options: dict[str, Any],
+    left_out: str,
+    kept: tuple[str, ...],
+    dropped: list[str],
+    counts: str,
+) -> None:
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", **options)
+    with capture_logs() as events:
+        assert run_sites_only(tmp_path) == 0
+    assert_sites(tmp_path, kept)
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    assert [text for text in lines if text.startswith("left out")] == [names(left_out)]
+    assert [text for text in lines if text.startswith("dropped")] == [names(t) for t in dropped]
+    line = counts_for_issue(lines)
+    assert line.endswith(f"{counts}; {NO_RECEIVER}")
+    assert not any(node.pseudonym in line for node in NODES.values())
+    assert coordinates_in(printed + repr(events)) == []
+
+
+@pytest.mark.parametrize(
+    ("options", "expect_pairs", "differences"),
+    [
+        ({}, "8", "5 pairs, not the 8 expected"),
+        ({"straddler": "D"}, "5", "pairs touching x72y429 are not 3"),
+        (
+            {"straddler": "D"},
+            "8",
+            "5 pairs, not the 8 expected; pairs touching x72y429 are not 3",
+        ),
+    ],
+)
+def test_sites_only_reports_a_counts_mismatch_and_does_not_refuse(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    options: dict[str, Any],
+    expect_pairs: str,
+    differences: str,
+) -> None:
+    """Every count that differs is named on one line; the sites are written all the same."""
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", **options)
+    with capture_logs() as events:
+        assert run_sites_only(tmp_path, expect_pairs=expect_pairs) == 0
+    assert_sites(tmp_path, SITE_ORDER)
+    printed = capsys.readouterr().out
+    assert (
+        f"counts check against 2026-11-08: differs ({differences}); --sites-only reports it "
+        "and does not refuse"
+    ) in printed.splitlines()
+    assert coordinates_in(printed + repr(events)) == []
+
+
+def test_sites_only_refuses_when_no_site_is_left(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    build_dem(tmp_path / "snapshots", bounds_m=FAR_DEM_BOUNDS_M)
+    build_capture(tmp_path / "snapshots")
+    with capture_logs() as events:
+        assert run_sites_only(tmp_path) == 2
+    assert not (tmp_path / "configs").exists()
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    assert [text for text in lines if text.startswith("left out")] == [
+        names(f"left out {{{name}}} {role}: fails the DEM edge check")
+        for name, role in zip(SITE_ORDER, SITE_ROLES, strict=True)
+    ]
+    refusal = "refused, nothing written: no site left; all 3 in-tile gateways were left out"
+    assert refusal in lines
+    assert not any(text.startswith("counts for") for text in lines)
+    assert coordinates_in(printed + repr(events)) == []
+
+
+def test_sites_only_does_not_place_the_relayer(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A moved inside the tile: the strict run refuses on it, the site layer does not need it."""
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", moved_a=True)
+    assert run_sites_only(tmp_path) == 0
+    assert_sites(tmp_path, SITE_ORDER)
+    assert pseudonym("A") + " both_ends_relayer" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "name", ["rx_real.parquet", "tx_sites_real.parquet", "engine-inputs.partial"]
+)
+def test_sites_only_refuses_an_existing_layer(tmp_path: Path, capture: Path, name: str) -> None:
+    """An earlier rx_real.parquet would sit beside the new sites; engine.prepare needs it absent."""
+    out = tmp_path / "configs" / "x72y429"
+    out.mkdir(parents=True)
+    (out / name).write_bytes(b"earlier")
+    assert run_sites_only(tmp_path) == 2
+    assert [path.name for path in out.iterdir()] == [name]
+    assert (out / name).read_bytes() == b"earlier"
+
+
+def test_without_sites_only_a_moved_gateway_still_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The strict path is unchanged: a selected gateway that is not stationary refuses."""
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", moved_g3=True)
+    assert run(tmp_path) == 2
+    assert not (tmp_path / "configs").exists()
+    assert (
+        "refused, nothing written: the gateway_only_gateway's 2 usable boxes in the MSA do not "
+        "all overlap; the layers need a stationary node (lnk_02)"
+    ) in capsys.readouterr().out.splitlines()

@@ -25,6 +25,11 @@ The links, relayer to gateway (positions in EPSG:26915 before quantisation):
 - F to G1, MeshSTL; F sends only 13-bit positions (coarse), so it never makes a
   pair.
 
+With `moved_g3`, G3 also sends a second box 2 km west of its own, inside the
+tile, as a MeshSTL row outside the MeshSTL run's window: the two boxes do not
+overlap, so G3 is not stationary over the capture, though it does not straddle
+the tile edge and the pairs stay as above.
+
 With `straddler`, one node also sends a second box on the other side of the
 tile edge (`STRADDLE_SHIFTS_M`), as a MeshSTL row outside the MeshSTL run's
 window: neither spike run sees it, so the pairs and their link-hours stay as
@@ -121,6 +126,7 @@ def every_box() -> list[tuple[int, int, int]]:
     boxes += [NODES[name].box(*shift) for name, shift in STRADDLE_SHIFTS_M.items()]
     boxes += [NODES["G1"].box(bits=WIDE_BITS), NODES["G3"].box(bits=WIDE_BITS)]
     boxes += [NODES["A"].box(east_shift_m=OUTSIDE_MSA_SHIFT_M), NODES["A"].box(bits=COARSE_BITS)]
+    boxes.append(NODES["G3"].box(east_shift_m=G3_MOVED_SHIFT_M))
     return [*boxes, NODES["G3"].box(east_shift_m=G3_EDGE_SHIFT_M)]
 
 
@@ -157,6 +163,8 @@ STRADDLE_SHIFTS_M = {
 }
 # G3's box 45 m from the tile's east edge, as the fixture first placed it.
 G3_EDGE_SHIFT_M = 250.0
+# G3's second box with moved_g3: 2 km west, still inside the tile.
+G3_MOVED_SHIFT_M = -2_000.0
 # The precision of the boxes nested_g1 and nested_g3 add: usable, and wide
 # enough that G3's 15-bit box centre lies east of the tile edge.
 WIDE_BITS = 15
@@ -278,9 +286,13 @@ def _links(rows: RowMaker, busy_outside_pair: bool) -> None:
     rows.receipts(n["M"], n["E"], at(23, 15), PUBLIC)
 
 
-def _overlap_options(rows: RowMaker, nested_g1: bool, nested_g3: bool, ignored_a: bool) -> None:
-    """Boxes the overlap rule places as before (module docstring)."""
+def _overlap_options(
+    rows: RowMaker, nested_g1: bool, nested_g3: bool, ignored_a: bool, moved_g3: bool
+) -> None:
+    """Boxes the overlap rule places as before, or that make G3 move (module docstring)."""
     n = NODES
+    if moved_g3:
+        rows.position(n["G3"], n["G3"], at(25, 1), MESHSTL, n["G3"].box(G3_MOVED_SHIFT_M))
     if nested_g1:
         rows.position(n["G1"], n["G1"], at(23, 9), PUBLIC, n["G1"].box(bits=WIDE_BITS))
     if nested_g3:
@@ -323,6 +335,7 @@ def build_capture(
     nested_g1: bool = False,
     nested_g3: bool = False,
     ignored_a: bool = False,
+    moved_g3: bool = False,
 ) -> Path:
     """Write the synthetic capture snapshot under root and return its finished folder.
 
@@ -341,10 +354,12 @@ def build_capture(
         nested_g1: G1 also sends a 15-bit box holding its 20-bit box.
         nested_g3: G3 also sends a 15-bit box, centred east of the tile edge.
         ignored_a: A also sends a box outside the MSA and a coarse box.
+        moved_g3: G3 also sends a box 2 km west inside the tile, so it is
+            not stationary and does not straddle.
     """
     rows = RowMaker()
     _positions(rows, moved_a, one_coordinate, g3_at_edge)
-    _overlap_options(rows, nested_g1, nested_g3, ignored_a)
+    _overlap_options(rows, nested_g1, nested_g3, ignored_a, moved_g3)
     if straddler is not None:
         _straddle(rows, straddler)
     _links(rows, busy_outside_pair)
@@ -375,10 +390,16 @@ def _finish(partial: Path, snapshot_id: str) -> Path:
     return common.finish_snapshot(partial)
 
 
-def build_dem(root: Path) -> Path:
-    """Write a DEM snapshot with the x72y429 DEM's bounds under root and return its folder."""
+def build_dem(root: Path, bounds_m: tuple[float, float, float, float] = DEM_BOUNDS_M) -> Path:
+    """Write a DEM snapshot under root and return its folder.
+
+    Args:
+        root: The snapshots folder.
+        bounds_m: West, south, east and north in EPSG:26915 metres, a square;
+            the x72y429 DEM's bounds by default.
+    """
     partial = common.start_snapshot(root, DEM_SNAPSHOT_ID)
-    west, _, east, north = DEM_BOUNDS_M
+    west, _, east, north = bounds_m
     pixel_m = (east - west) / 2
     profile = {
         "driver": "GTiff",
