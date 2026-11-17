@@ -9,7 +9,7 @@ finds them. The real nodes' coordinates must appear in no output but the two
 point layers.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import geopandas as gpd
@@ -470,8 +470,8 @@ def test_a_staging_folder_that_cannot_be_removed_is_logged_and_the_first_error_r
     folder = write_inputs(tmp_path / "x72y429")
     monkeypatch.setattr(command, "config_text", lambda tile: "run_id: x72y429\n")
 
-    def rmtree_that_fails(path: Path, *, onexc: object) -> None:
-        onexc(Path.unlink, Path(path) / "x72y429.yaml", PermissionError("in use"))  # type: ignore[operator]
+    def rmtree_that_fails(path: Path, *, onexc: Callable[..., None]) -> None:
+        onexc(Path.unlink, Path(path) / "x72y429.yaml", PermissionError("in use"))
 
     monkeypatch.setattr(command, "rmtree", rmtree_that_fails)
     with capture_logs() as logs, pytest.raises(RuntimeError, match="engine's check"):

@@ -27,13 +27,14 @@ endpoints by id.
 """
 
 import argparse
-import shutil
 import sys
 import tempfile
 import time
 from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
+from shutil import rmtree
+from typing import Any
 
 import geopandas as gpd
 import pyarrow.parquet as pq
@@ -335,10 +336,10 @@ def _write_outputs(
     except BaseException:
         # Only files this call wrote are removed, so the folder is as it was.
         for path in moved:
-            path.unlink(missing_ok=True)
+            _remove_output(path)
         raise
     finally:
-        shutil.rmtree(staging, ignore_errors=True)
+        rmtree(staging, onexc=_staging_left)
     log.info(
         "prepare_written",
         tile=tile.name,
@@ -347,6 +348,24 @@ def _write_outputs(
         receivers=len(receivers),
         duration_s=round(time.monotonic() - started, 3),
     )
+
+
+def _remove_output(path: Path) -> None:
+    """Remove an output moved in before the failure; name it in a warning if that fails."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as err:
+        _staging_left(Path.unlink, path, err)
+
+
+def _staging_left(function: Any, path: str | Path, error: BaseException) -> None:
+    """Name a file this command wrote but could not remove; the original error goes on.
+
+    Safe to continue: the error that stopped the write is still raised. The
+    file may hold real positions, so the warning names it for removal by hand;
+    it lies in the config folder, outside git.
+    """
+    log.warning("prepare_staging_left", path=str(path), reason=f"{type(error).__name__}: {error}")
 
 
 def _write_staged(
