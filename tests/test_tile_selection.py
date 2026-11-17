@@ -13,7 +13,7 @@ from engine.errors import ConfigError
 from engine.grid import run_grid
 from engine.points import Endpoint
 from engine.snapshots import resolve_snapshots
-from engine.terrain_build import _check_covers
+from engine.terrain_build import check_covers
 from ingester.link_pairs import Box, CaptureLinks, NodePositions, PairActivity, SelectionError
 from ingester.tile_selection import (
     busiest_two,
@@ -153,7 +153,7 @@ def _engine_covers(dem_snapshot: object, centre_xy_m: tuple[float, float], half_
     box = EndpointBox(centre_xy_m=centre_xy_m, half_width_m=half_m)
     grid = run_grid([Endpoint(endpoint_id="x", box=box)], resolution_m=1.0)
     try:
-        _check_covers(dem_snapshot, grid)  # type: ignore[arg-type]
+        check_covers(dem_snapshot, grid)  # type: ignore[arg-type]
     except ConfigError:
         return False
     return True
