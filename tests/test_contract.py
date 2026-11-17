@@ -1,21 +1,25 @@
 """Every rule in docs/data-quality-contract.md has a test named for it.
 
-The contract (its opening lines and ADR 0007) accepts a dbt test or a Dagster
-asset check, so a test names the rule `lnk_03` in one of three ways:
+The contract's opening line asks for "a dbt test or a Dagster asset check with
+the same identifier", and its naming line (ADR 0007) says how dbt tests carry
+it. So a test names the rule `lnk_03` in one of three ways:
 
 - a dbt singular test file `assert_lnk_03.sql` or `assert_lnk_03_<what>.sql`;
 - a dbt generic test in model YAML with `config: {meta: {contract: lnk_03}}`, or a
   list of ids when one test enforces several rules;
-- a Dagster asset check named `lnk_03` or `lnk_03_<what>`, as the existing
-  `ing_04_decode_rate` is.
+- a Dagster asset check named exactly `lnk_03`. The contract does not say an
+  asset check may add a description after the id, so `ing_04_decode_rate`
+  does not name `ing_04` (the question is with Casey; docs/STATUS.md).
 
-A pytest function does not count, whatever its name: the contract does not
-accept one. Rules that no test names yet are on PENDING. The check fails when
-a rule off the list has no test, and when a rule on the list has one, so a
-rule leaves the list in the same change that adds its test. PENDING may never
-hold a rule that was not pending when the list was made (PENDING_AT_B1), so it
-only shrinks. The check needs one named test per rule, not every item of the
-contract's "Enforced by" column; the reviewer checks that.
+Nothing else counts, a pytest function included, since the opening line names
+only those two kinds. Rules that no test names yet are on PENDING. The check
+fails when a rule off the list has no test, and when a rule on the list has
+one, so a rule leaves the list in the same change that adds its test. PENDING
+may only hold rules in PENDING_AT_B1, so it only shrinks. A new contract rule
+enters both PENDING_AT_B1 and PENDING in the pull request that adds it to the
+contract, unless it lands with its test. The check needs one named test per
+rule, not every item of the contract's "Enforced by" column; the reviewer
+checks that.
 """
 
 import ast
@@ -28,17 +32,21 @@ from dbt_listing import DEVELOPMENT_TARGET, REPO_ROOT, dbt_nodes
 
 CONTRACT = REPO_ROOT / "docs" / "data-quality-contract.md"
 RULE_ROW = re.compile(r"^\| `([a-z]{3}_\d{2})` \|", re.MULTILINE)
+RULE_ID = re.compile(r"[a-z]{3}_\d{2}")
 LEADING_RULE = re.compile(r"^([a-z]{3}_\d{2})(?:_|$)")
 SINGULAR_RULE = re.compile(r"^assert_([a-z]{3}_\d{2})(?:_|$)")
 ASSET_CHECK_PACKAGES = ("ingester", "pipeline", "engine", "terrain")
 ASSET_CHECK_CALLS = {"AssetCheckSpec", "asset_check"}
 
-# The rules pending when this test was written (issue #55, B1, 2026-11-17).
-# PENDING must stay a subset of it; do not edit this set.
+# The rules pending when this test was written (issue #55, B1, 2026-11-17):
+# all 33, since no dbt test or asset check carries a rule id exactly yet.
+# PENDING must stay a subset of it. Edit it only to add a new contract rule,
+# in the pull request that adds the rule, unless the rule lands with its test.
 PENDING_AT_B1 = frozenset(
     {
-        *("ing_01", "ing_02", "ing_05", "ing_06"),
-        *("pos_01", "pos_02", "pos_04"),
+        *("ing_01", "ing_02", "ing_03", "ing_04", "ing_05", "ing_06", "ing_07"),
+        *("snp_01",),
+        *("pos_01", "pos_02", "pos_03", "pos_04"),
         *("lnk_01", "lnk_02", "lnk_03", "lnk_04", "lnk_05", "lnk_06", "lnk_07", "lnk_08"),
         *("prv_01", "prv_02", "prv_03"),
         *("ter_01", "ter_02", "ter_03", "ter_04", "ter_05", "ter_06", "ter_07"),
@@ -51,14 +59,23 @@ PENDING_AT_B1 = frozenset(
 PENDING = frozenset(
     {
         # ing_01 (key derivation), ing_05 (loader refusal) and prv_01
-        # (allowlist) have pytest tests today, which the contract does not
-        # count; each needs a dbt test or an asset check named for it.
+        # (allowlist) have pytest tests, which the parser does not count.
         "ing_01",
         "ing_02",
+        # ing_03, ing_04, ing_07, snp_01 and pos_03 have asset checks named
+        # <id>_<what> in ingester/assets.py (ing_03_reconcile, ing_04_decode_rate,
+        # ing_07_second_load, snp_01_content_hash, pos_03_not_both_zero); the
+        # contract asks for the same identifier, so they wait on Casey's answer
+        # on that suffix, or on another test named for them.
+        "ing_03",
+        "ing_04",
         "ing_05",
         "ing_06",
+        "ing_07",
+        "snp_01",
         "pos_01",
         "pos_02",
+        "pos_03",
         "pos_04",
         "lnk_01",
         "lnk_02",
@@ -78,9 +95,9 @@ PENDING = frozenset(
         "ter_05",
         "ter_06",
         "ter_07",
-        # val_01 and val_03 name a pytest on a Python function, and val_02 the
-        # reviewer; none can leave PENDING until the contract or the rule
-        # names a dbt test or an asset check for it.
+        # val_01 names only a pytest on the split function and val_02 only the
+        # reviewer, so neither can leave PENDING unless the contract changes.
+        # val_03 also names a singular dbt test and leaves when that exists.
         "val_01",
         "val_02",
         "val_03",
@@ -254,9 +271,9 @@ def test_generic_dbt_tests_name_rules_by_meta() -> None:
     assert dbt_test_rules(generic({})) == frozenset()
 
 
-def test_asset_checks_name_a_rule_by_leading_id() -> None:
-    assert asset_check_rules("pos_03_not_both_zero") == {"pos_03"}
-    assert asset_check_rules("lnk_03") == {"lnk_03"}
+def test_asset_checks_name_a_rule_only_by_its_exact_id() -> None:
+    assert asset_check_rules("pos_03") == {"pos_03"}
+    assert asset_check_rules("pos_03_not_both_zero") == frozenset()
     assert asset_check_rules("decode_rate_ing_04") == frozenset()
     assert asset_check_rules("lnk_031_x") == frozenset()
 
@@ -294,19 +311,21 @@ def test_every_contract_rule_has_a_test_or_is_pending() -> None:
 
 
 def test_removing_a_rules_tests_fails_the_check() -> None:
+    # Every rule is pending today, so each one is given a test here first.
     rule_ids = contract_rule_ids(CONTRACT.read_text(encoding="utf-8"))
     tests = all_named_tests()
-    tested = [rule for rule in rule_ids if rule not in PENDING]
-    assert tested, "no rule has a test yet, so removal cannot be checked"
-    for rule in tested:
-        problems = contract_problems(rule_ids, without_rule(tests, rule), PENDING)
+    for rule in rule_ids:
+        with_test = [*tests, (f"dbt/tests/assert_{rule}.sql", frozenset({rule}))]
+        pending = PENDING - {rule}
+        assert contract_problems(rule_ids, with_test, pending) == []
+        problems = contract_problems(rule_ids, without_rule(with_test, rule), pending)
         assert problems == [f"{rule} has no test named for it"]
 
 
 def test_a_pending_rule_that_gains_a_test_fails_the_check() -> None:
     rule_ids = contract_rule_ids(CONTRACT.read_text(encoding="utf-8"))
     rule = sorted(PENDING)[0]
-    tests = [*all_named_tests(), ("tests/new.py::test_new", frozenset({rule}))]
+    tests = [*all_named_tests(), ("dbt/tests/assert_new.sql", frozenset({rule}))]
     assert contract_problems(rule_ids, tests, PENDING) == [
         f"{rule} has a test now; remove it from PENDING"
     ]
