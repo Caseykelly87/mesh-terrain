@@ -4,25 +4,32 @@ Casey, issue #55 comment 6960283869, item 10: the loader tests use their own
 throwaway schema, never `raw` and never `raw_dev_wh`. The source scan reads
 every test module; the database tests need the local stack and skip without it.
 
-What the scan matches, outside docstrings: a string literal or f-string whose
-text names `raw.` or `raw_dev_wh.` (quoted or not, f-string values read as
-`x`); a string literal that is exactly `raw` or `raw_dev_wh`, however it is
-used afterwards (a variable, `.format`, `%`, `+`, an Identifier); and any
-name, attribute or import called `RAW_SCHEMA`. Each match is reported with
-the function (or `<module>`) it sits in, and ALLOWED lists the ones that are
-not SQL. PROBES holds one case per form the PR #61 review found the first
-scan missed (`schema=load.RAW_SCHEMA`, `schema=RAW_SCHEMA`, `.format("raw")`,
-`% "raw"`, concatenation, a variable holding `raw.snapshot` or `raw` used in
-an f-string, a bare `Identifier("raw", ...)`, `sql.Identifier(S, ...)` with
-`S = "raw"`) and each is caught now.
+What the scan matches in every test module, outside docstrings, ignoring case:
 
-It does not see a name built at run time (`"r" + "aw"`, a join, a value read
-from settings, the environment or a file, `getattr`), a test in another
-language, nor a production function called without `schema=`, which falls
-back to `raw`; the throwaway fixture's lock check catches that last case, on
-its own connection only. A database role with no write on `raw` or
-`raw_dev_wh` for the tests is queued for platform-eng (Casey, issue #55
-comment 6961809084, item 10); it refuses a write however it is written.
+- text in a string, bytes or f-string literal where either name, as a whole
+  word and quoted or not, is followed by a dot, with or without spaces before
+  it, including a dot at the end of the text (`"delete from raw." + table`);
+- text where `search_path` is followed, before the next semicolon or line end,
+  by either name as a whole word (`set search_path to public, raw`,
+  `options="-c search_path=raw"`);
+- a string or bytes literal, or an f-string's literal part, that is, or ends
+  with, either name as a whole word not preceded by a dot (`"raw"`,
+  `f"raw{SUFFIX}"`, `"select * from raw" + "." + table`), however it is then
+  used;
+- any name, attribute or import called `RAW_SCHEMA` or `REAL_SCHEMAS`.
+
+What it does not see (each has a probe in `NOT_SEEN` that passes unseen):
+
+- a name built from pieces at run time (`"r" + "aw"`, `"".join(["r", "aw"])`);
+- a name read from the environment, settings or a file;
+- `getattr` with an attribute name built at run time;
+- a loader or register call without `schema=`, which falls back to `raw` (the
+  throwaway fixture's lock check catches this on its own connection only);
+- SQL read from a file that is not Python.
+
+The database role with no INSERT, UPDATE, DELETE or TRUNCATE on `raw` or
+`raw_dev_wh`, queued for platform-eng (Casey, issue #55 comment 6961809084,
+item 10), is the guard for everything the scan cannot see.
 """
 
 import ast
@@ -48,9 +55,9 @@ from raw_schema import (
 TESTS = Path(__file__).resolve().parent
 # The longer name first, so raw_dev_wh is not read as raw followed by text.
 _WATCHED = "|".join(sorted(WATCHED, key=len, reverse=True))
-# A watched name, quoted or not, then a dot, spaces allowed around it, then
-# a name, a quote or the end of the text ("delete from raw." + table).
-QUALIFIED = re.compile(rf'(?<![\w$])"?({_WATCHED})"?\s*\.\s*(?:["\w]|$)', re.IGNORECASE)
+# A watched name as a whole word, quoted or not, then a dot, spaces allowed
+# before it; the dot may end the text ("delete from raw." + table).
+QUALIFIED = re.compile(rf'(?<![\w$])"?({_WATCHED})"?\s*\.', re.IGNORECASE)
 # search_path set to a list that holds a watched name, in SQL or a connect option.
 SEARCH_PATH = re.compile(
     rf'search_path\W[^;\n]*?(?<![\w$])"?({_WATCHED})"?(?![\w$])', re.IGNORECASE
