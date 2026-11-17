@@ -1,4 +1,4 @@
-"""The tile's nodes, the busiest-pair measures and the DEM extent rule, on invented nodes.
+"""The tile's nodes, the busiest-pair rule and the DEM extent rule, on invented nodes.
 
 No test reads the real snapshot.
 """
@@ -66,21 +66,44 @@ def test_tile_refuses_other_names(name: str) -> None:
         parse_tile(name)
 
 
-def test_busiest_two_when_every_measure_agrees() -> None:
+def test_busiest_two_ranks_by_link_hours_over_both_runs() -> None:
     pairs = [activity("a", 2, 2, 6), activity("b", 5, 6, 18), activity("c", 4, 4, 12)]
     assert [found.relayer for found in busiest_two(pairs)] == ["r-b", "r-c"]
 
 
-def test_busiest_two_refuses_when_measures_disagree() -> None:
-    pairs = [activity("a", 3, 3, 30), activity("b", 5, 6, 18), activity("c", 4, 4, 12)]
-    with pytest.raises(SelectionError, match="measure"):
-        busiest_two(pairs)
+def test_receipts_break_a_tie_on_link_hours_for_second_place() -> None:
+    pairs = [activity("a", 4, 4, 10), activity("b", 5, 6, 18), activity("c", 4, 4, 12)]
+    assert [found.relayer for found in busiest_two(pairs)] == ["r-b", "r-c"]
 
 
-def test_busiest_two_refuses_a_tie_for_second() -> None:
+def test_receipts_order_a_tie_on_link_hours_for_first_place() -> None:
+    pairs = [activity("a", 5, 5, 15), activity("b", 5, 6, 18), activity("c", 4, 4, 12)]
+    assert [found.relayer for found in busiest_two(pairs)] == ["r-b", "r-a"]
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        # Link-hours public plus MeshSTL would rank a first.
+        activity("a", 3, 7, 9),
+        # Receipts alone would rank a first.
+        activity("a", 3, 3, 30),
+    ],
+)
+def test_other_measures_no_longer_refuse_or_change_the_pick(other: PairActivity) -> None:
+    pairs = [other, activity("b", 5, 6, 18), activity("c", 4, 4, 12)]
+    assert [found.relayer for found in busiest_two(pairs)] == ["r-b", "r-c"]
+
+
+def test_busiest_two_refuses_a_tie_for_second_on_both_keys() -> None:
     pairs = [activity("a", 4, 4, 12), activity("b", 5, 6, 18), activity("c", 4, 4, 12)]
-    with pytest.raises(SelectionError, match="tie"):
+    with pytest.raises(SelectionError, match="tie for second busiest pair on link-hours"):
         busiest_two(pairs)
+
+
+def test_busiest_two_refuses_fewer_than_two_pairs() -> None:
+    with pytest.raises(SelectionError, match="1 pairs; the selection needs two busy pairs"):
+        busiest_two([activity("a", 4, 4, 12)])
 
 
 def test_a_gateway_in_two_selected_pairs_is_one_site_with_the_both_ends_role() -> None:

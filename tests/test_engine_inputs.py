@@ -23,6 +23,7 @@ from engine_inputs_fixture import (
 )
 from structlog.testing import capture_logs
 
+from engine import positions_marker
 from engine.points import read_points
 from ingester import engine_inputs
 
@@ -102,6 +103,32 @@ def test_both_layers_are_marked_real(tmp_path: Path, capture: Path) -> None:
         metadata = pq.read_metadata(out / name).metadata
         assert metadata[b"mesh_terrain:positions"] == b"real"
         assert b"geo" in metadata
+
+
+def test_the_marker_matches_the_engines_definition() -> None:
+    """Both packages spell the marker on their own; this keeps the spellings equal."""
+    assert engine_inputs.POSITIONS_KEY == positions_marker.POSITIONS_KEY.encode()
+    assert engine_inputs.POSITIONS_REAL == positions_marker.REAL.encode()
+
+
+def test_the_command_states_the_busiest_pair_rule(
+    tmp_path: Path, capture: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(tmp_path) == 0
+    assert (
+        "busiest two pairs: by link-hours over both runs, ties broken by receipts in those "
+        "link-hours (Casey, 2026-11-16, Q2 (a))"
+    ) in capsys.readouterr().out.splitlines()
+
+
+def test_the_command_quotes_caseys_never_publish_sentence(
+    tmp_path: Path, capture: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(tmp_path) == 0
+    assert (
+        'Casey, issue #44, 2026-11-16: "Coverage outputs built from real gateway positions '
+        'inherit the rule that precise MeshSTL positions are never published".'
+    ) in capsys.readouterr().out
 
 
 def test_the_counts_line_names_no_pseudonym(
