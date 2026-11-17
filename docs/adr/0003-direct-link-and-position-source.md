@@ -202,3 +202,5 @@ Casey's answers to the D batch (issue #55 comment 6961809084), verbatim, items 1
 > 6. D10: agree, write "exactly when".
 
 The D batch itself is issue #55 comment 6961441051.
+
+Box columns (Casey, issue #55 comment 6959184944, verbatim): "Box columns: agree, including the WGS84 metre formula and position_uncertainty_m from the larger half-widths until the rectangle unit." `pos_01` keeps each position's cell as the firmware sent it: `latitude_i`, `longitude_i`, `precision_bits`, the exact cell width `cell_width_i`, and two metre half-widths by a named WGS84 formula; a stored `precision_bits` outside 0 to 32 is `unusable` (Casey, issue #55, D6). `int_link_window` carries, for each end, the box it used under `lnk_02` as exact edges, which hold either a cell or the rectangle around merged fixes, with its precise flag decided only by the positions `lnk_02` read for that end in that hour (Casey, issue #55, D7). `lnk_05`'s `position_uncertainty_m` sums the larger of each end's two half-widths until the rectangle-draws unit. Casey approved the matching change to the warehouse-eng agent file (issue #55 comment 6959592431, item 5).
