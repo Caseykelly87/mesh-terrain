@@ -457,3 +457,63 @@ def test_layers_written_by_ingest_engs_command_are_accepted(tmp_path: Path) -> N
     assert gpd.read_parquet(folder / "rx_points.parquet")["rx_id"].iloc[0] == RX
     assert positions_marker(folder / "rx_points.parquet") == "real"
     assert positions_marker(folder / "tx_sites.parquet") == "real"
+
+
+def staging_warnings(logs: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [entry for entry in logs if entry["event"] == "prepare_staging_left"]
+
+
+@pytest.mark.usefixtures("env")
+def test_a_staging_folder_that_cannot_be_removed_is_logged_and_the_first_error_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    monkeypatch.setattr(command, "config_text", lambda tile: "run_id: x72y429\n")
+
+    def rmtree_that_fails(path: Path, *, onexc: object) -> None:
+        onexc(Path.unlink, Path(path) / "x72y429.yaml", PermissionError("in use"))  # type: ignore[operator]
+
+    monkeypatch.setattr(command, "rmtree", rmtree_that_fails)
+    with capture_logs() as logs, pytest.raises(RuntimeError, match="engine's check"):
+        run(folder)
+    (left,) = staging_warnings(logs)
+    assert left["log_level"] == "warning"
+    assert str(left["path"]).endswith("x72y429.yaml")
+    assert ".prepare-" in str(left["path"])
+
+
+@pytest.mark.usefixtures("env")
+def test_an_output_that_cannot_be_removed_after_a_failure_is_logged_and_the_first_error_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder = write_inputs(tmp_path / "x72y429")
+    moved: list[Path] = []
+    real_move = command.move_into_place
+
+    def fail_on_third(source: Path, target: Path) -> None:
+        if len(moved) == 2:
+            raise OSError("disk full")
+        real_move(source, target)
+        moved.append(target)
+
+    def unlink_that_fails(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError(f"{self.name} in use")
+
+    monkeypatch.setattr(command, "move_into_place", fail_on_third)
+    monkeypatch.setattr(Path, "unlink", unlink_that_fails)
+    with capture_logs() as logs, pytest.raises(OSError, match="disk full"):
+        run(folder)
+    monkeypatch.undo()
+    left = staging_warnings(logs)
+    assert [entry["log_level"] for entry in left] == ["warning", "warning"]
+    assert sorted(Path(str(entry["path"])).name for entry in left) == sorted(p.name for p in moved)
+
+
+def test_a_move_never_replaces_a_file_that_appeared_meanwhile(tmp_path: Path) -> None:
+    source, target = tmp_path / "staged.md", tmp_path / "crossing.md"
+    source.write_text("new\n", encoding="utf-8")
+    target.write_text("appeared\n", encoding="utf-8")
+    with pytest.raises(FileExistsError, match="appeared"):
+        command.move_into_place(source, target)
+    assert target.read_text(encoding="utf-8") == "appeared\n"
+    assert source.read_text(encoding="utf-8") == "new\n"
