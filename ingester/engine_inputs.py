@@ -36,11 +36,29 @@ so a refusal shows which pair and end caused it; edge-check lines print after
 the nodes are placed. When the both-ends pair or a gateway-only pair is
 dropped it refuses (exit 2) after those lines, before anything is written.
 
-Both layers are written into a staging folder inside the output folder and
-moved to their names only when both are complete. A refusal exits 2 and any
+With `--sites-only` (Casey, 2026-11-17, engine_inputs (c)) the command writes
+`tx_sites_real.parquet` alone and never `rx_real.parquet`, for the engine run
+whose receivers are the synthetic grid alone (terrain-rf-eng's
+`engine.prepare --no-real-receivers`). It is accepted only with
+`--tile x72y429`, since corridor runs keep the strict checks; any other tile
+refuses before anything is read. The 2026-11-08 counts check still runs and
+prints one line, pass or every count that differs, and never refuses. The
+drop lines print as without the flag, and no dropped pair stops the run.
+The candidates are the in-tile gateways of the site rule above, with the same
+roles; one is written only when it is stationary under `lnk_02`, does not
+straddle the tile edge and passes the DEM edge check
+(`ingester.tile_selection.select_sites`). Each gateway left out gets a local
+`left out` line with its reason, and a run with no site left refuses. No
+relayer is placed, so no receiver is chosen and only a gateway's DEM check
+can drop a pair. The counts line gains the sites written and left out and
+states that no real receiver was written.
+
+The layers are written into a staging folder inside the output folder and
+moved to their names only when all are complete. A refusal exits 2 and any
 other failure raises; either way the run leaves no layer, no staging folder and
 no output folder it created. An existing layer or staging folder is refused and
-left as it is.
+left as it is, with or without `--sites-only`, so a sites-only run never
+leaves its sites beside an earlier `rx_real.parquet`.
 
 The layers hold real positions, precise MeshSTL ones among them, and are
 never published (`pos_04`). Casey, issue #44, 2026-11-16: "Coverage outputs
@@ -61,6 +79,7 @@ import argparse
 import sys
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import geopandas as gpd
@@ -81,13 +100,17 @@ from ingester.tile_selection import (
     SITE_RULE,
     STRADDLES,
     DroppedPair,
+    Extent,
     PlacedNode,
     Selection,
+    SiteSelection,
     Tile,
+    count_differences,
     dem_extent,
     pair_states,
     parse_tile,
     select_nodes,
+    select_sites,
     straddle_drops,
     tile_counts,
 )
@@ -113,6 +136,15 @@ NEVER_PUBLISH = (
     "The lines above that name pseudonyms are for local reading; only the counts line goes "
     "on issue #44."
 )
+# Casey, 2026-11-17, engine_inputs (c): the x72y429 run with its real sites and
+# no real receiver. Corridor runs keep the strict checks (issue #44 fallback).
+SITES_ONLY_TILE = "x72y429"
+SITES_ONLY_RULE = (
+    "sites only (Casey, 2026-11-17, engine_inputs (c)): a gateway is written when it is "
+    "stationary under lnk_02, does not straddle the tile edge and passes the DEM edge check; "
+    "no real receiver; neither a dropped pair nor the counts check stops the run"
+)
+COUNTS_CHECK = "counts check against 2026-11-08"
 
 
 def _print_pairs(links: CaptureLinks) -> None:
@@ -184,6 +216,23 @@ def counts_line(links: CaptureLinks, tile: dict[str, int], selection: Selection)
         f"extent pass {sum(verdicts)}, fail {len(verdicts) - sum(verdicts)}; pairs dropped "
         f"{len(selection.dropped)} ({STRADDLES} {reasons.count(STRADDLES)}, "
         f"{FAILS_DEM} {reasons.count(FAILS_DEM)})"
+    )
+
+
+def counts_check_line(differences: Sequence[str]) -> str:
+    """The sites-only run's report of the 2026-11-08 counts check, which never refuses it."""
+    if not differences:
+        return f"{COUNTS_CHECK}: pass"
+    found = "; ".join(differences)
+    return f"{COUNTS_CHECK}: differs ({found}); --sites-only reports it and does not refuse"
+
+
+def sites_only_counts_line(links: CaptureLinks, tile: dict[str, int], chosen: SiteSelection) -> str:
+    """The issue #44 line of a sites-only run: counts only, no pseudonym, and no receiver."""
+    kept = sum(chosen.selection.dem_check.values())
+    return (
+        f"{counts_line(links, tile, chosen.selection)}; sites written {kept}, left out "
+        f"{len(chosen.left_out)}; no real receiver written"
     )
 
 
@@ -272,19 +321,23 @@ def _publish(staging: Path, targets: list[Path], published: list[Path]) -> None:
     staging.rmdir()
 
 
-def write_layers(out: Path, sites: list[PlacedNode], receiver: PlacedNode) -> None:
-    """Write the two layers into out through a staging folder, all or nothing.
+def write_layers(out: Path, sites: list[PlacedNode], receiver: PlacedNode | None) -> None:
+    """Write the layers into out through a staging folder, all or nothing.
 
     Args:
         out: The output folder; it and its missing parents are created.
         sites: The site rows, in order.
-        receiver: The receiver row.
+        receiver: The receiver row, or None to write the site layer alone
+            (`--sites-only`).
 
     Raises:
-        SelectionError: if out is inside a git checkout, or a layer or the
-            staging folder exists; nothing is written.
+        SelectionError: if out is inside a git checkout, or either layer or
+            the staging folder exists, whether or not this call writes it;
+            nothing is written.
     """
     targets = _check_targets(out)
+    if receiver is None:
+        targets = [out / SITES_FILE]
     created = _missing_folders(out)
     out.mkdir(parents=True, exist_ok=True)
     staging = out / STAGING_FOLDER
@@ -296,7 +349,8 @@ def write_layers(out: Path, sites: list[PlacedNode], receiver: PlacedNode) -> No
     published: list[Path] = []
     try:
         _write(staging / SITES_FILE, _frame(sites, "site_id", with_role=True))
-        _write(staging / RECEIVERS_FILE, _frame([receiver], "rx_id", with_role=False))
+        if receiver is not None:
+            _write(staging / RECEIVERS_FILE, _frame([receiver], "rx_id", with_role=False))
         _publish(staging, targets, published)
     except BaseException:
         # The exception goes on; first remove what this run wrote, so no partial
@@ -316,10 +370,66 @@ def _parser() -> argparse.ArgumentParser:
         help="the union of both-ends pairs the tile check found (8 on 2026-11-08)",
     )  # fmt: skip
     parser.add_argument("--snapshots-dir", type=Path, default=None)
+    parser.add_argument(
+        "--sites-only", action="store_true",
+        help=f"write {SITES_FILE} alone, with no real receiver; only with --tile {SITES_ONLY_TILE}",
+    )  # fmt: skip
     return parser
 
 
+def _check_sites_only(args: argparse.Namespace) -> None:
+    if args.sites_only and args.tile != SITES_ONLY_TILE:
+        raise SelectionError(
+            f"--sites-only is accepted only with --tile {SITES_ONLY_TILE} (Casey, 2026-11-17: "
+            "this run only; corridor runs keep the strict checks)"
+        )
+
+
+@dataclass(frozen=True)
+class _Run:
+    """What both kinds of run share once the capture is read and the straddle lines printed."""
+
+    out: Path
+    expect_pairs: int
+    links: CaptureLinks
+    tile: Tile
+    extent: Extent
+    tile_counts: dict[str, int]
+    printed: set[DropEnd]
+
+
+def _write_both(run: _Run) -> None:
+    """The strict run: the counts check, the stop on a dropped selected pair, both layers."""
+    selection = select_nodes(run.links, run.tile, run.expect_pairs, run.extent)
+    _print_selection(selection, run.printed)
+    # Casey's stop for a dropped selected pair comes here, after the drop lines
+    # and before anything with real positions is written.
+    sites, receiver = selection.layers()
+    write_layers(run.out, sites, receiver)
+    print(f"wrote {SITES_FILE} ({len(sites)} sites) and {RECEIVERS_FILE} (1 receiver)")
+    print(counts_line(run.links, run.tile_counts, selection))
+
+
+def _write_sites(run: _Run) -> None:
+    """The sites-only run: the counts check reported, never applied; the site layer alone."""
+    states = pair_states(run.links, run.tile)
+    print(counts_check_line(count_differences(run.links, states, run.tile, run.expect_pairs)))
+    chosen = select_sites(run.links, run.tile, run.extent)
+    _print_selection(chosen.selection, run.printed)
+    print(SITES_ONLY_RULE)
+    for site in chosen.left_out:
+        print(f"left out {site.pseudonym} {site.role}: {site.reason}")
+    sites = chosen.sites()
+    write_layers(run.out, sites, None)
+    print(
+        f"wrote {SITES_FILE} ({len(sites)} sites); no {RECEIVERS_FILE}: no real receiver "
+        "written (--sites-only)"
+    )
+    print(sites_only_counts_line(run.links, run.tile_counts, chosen))
+
+
 def _run(args: argparse.Namespace) -> None:
+    _check_sites_only(args)
     tile = parse_tile(args.tile)
     _check_targets(args.out)
     root = args.snapshots_dir or get_ingester_settings().snapshots_dir
@@ -333,14 +443,8 @@ def _run(args: argparse.Namespace) -> None:
     # in select_nodes can refuse, so a refusal shows which pair and end caused it.
     printed: set[DropEnd] = set()
     _print_drops(straddle_drops(links, tile, args.expect_pairs), printed)
-    selection = select_nodes(links, tile, args.expect_pairs, extent)
-    _print_selection(selection, printed)
-    # Casey's stop for a dropped selected pair comes here, after the drop lines
-    # and before anything with real positions is written.
-    sites, receiver = selection.layers()
-    write_layers(args.out, sites, receiver)
-    print(f"wrote {SITES_FILE} ({len(sites)} sites) and {RECEIVERS_FILE} (1 receiver)")
-    print(counts_line(links, counts, selection))
+    run = _Run(args.out, args.expect_pairs, links, tile, extent, counts, printed)
+    (_write_sites if args.sites_only else _write_both)(run)
     print(NEVER_PUBLISH)
 
 
@@ -351,7 +455,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: Command-line arguments; sys.argv when None.
 
     Returns:
-        0 when both layers were written, 2 when the run was refused and wrote nothing.
+        0 when the layers were written (the site layer alone with
+        `--sites-only`), 2 when the run was refused and wrote nothing.
     """
     args = _parser().parse_args(argv)
     try:
