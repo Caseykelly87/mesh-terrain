@@ -4,6 +4,8 @@ Every table and view in the warehouse that another agent or a person reads, with
 
 Schemas, in pipeline order: `raw` (loaders write it, documented by ingest-eng in `ingester/README.md`), `staging` (views and seeds), `core` (incremental tables at the link-hour grain), `features` (terrain per link-hour), `analytics` (marts). Sections for `core`, `features` and `analytics` are added here as their tables appear.
 
+Development copies. A dbt target is a named set of connection settings in `dbt/profiles.yml`. Only the target `prod`, which the lead runs, builds the schemas this file describes. Every other target builds the same tables in schemas named with its own suffix and reads raw tables from a suffixed raw schema: the default target `dev_wh`, which `make check` uses, builds `staging_dev_wh`, `core_dev_wh` and `analytics_dev_wh` and reads `raw_dev_wh`, where only synthetic fixture tables go. For example, `make check` puts a copy of `stg_msa_boundary` in `staging_dev_wh.stg_msa_boundary` and leaves `staging.stg_msa_boundary` alone. The copies are for tests; nothing reads them as results. `dbt/README.md` has the details.
+
 Conventions that hold everywhere below: geometry columns are stored in SRID 4326 (longitude and latitude in degrees) and any area, distance or azimuth is computed after reprojecting to EPSG:26915 (UTM zone 15N, metres) with `st_transform`, or after casting to `geography`. Names are `snake_case`.
 
 ## staging
