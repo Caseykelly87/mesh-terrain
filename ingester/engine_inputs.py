@@ -11,6 +11,14 @@ its stationary box centre. Both files carry the key `mesh_terrain:positions`
 with the value `real` in their Parquet metadata (Casey, issue #44, 4 (a)); the
 engine does not read it yet.
 
+A node whose usable boxes lie on both sides of the tile edge counts as in the
+tile for the tile check, then drops its own pair, as a node the run places
+that fails the DEM edge check does (Casey, issue #44, engine_inputs Q1 (a),
+2026-11-17; the rule in full is in `ingester.tile_selection`). The command
+prints one line per end that drops a pair, naming both ends' pseudonyms, the
+end and the reason. When the both-ends pair or a busiest pair is dropped it
+refuses (exit 2) after those lines, before anything is written.
+
 Both layers are written into a staging folder inside the output folder and
 moved to their names only when both are complete. A refusal exits 2 and any
 other failure raises; either way the run leaves no layer, no staging folder and
@@ -22,9 +30,10 @@ never published (`pos_04`). Casey, issue #44, 2026-11-16: "Coverage outputs
 built from real gateway positions inherit the rule that precise MeshSTL
 positions are never published".
 The command refuses an output folder inside a git checkout and never prints or
-logs a coordinate. Its per-node lines tie pseudonyms to roles, link-hours, the
-precise flag and the DEM check, which narrows where a node is, so they are read
-locally; only the final counts line is for issue #44. It does not write the
+logs a coordinate. Its per-node and drop lines tie pseudonyms to roles,
+link-hours, the precise flag, the DEM check and the tile edge, which narrows
+where a node is, so they are read locally; only the final counts line is for
+issue #44. It does not write the
 grid receivers, the run config or any check of the paths; those are
 terrain-rf-eng's.
 """
