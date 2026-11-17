@@ -3,8 +3,13 @@
 -- statement is idempotent, so it runs against an existing warehouse volume as
 -- well as a fresh one. Columns match ingester/allowlist.py for schema_version 1,
 -- and a test compares the two. Rows are only ever inserted (ing_07).
+--
+-- {schema} is a placeholder, not SQL: ingester.load.raw_ddl puts the target
+-- schema there as a quoted identifier, "raw" for every real load and a
+-- throwaway test_load_<hex> schema in the tests, so the tests build the same
+-- tables the warehouse holds. Run it through raw_ddl, not psql.
 
-create table if not exists raw.snapshot (
+create table if not exists {schema}.snapshot (
     snapshot_id text not null,
     capture_date date not null,
     source_url text not null,
@@ -15,8 +20,8 @@ create table if not exists raw.snapshot (
     primary key (snapshot_id)
 );
 
-create table if not exists raw.mqtt_message (
-    snapshot_id text not null references raw.snapshot (snapshot_id),
+create table if not exists {schema}.mqtt_message (
+    snapshot_id text not null references {schema}.snapshot (snapshot_id),
     delivery_key text not null,
     received_at timestamp with time zone not null,
     topic text not null,
@@ -62,8 +67,8 @@ create table if not exists raw.mqtt_message (
     primary key (snapshot_id, delivery_key)
 );
 
-create table if not exists raw.mqtt_copy_count (
-    snapshot_id text not null references raw.snapshot (snapshot_id),
+create table if not exists {schema}.mqtt_copy_count (
+    snapshot_id text not null references {schema}.snapshot (snapshot_id),
     hour timestamp with time zone not null,
     topic text not null,
     gateway_pseudonym text not null,
@@ -74,8 +79,8 @@ create table if not exists raw.mqtt_copy_count (
     primary key (snapshot_id, hour, topic, gateway_pseudonym)
 );
 
-create table if not exists raw.mqtt_dropped_count (
-    snapshot_id text not null references raw.snapshot (snapshot_id),
+create table if not exists {schema}.mqtt_dropped_count (
+    snapshot_id text not null references {schema}.snapshot (snapshot_id),
     hour timestamp with time zone not null,
     topic_class text not null check (topic_class in ('e', 'map', 'json', 'stat', 'other')),
     reason text not null check (reason in ('json', 'stat', 'unparsed', 'other')),

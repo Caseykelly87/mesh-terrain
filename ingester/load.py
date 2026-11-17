@@ -18,6 +18,11 @@ problem.
 What reconcile can split by broker: the stored rows, since each carries both
 broker flags. The count tables carry no broker (their keys are the contract's),
 so counted deliveries are checked per hour only.
+
+Every function that sends SQL to the raw tables takes a keyword-only `schema`,
+`raw` by default. Only the tests pass another one: a throwaway schema built
+from the same DDL, so they never touch the real raw tables (Casey, issue #55,
+item 10).
 """
 
 import argparse
@@ -47,6 +52,7 @@ from pipeline.common.snapshot import (
 log = structlog.get_logger(component="ingester.load")
 
 DDL_PATH = Path(__file__).with_name("sql") / "raw_tables.sql"
+RAW_SCHEMA = "raw"
 SNAPSHOT_CONTENT_COLUMNS = tuple(name for name in SNAPSHOT_COLUMNS if name != "registered_at")
 LOAD_ORDER = ("mqtt_message", "mqtt_copy_count", "mqtt_dropped_count")
 
@@ -55,12 +61,18 @@ class SchemaDriftError(RuntimeError):
     """A raw table's columns differ from the allowlist."""
 
 
-def apply_ddl(conn: psycopg.Connection) -> None:
-    """Create the raw tables when they are missing."""
-    conn.execute(DDL_PATH.read_text(encoding="utf-8"))
+def raw_ddl(schema: str = RAW_SCHEMA) -> sql.Composed:
+    """The raw DDL with its tables in the given schema, which must exist."""
+    template = DDL_PATH.read_text(encoding="utf-8")
+    return sql.SQL(template).format(schema=sql.Identifier(schema))
 
 
-def check_columns(conn: psycopg.Connection) -> None:
+def apply_ddl(conn: psycopg.Connection, *, schema: str = RAW_SCHEMA) -> None:
+    """Create the raw tables in the schema when they are missing."""
+    conn.execute(raw_ddl(schema))
+
+
+def check_columns(conn: psycopg.Connection, *, schema: str = RAW_SCHEMA) -> None:
     """Refuse when a raw table's columns differ from the allowlist.
 
     Raises:
@@ -69,22 +81,24 @@ def check_columns(conn: psycopg.Connection) -> None:
     expected = {table: allowlist(table) for table in TABLES} | {"snapshot": list(SNAPSHOT_COLUMNS)}
     query = (
         "select column_name from information_schema.columns "
-        "where table_schema = 'raw' and table_name = %s order by ordinal_position"
+        "where table_schema = %s and table_name = %s order by ordinal_position"
     )
     for table, columns in expected.items():
-        found = [row[0] for row in conn.execute(query, (table,)).fetchall()]
+        found = [row[0] for row in conn.execute(query, (schema, table)).fetchall()]
         if found != columns:
-            raise SchemaDriftError(f"raw.{table} columns differ from the allowlist")
+            raise SchemaDriftError(f"{schema}.{table} columns differ from the allowlist")
 
 
-def load_table(conn: psycopg.Connection, folder: Path, table: str) -> int:
-    """Copy one table's files into raw; returns the rows inserted."""
+def load_table(
+    conn: psycopg.Connection, folder: Path, table: str, *, schema: str = RAW_SCHEMA
+) -> int:
+    """Copy one table's files into the raw table of that name; returns the rows inserted."""
     started = time.monotonic()
     columns = allowlist(table)
     # A fresh name per load: temporary tables live until the session ends, and a
     # second load in the same session must not see the first one's rows.
     staging = sql.Identifier(f"load_{table}_{uuid.uuid4().hex[:12]}")
-    target = sql.Identifier("raw", table)
+    target = sql.Identifier(schema, table)
     conn.execute(sql.SQL("create temp table {} (like {})").format(staging, target))
     names = sql.SQL(", ").join(sql.Identifier(name) for name in columns)
     with conn.cursor() as cursor:
@@ -106,7 +120,9 @@ def _since(started: float) -> float:
     return round(time.monotonic() - started, 3)
 
 
-def load_snapshot(conn: psycopg.Connection, folder: Path) -> dict[str, int]:
+def load_snapshot(
+    conn: psycopg.Connection, folder: Path, *, schema: str = RAW_SCHEMA
+) -> dict[str, int]:
     """Load one finished snapshot folder; returns rows inserted per table.
 
     Raises:
@@ -117,21 +133,23 @@ def load_snapshot(conn: psycopg.Connection, folder: Path) -> dict[str, int]:
         SchemaDriftError: if a raw table's columns differ from the allowlist.
     """
     manifest = verified_manifest(folder)
-    apply_ddl(conn)
-    check_columns(conn)
-    inserted = {"snapshot": register(conn, folder, manifest)}
+    apply_ddl(conn, schema=schema)
+    check_columns(conn, schema=schema)
+    inserted = {"snapshot": register(conn, folder, manifest, schema=schema)}
     for table in LOAD_ORDER:
-        inserted[table] = load_table(conn, folder, table)
+        inserted[table] = load_table(conn, folder, table, schema=schema)
     log.info("load_snapshot", snapshot_id=manifest["snapshot_id"], **inserted)
     return inserted
 
 
-def row_counts(conn: psycopg.Connection, snapshot_id: str) -> dict[str, int]:
+def row_counts(
+    conn: psycopg.Connection, snapshot_id: str, *, schema: str = RAW_SCHEMA
+) -> dict[str, int]:
     """Rows per raw table for one snapshot."""
     counts: dict[str, int] = {}
     for table in ("snapshot", *LOAD_ORDER):
         query = sql.SQL("select count(*) from {} where snapshot_id = %s").format(
-            sql.Identifier("raw", table)
+            sql.Identifier(schema, table)
         )
         row = conn.execute(query, (snapshot_id,)).fetchone()
         counts[table] = int(row[0]) if row else 0
@@ -141,7 +159,7 @@ def row_counts(conn: psycopg.Connection, snapshot_id: str) -> dict[str, int]:
 BALANCE_PARTS = ("stored", "counted", "merged_cross_broker", "merged_repeat")
 
 
-def reconcile(conn: psycopg.Connection, folder: Path) -> list[str]:
+def reconcile(conn: psycopg.Connection, folder: Path, *, schema: str = RAW_SCHEMA) -> list[str]:
     """ing_03: raw against the manifest's deliveries per hour and broker.
 
     Checks, each line of the result naming what failed and where:
@@ -158,7 +176,7 @@ def reconcile(conn: psycopg.Connection, folder: Path) -> list[str]:
     """
     manifest = read_manifest(folder)
     rows = manifest["deliveries"]
-    flagged = _flagged_per_hour(conn, manifest["snapshot_id"])
+    flagged = _flagged_per_hour(conn, manifest["snapshot_id"], schema)
     problems = [
         f"unbalanced: {row['hour']} {row['broker']}"
         for row in rows
@@ -166,9 +184,9 @@ def reconcile(conn: psycopg.Connection, folder: Path) -> list[str]:
     ]
     problems += _differences("flagged", _manifest_sum(rows, "rows_with_flag", True), flagged)
     problems += _differences("cross_broker", _first_and_cross(rows), _per_broker(flagged))
-    stored = _stored_per_hour(conn, manifest["snapshot_id"])
+    stored = _stored_per_hour(conn, manifest["snapshot_id"], schema)
     problems += _differences("stored", _manifest_sum(rows, "stored", False), stored)
-    counted = _counted_per_hour(conn, manifest["snapshot_id"])
+    counted = _counted_per_hour(conn, manifest["snapshot_id"], schema)
     problems += _differences("counted", _manifest_sum(rows, "counted", False), counted)
     return sorted(problems)
 
@@ -201,23 +219,27 @@ def _differences(name: str, expected: Counter[str], found: Counter[str]) -> list
     ]
 
 
-def _stored_per_hour(conn: psycopg.Connection, snapshot_id: str) -> Counter[str]:
-    rows = conn.execute(
+def _messages(schema: str) -> sql.Identifier:
+    return sql.Identifier(schema, "mqtt_message")
+
+
+def _stored_per_hour(conn: psycopg.Connection, snapshot_id: str, schema: str) -> Counter[str]:
+    query = sql.SQL(
         "select date_trunc('hour', received_at at time zone 'UTC'), count(*) "
-        "from raw.mqtt_message where snapshot_id = %s group by 1",
-        (snapshot_id,),
-    ).fetchall()
+        "from {} where snapshot_id = %s group by 1"
+    ).format(_messages(schema))
+    rows = conn.execute(query, (snapshot_id,)).fetchall()
     return Counter({f"{hour:%Y-%m-%dT%H}": int(count) for hour, count in rows})
 
 
-def _flagged_per_hour(conn: psycopg.Connection, snapshot_id: str) -> Counter[str]:
+def _flagged_per_hour(conn: psycopg.Connection, snapshot_id: str, schema: str) -> Counter[str]:
     """Raw rows carrying each broker's flag, by "hour broker"."""
-    rows = conn.execute(
+    query = sql.SQL(
         "select date_trunc('hour', received_at at time zone 'UTC'), "
         "count(*) filter (where seen_public), count(*) filter (where seen_meshstl) "
-        "from raw.mqtt_message where snapshot_id = %s group by 1",
-        (snapshot_id,),
-    ).fetchall()
+        "from {} where snapshot_id = %s group by 1"
+    ).format(_messages(schema))
+    rows = conn.execute(query, (snapshot_id,)).fetchall()
     found: Counter[str] = Counter()
     for hour, public, meshstl in rows:
         found[f"{hour:%Y-%m-%dT%H} public"] += int(public)
@@ -225,7 +247,7 @@ def _flagged_per_hour(conn: psycopg.Connection, snapshot_id: str) -> Counter[str
     return +found
 
 
-def _counted_per_hour(conn: psycopg.Connection, snapshot_id: str) -> Counter[str]:
+def _counted_per_hour(conn: psycopg.Connection, snapshot_id: str, schema: str) -> Counter[str]:
     totals: Counter[str] = Counter()
     for table, column in (
         ("mqtt_copy_count", "copy_count"),
@@ -234,19 +256,21 @@ def _counted_per_hour(conn: psycopg.Connection, snapshot_id: str) -> Counter[str
         query = sql.SQL(
             "select date_trunc('hour', hour at time zone 'UTC'), sum({}) from {} "
             "where snapshot_id = %s group by 1"
-        ).format(sql.Identifier(column), sql.Identifier("raw", table))
+        ).format(sql.Identifier(column), sql.Identifier(schema, table))
         for hour, count in conn.execute(query, (snapshot_id,)).fetchall():
             totals[f"{hour:%Y-%m-%dT%H}"] += int(count)
     return totals
 
 
-def decode_rates(conn: psycopg.Connection, snapshot_id: str) -> dict[str, float]:
+def decode_rates(
+    conn: psycopg.Connection, snapshot_id: str, *, schema: str = RAW_SCHEMA
+) -> dict[str, float]:
     """ing_04: ok over stored radio deliveries with a payload, per broker flag."""
-    rows = conn.execute(
+    query = sql.SQL(
         "select topic, decode_status, seen_public, seen_meshstl, count(*) "
-        "from raw.mqtt_message where snapshot_id = %s and not via_mqtt group by 1, 2, 3, 4",
-        (snapshot_id,),
-    ).fetchall()
+        "from {} where snapshot_id = %s and not via_mqtt group by 1, 2, 3, 4"
+    ).format(_messages(schema))
+    rows = conn.execute(query, (snapshot_id,)).fetchall()
     ok: Counter[str] = Counter()
     carried: Counter[str] = Counter()
     for topic, status, seen_public, seen_meshstl, count in rows:
@@ -262,17 +286,19 @@ def decode_rates(conn: psycopg.Connection, snapshot_id: str) -> dict[str, float]
     }
 
 
-def zero_positions(conn: psycopg.Connection, snapshot_id: str) -> dict[str, int]:
+def zero_positions(
+    conn: psycopg.Connection, snapshot_id: str, *, schema: str = RAW_SCHEMA
+) -> dict[str, int]:
     """pos_03: rows with latitude_i and longitude_i both exactly 0, per broker flag and source.
 
     A position the sender set to 0, 0 is stored as sent (the decoder keeps a set
     field); a missing coordinate is null and is never read as 0 (Casey, 2026-11-14).
     """
-    rows = conn.execute(
-        "select seen_public, seen_meshstl, position_source, count(*) from raw.mqtt_message "
-        "where snapshot_id = %s and latitude_i = 0 and longitude_i = 0 group by 1, 2, 3",
-        (snapshot_id,),
-    ).fetchall()
+    query = sql.SQL(
+        "select seen_public, seen_meshstl, position_source, count(*) from {} "
+        "where snapshot_id = %s and latitude_i = 0 and longitude_i = 0 group by 1, 2, 3"
+    ).format(_messages(schema))
+    rows = conn.execute(query, (snapshot_id,)).fetchall()
     found: Counter[str] = Counter()
     for seen_public, seen_meshstl, source, count in rows:
         for flag, seen in (("seen_public", seen_public), ("seen_meshstl", seen_meshstl)):
@@ -294,7 +320,9 @@ def _float32(value: Any) -> Any:
     return None if value is None else struct.unpack("<f", struct.pack("<f", value))[0]
 
 
-def content_hashes(conn: psycopg.Connection, snapshot_id: str) -> dict[str, str]:
+def content_hashes(
+    conn: psycopg.Connection, snapshot_id: str, *, schema: str = RAW_SCHEMA
+) -> dict[str, str]:
     """Data content hash of each raw table's rows for one snapshot (snp_01).
 
     The three landed tables hash as their Parquet files do (ingester.parquet),
@@ -308,7 +336,7 @@ def content_hashes(conn: psycopg.Connection, snapshot_id: str) -> dict[str, str]
         real = [c.name for c in TABLES.get(table, ()) if c.sql_type in {"real", "real[]"}]
         query = sql.SQL("select {} from {} where snapshot_id = %s").format(
             sql.SQL(", ").join(sql.Identifier(name) for name in columns),
-            sql.Identifier("raw", table),
+            sql.Identifier(schema, table),
         )
         total = 0
         with conn.cursor(row_factory=psycopg.rows.dict_row) as cursor:
@@ -319,10 +347,10 @@ def content_hashes(conn: psycopg.Connection, snapshot_id: str) -> dict[str, str]
     return hashes
 
 
-def hash_problems(conn: psycopg.Connection, folder: Path) -> list[str]:
+def hash_problems(conn: psycopg.Connection, folder: Path, *, schema: str = RAW_SCHEMA) -> list[str]:
     """snp_01: one `content_hash: table` line per raw table whose hash differs from the manifest."""
     manifest = read_manifest(folder)
-    found = content_hashes(conn, manifest["snapshot_id"])
+    found = content_hashes(conn, manifest["snapshot_id"], schema=schema)
     expected = manifest["content_hashes"]
     return [f"content_hash: {table}" for table in LOAD_ORDER if found[table] != expected[table]]
 
