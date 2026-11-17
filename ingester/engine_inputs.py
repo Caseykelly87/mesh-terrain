@@ -7,7 +7,9 @@ spike's rules (`ingester.link_pairs`), selects the tile's nodes
 with the columns the lead agreed for the x72y429 run (issue #44):
 `tx_sites_real.parquet` (`site_id`, `geometry`, `box_half_width_m`, `role`)
 and `rx_real.parquet` (`rx_id`, `geometry`, `box_half_width_m`), each node at
-its stationary box centre.
+its stationary box centre. Both files carry the key `mesh_terrain:positions`
+with the value `real` in their Parquet metadata (Casey, issue #44, 4 (a)); the
+engine does not read it yet.
 
 Both layers are written into a staging folder inside the output folder and
 moved to their names only when both are complete. A refusal exits 2 and any
@@ -32,6 +34,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import geopandas as gpd
+import pyarrow.parquet as pq
 import structlog
 
 from ingester.link_pairs import CaptureLinks, SelectionError, capture_links, read_capture_rows
@@ -57,6 +60,10 @@ log = structlog.get_logger(component="ingester.engine_inputs")
 SITES_FILE = "tx_sites_real.parquet"
 RECEIVERS_FILE = "rx_real.parquet"
 STAGING_FOLDER = "engine-inputs.partial"
+# The marker agreed with terrain-rf-eng (Casey, issue #44, 4 (a)): a layer is
+# "synthetic" only when every row is made up; any real row makes it "real".
+POSITIONS_KEY = b"mesh_terrain:positions"
+POSITIONS_REAL = b"real"
 NEVER_PUBLISH = (
     "These layers hold real node positions, precise MeshSTL positions among them. They, and "
     "every coverage output built from them, are never published (pos_04; Casey, issue #44). "
@@ -141,11 +148,23 @@ def _frame(nodes: list[PlacedNode], id_column: str, with_role: bool) -> gpd.GeoD
     return frame[order]
 
 
+def _mark_real(path: Path) -> None:
+    """Add the positions marker to a layer's file metadata, keeping the GeoParquet `geo` key.
+
+    The file is still in the staging folder, so rewriting it in place changes
+    no finished output.
+    """
+    table = pq.read_table(path)
+    metadata = {**(table.schema.metadata or {}), POSITIONS_KEY: POSITIONS_REAL}
+    pq.write_table(table.replace_schema_metadata(metadata), path)
+
+
 def _write(path: Path, frame: gpd.GeoDataFrame) -> None:
     started = time.monotonic()
     # "x" creates the file and fails if it exists, so nothing is ever overwritten.
     with path.open("xb") as handle:
         frame.to_parquet(handle)
+    _mark_real(path)
     duration_s = round(time.monotonic() - started, 3)
     log.info(
         "layer_written",
