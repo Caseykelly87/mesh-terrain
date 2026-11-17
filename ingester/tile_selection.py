@@ -7,10 +7,10 @@ pairs, whose gateway ends in the tile are sites. `select_nodes` returns those
 nodes at their stationary box centres in EPSG:26915, or refuses when the pairs
 do not reproduce that check.
 
-The measurements file does not say how it ranked the busiest pairs, so
-`busiest_two` ranks by three measures and refuses unless all three pick the
-same two pairs. The measures can only refuse a selection; they never change
-which sites are chosen.
+The measurements file does not say how it ranked the busiest pairs.
+`busiest_two` ranks them by link-hours over both runs, ties broken by
+receipts in those link-hours (Casey, 2026-11-16, Q2 (a)), and refuses when
+second and third place are still equal on both.
 
 The DEM check uses the engine's rule: `engine.grid.run_grid` builds the grid
 for one box plus the engine's 50 m margin, and the comparison of
@@ -20,7 +20,7 @@ puts a coordinate in an error message.
 """
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -119,39 +119,34 @@ def parse_tile(name: str) -> Tile:
     return Tile(name, west_m, north_m - TILE_SIZE_M, west_m + TILE_SIZE_M, north_m)
 
 
-MEASURES: dict[str, Callable[[PairActivity], int]] = {
-    "link-hours over both runs": lambda pair: pair.link_hours_union,
-    "link-hours, public plus MeshSTL": lambda pair: (
-        pair.link_hours_public + pair.link_hours_meshstl
-    ),
-    "receipts in those link-hours": lambda pair: pair.receipts,
-}
+BUSIEST_RULE = (
+    "by link-hours over both runs, ties broken by receipts in those link-hours "
+    "(Casey, 2026-11-16, Q2 (a))"
+)
+
+
+def _busyness(pair: PairActivity) -> tuple[int, int]:
+    return pair.link_hours_union, pair.receipts
 
 
 def busiest_two(pairs: Sequence[PairActivity]) -> tuple[PairActivity, PairActivity]:
-    """The two busiest pairs, when every measure in MEASURES picks the same two without a tie.
+    """The two busiest pairs under BUSIEST_RULE.
 
     Args:
         pairs: Every pair of the capture.
 
     Returns:
-        The two pairs, busiest first by the first measure.
+        The two pairs, busiest first.
 
     Raises:
-        SelectionError: with fewer than two pairs, a tie for second place, or
-            measures that pick different pairs.
+        SelectionError: with fewer than two pairs, or when second and third
+            place are equal on both link-hours and receipts.
     """
     if len(pairs) < 2:
         raise SelectionError(f"{len(pairs)} pairs; the selection needs two busy pairs")
-    picks = []
-    for name, measure in MEASURES.items():
-        ranked = sorted(pairs, key=measure, reverse=True)
-        if len(ranked) > 2 and measure(ranked[1]) == measure(ranked[2]):
-            raise SelectionError(f"a tie for second busiest pair by {name}")
-        picks.append(ranked[:2])
-    if any(set(pick) != set(picks[0]) for pick in picks):
-        raise SelectionError("the two busiest pairs depend on the measure of busyness")
-    first, second = picks[0]
+    first, second, *rest = sorted(pairs, key=_busyness, reverse=True)
+    if rest and _busyness(second) == _busyness(rest[0]):
+        raise SelectionError("a tie for second busiest pair on link-hours and receipts")
     return first, second
 
 
@@ -283,9 +278,9 @@ def select_nodes(
         each gateway once, with the both-ends role first) and the receiver.
 
     Raises:
-        SelectionError: when the pairs do not reproduce the tile check, the
-            busiest pairs depend on the measure, or a selected node sent more
-            than one box during the capture.
+        SelectionError: when the pairs do not reproduce the tile check, two
+            pairs tie for second busiest on both keys, or a selected node sent
+            more than one box during the capture.
     """
     if len(links.pairs) != expect_pairs:
         raise SelectionError(f"{len(links.pairs)} pairs, not the {expect_pairs} expected")
