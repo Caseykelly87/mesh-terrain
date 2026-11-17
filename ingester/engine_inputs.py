@@ -284,8 +284,10 @@ def _inside_checkout(folder: Path) -> bool:
 def _check_targets(out: Path, report: bool = False) -> list[Path]:
     """The two layer paths in out, refusing a checkout or any file the run could overwrite.
 
-    With report, an existing run report is refused too; a strict run writes
-    none, so it does not look for one.
+    The files are both layers, the staging folder and, with report, the
+    sites-only run report REPORT_FILE; a strict run writes no report, so it
+    does not look for one. A checkout is refused because the layers hold real
+    positions and the report names pseudonyms.
     """
     if _inside_checkout(out):
         raise SelectionError(f"{out} is inside a git checkout; real positions stay out of git")
