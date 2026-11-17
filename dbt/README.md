@@ -15,7 +15,7 @@ A target is a named set of connection settings in `profiles.yml`. dbt takes it f
 
 A worked example: `make check` builds the MSA boundary view as `staging_dev_wh.stg_msa_boundary` and its seed as `staging_dev_wh.msa_boundary`; the view in `staging` is untouched until the lead runs `make dbt-build-real`. A dbt command typed without `--target` also lands in the `_dev_wh` schemas, unless `DBT_TARGET` names `prod`, and then it stops (next paragraph).
 
-Because `DBT_TARGET` can name `prod` without anyone typing it, in a shell, a `.env` or a container, the target alone does not keep a build off the real schemas. Every `dbt build`, `run`, `seed`, `snapshot` or `test` on `prod` stops in its `on-run-start` hook, before any node runs, unless it was given `--vars '{real_build: true}'`. Only `make dbt-build-real` passes that, and `tests/test_dbt_targets.py` fails if any other Makefile recipe does. `dbt ls` and `dbt parse` still work on `prod`, since they run no hook.
+Because `DBT_TARGET` can name `prod` without anyone typing it, in a shell, a `.env` or a container, the target alone does not keep a build off the real schemas. Every `dbt build`, `run`, `seed`, `snapshot` or `test` on `prod` stops in its `on-run-start` hook, before any node runs, unless it was given `--vars '{real_build: true}'` with the boolean `true` (a string `'true'` or a `1` is refused). Only `make dbt-build-real` passes that, and `tests/test_dbt_targets.py` fails if any other Makefile recipe does, directly or through a Make variable. Two things happen before the hook: dbt's own schema step issues `create schema if not exists` for the target's schemas, which on `prod` already exist from the init SQL, so a refused run creates nothing. And `dbt clone` runs no `on-run-start` hook at all, so the guard does not cover it: nobody runs `dbt clone` on `prod`. `dbt ls` and `dbt parse` still work on `prod`, since they run no hook.
 
 How it works:
 
@@ -31,7 +31,7 @@ From the repository root with the stack up and the `.env` variables exported: `m
 
 ## Contract tests
 
-`tests/test_contract.py` reads every rule id from `docs/data-quality-contract.md` and fails when a rule has no test named for it. The contract counts a dbt test or a Dagster asset check, never a pytest function. A dbt test names a rule in one of two ways (the contract's naming line, ADR 0007): a singular test file `tests/assert_<rule id>.sql` or `tests/assert_<rule id>_<what>.sql`, `<what>` being a short description of the case, or a generic test in model YAML with the rule id in its meta:
+`tests/test_contract.py` reads every rule id from `docs/data-quality-contract.md` and fails when a rule has no test named for it. It counts only what the contract's opening line names, "a dbt test or a Dagster asset check with the same identifier"; a pytest function does not count, whatever its name. A dbt test names a rule in one of two ways (the contract's naming line, ADR 0007): a singular test file `tests/assert_<rule id>.sql` or `tests/assert_<rule id>_<what>.sql`, `<what>` being a short description of the case, or a generic test in model YAML with the rule id in its meta:
 
 ```yaml
 columns:
@@ -43,7 +43,7 @@ columns:
               contract: lnk_08
 ```
 
-`contract` can also be a list of ids. An asset check names a rule when its name is the rule id or starts with it and an underscore, as `ing_04_decode_rate` does. Rules without a test yet are on the `PENDING` list in that file; a rule leaves it in the change that adds its test, and the test fails if it stays. `PENDING` must stay inside `PENDING_AT_B1`, the 28 rules pending when the test was written, so the list cannot grow.
+`contract` can also be a list of ids. An asset check names a rule only when its name is exactly the rule id, such as `pos_03`; the existing checks are named with a description after the id (`pos_03_not_both_zero`), which the contract does not provide for, so they do not count until Casey answers that question (`docs/STATUS.md`). Rules without a test yet are on the `PENDING` list in that file, all 33 today; a rule leaves it in the change that adds its test, and the test fails if it stays. `PENDING` must stay inside `PENDING_AT_B1`, the rules pending when the test was written, so the list cannot grow. A new contract rule enters both `PENDING_AT_B1` and `PENDING` in the pull request that adds it to the contract, unless it lands with its test.
 
 ## Layout
 
