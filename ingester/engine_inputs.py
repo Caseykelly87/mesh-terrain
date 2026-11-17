@@ -56,7 +56,13 @@ tile edge and passes the DEM edge check
 own message when no pair touching the tile has its gateway in it. No relayer
 is placed, so no receiver is chosen and only a gateway's DEM check can drop
 a pair. The counts line gains the sites written and left out and states that
-no real receiver was written and that relayers were not DEM-checked.
+no real receiver was written and that relayers were not DEM-checked. Beside
+the layer, through the same staging folder, it writes the local run report
+`engine_inputs_report.md`: the drop, counts check, rule, per-gateway and
+left-out lines and the counts line, in the order they printed (Casey, issue
+#55, 7). The report names pseudonyms, so it is local only, like the layer; a
+refusal writes neither, and an existing report is refused. A run without the
+flag writes no report.
 
 The layers are written into a staging folder inside the output folder and
 moved to their names only when all are complete. A refusal exits 2 and any
@@ -151,6 +157,15 @@ SITES_ONLY_RULE = (
     "no real receiver; neither a dropped pair nor the counts check stops the run"
 )
 COUNTS_CHECK = "counts check against 2026-11-08"
+# Casey, issue #55, 7: "write the counts line and every left-out gateway line
+# into the local run report, not only the terminal. Nothing public."
+REPORT_FILE = "engine_inputs_report.md"
+REPORT_NOTE = (
+    "Local only. These lines name pseudonyms and tie them to roles, the DEM edge check and "
+    "the tile edge, which narrows where a node is, so this file is never committed, posted "
+    "or published; only its last line, the counts line, goes on issue #44 "
+    '(Casey, issue #55, 7: "Nothing public.").'
+)
 
 
 def _print_pairs(links: CaptureLinks) -> None:
@@ -181,27 +196,46 @@ DropEnd = tuple[PairActivity, str, str]
 """A pair, the end that drops it and the reason."""
 
 
-def _print_drops(dropped: Sequence[DroppedPair], printed: set[DropEnd]) -> None:
-    """One line per end that drops a pair, skipping ends already printed; adds to printed."""
+def _say(line: str, record: list[str]) -> None:
+    """Print a line and keep it for the local run report."""
+    print(line)
+    record.append(line)
+
+
+def _print_drops(dropped: Sequence[DroppedPair], printed: set[DropEnd]) -> list[str]:
+    """One line per end that drops a pair, skipping ends already printed; adds to printed.
+
+    Returns:
+        The lines printed, in order.
+    """
+    record: list[str] = []
     for found in dropped:
         pair = found.pair
         for end, reason in found.reasons:
             if (pair, end, reason) not in printed:
                 printed.add((pair, end, reason))
-                print(f"dropped {found.kind} {pair.relayer} to {pair.gateway}: {end} {reason}")
+                line = f"dropped {found.kind} {pair.relayer} to {pair.gateway}: {end} {reason}"
+                _say(line, record)
+    return record
 
 
-def _print_selection(selection: Selection, printed: set[DropEnd]) -> None:
-    """The site rule, per placed node its DEM edge check, then the drop lines not printed yet."""
-    print(f"sites by tile membership: {SITE_RULE}")
+def _print_selection(selection: Selection, printed: set[DropEnd]) -> list[str]:
+    """The site rule, per placed node its DEM edge check, then the drop lines not printed yet.
+
+    Returns:
+        The lines printed, in order.
+    """
+    record: list[str] = []
+    _say(f"sites by tile membership: {SITE_RULE}", record)
     for node in selection.placed:
         inside = selection.dem_check[node.pseudonym]
-        print(
+        line = (
             f"{node.pseudonym} {node.role}: box half-width {node.half_width_m:.1f} m, "
             f"precise source {str(node.precise_source).lower()}, box plus 50 m inside the DEM "
             f"(engine rule): extent {'pass' if inside else 'fail'}"
         )
-    _print_drops(selection.dropped, printed)
+        _say(line, record)
+    return [*record, *_print_drops(selection.dropped, printed)]
 
 
 def counts_line(links: CaptureLinks, tile: dict[str, int], selection: Selection) -> str:
@@ -247,10 +281,15 @@ def _inside_checkout(folder: Path) -> bool:
     return any((parent / ".git").exists() for parent in (resolved, *resolved.parents))
 
 
-def _check_targets(out: Path) -> list[Path]:
+def _check_targets(out: Path, report: bool = False) -> list[Path]:
+    """The two layer paths in out, refusing a checkout or any file the run could overwrite.
+
+    With report, an existing run report is refused too; a strict run writes
+    none, so it does not look for one.
+    """
     if _inside_checkout(out):
         raise SelectionError(f"{out} is inside a git checkout; real positions stay out of git")
-    names = (SITES_FILE, RECEIVERS_FILE, STAGING_FOLDER)
+    names = (SITES_FILE, RECEIVERS_FILE, STAGING_FOLDER, *([REPORT_FILE] if report else []))
     existing = [name for name in names if (out / name).exists()]
     if existing:
         raise SelectionError(f"{', '.join(existing)} exists in {out}; nothing is overwritten")
@@ -297,6 +336,27 @@ def _write(path: Path, frame: gpd.GeoDataFrame) -> None:
     )
 
 
+def report_text(heading: str, source: str, lines: Sequence[str]) -> str:
+    """The local run report: a heading, the local-only note, the snapshots and the lines.
+
+    Args:
+        heading: The run, such as `engine_inputs --sites-only, x72y429`.
+        source: The snapshots the run read, one sentence.
+        lines: The terminal lines the report keeps, in the order they printed.
+    """
+    block = "\n".join(lines)
+    return f"# {heading}\n\n{REPORT_NOTE}\n\n{source}\n\n```text\n{block}\n```\n"
+
+
+def _write_report(path: Path, text: str) -> None:
+    started = time.monotonic()
+    # "x" creates the file and fails if it exists; newline="\n" keeps one form on every host.
+    with path.open("x", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    duration_s = round(time.monotonic() - started, 3)
+    log.info("report_written", path=str(path), bytes=path.stat().st_size, duration_s=duration_s)
+
+
 def _missing_folders(out: Path) -> list[Path]:
     """out and each parent that does not exist yet, deepest first."""
     return [folder for folder in (out, *out.parents) if not folder.exists()]
@@ -327,23 +387,30 @@ def _publish(staging: Path, targets: list[Path], published: list[Path]) -> None:
     staging.rmdir()
 
 
-def write_layers(out: Path, sites: list[PlacedNode], receiver: PlacedNode | None) -> None:
-    """Write the layers into out through a staging folder, all or nothing.
+def write_layers(
+    out: Path, sites: list[PlacedNode], receiver: PlacedNode | None, report: str | None = None
+) -> None:
+    """Write the layers, and the run report when given, into out through a staging folder.
+
+    All or nothing: every file is moved to its name only when all are written.
 
     Args:
         out: The output folder; it and its missing parents are created.
         sites: The site rows, in order.
         receiver: The receiver row, or None to write the site layer alone
             (`--sites-only`).
+        report: The text of REPORT_FILE, or None to write no report.
 
     Raises:
-        SelectionError: if out is inside a git checkout, or either layer or
-            the staging folder exists, whether or not this call writes it;
-            nothing is written.
+        SelectionError: if out is inside a git checkout, or either layer, the
+            staging folder or (with report) a report exists, whether or not
+            this call writes it; nothing is written.
     """
-    targets = _check_targets(out)
+    targets = _check_targets(out, report=report is not None)
     if receiver is None:
         targets = [out / SITES_FILE]
+    if report is not None:
+        targets.append(out / REPORT_FILE)
     created = _missing_folders(out)
     out.mkdir(parents=True, exist_ok=True)
     staging = out / STAGING_FOLDER
@@ -357,6 +424,8 @@ def write_layers(out: Path, sites: list[PlacedNode], receiver: PlacedNode | None
         _write(staging / SITES_FILE, _frame(sites, "site_id", with_role=True))
         if receiver is not None:
             _write(staging / RECEIVERS_FILE, _frame([receiver], "rx_id", with_role=False))
+        if report is not None:
+            _write_report(staging / REPORT_FILE, report)
         _publish(staging, targets, published)
     except BaseException:
         # The exception goes on; first remove what this run wrote, so no partial
@@ -402,6 +471,8 @@ class _Run:
     extent: Extent
     tile_counts: dict[str, int]
     printed: set[DropEnd]
+    straddle_lines: list[str]
+    source: str
 
 
 def _write_both(run: _Run) -> None:
@@ -417,27 +488,36 @@ def _write_both(run: _Run) -> None:
 
 
 def _write_sites(run: _Run) -> None:
-    """The sites-only run: the counts check reported, never applied; the site layer alone."""
+    """The sites-only run: the counts check reported, never applied; the site layer alone.
+
+    The report holds the straddle, counts check, selection, rule and left-out
+    lines and the counts line, and is written beside the layer only when the
+    layer is; a refusal writes neither, though the terminal has the lines.
+    """
+    record = list(run.straddle_lines)
     states = pair_states(run.links, run.tile)
-    print(counts_check_line(count_differences(run.links, states, run.tile, run.expect_pairs)))
+    differences = count_differences(run.links, states, run.tile, run.expect_pairs)
+    _say(counts_check_line(differences), record)
     chosen = select_sites(run.links, run.tile, run.extent)
-    _print_selection(chosen.selection, run.printed)
-    print(SITES_ONLY_RULE)
+    record += _print_selection(chosen.selection, run.printed)
+    _say(SITES_ONLY_RULE, record)
     for site in chosen.left_out:
-        print(f"left out {site.pseudonym} {site.role}: {site.reason}")
+        _say(f"left out {site.pseudonym} {site.role}: {site.reason}", record)
     sites = chosen.sites()
-    write_layers(run.out, sites, None)
+    counts = sites_only_counts_line(run.links, run.tile_counts, chosen)
+    heading = f"engine_inputs --sites-only, {run.tile.name}"
+    write_layers(run.out, sites, None, report_text(heading, run.source, [*record, counts]))
     print(
-        f"wrote {SITES_FILE} ({len(sites)} sites); no {RECEIVERS_FILE}: no real receiver "
-        "written (--sites-only)"
+        f"wrote {SITES_FILE} ({len(sites)} sites) and {REPORT_FILE} (local only); "
+        f"no {RECEIVERS_FILE}: no real receiver written (--sites-only)"
     )
-    print(sites_only_counts_line(run.links, run.tile_counts, chosen))
+    print(counts)
 
 
 def _run(args: argparse.Namespace) -> None:
     _check_sites_only(args)
     tile = parse_tile(args.tile)
-    _check_targets(args.out)
+    _check_targets(args.out, report=args.sites_only)
     root = args.snapshots_dir or get_ingester_settings().snapshots_dir
     extent = dem_extent(root, args.dem_snapshot)
     rows = read_capture_rows(snapshot_folder(root, args.snapshot))
@@ -450,10 +530,11 @@ def _run(args: argparse.Namespace) -> None:
     # A sites-only run never refuses on the counts, so its lines name the kind.
     printed: set[DropEnd] = set()
     if args.sites_only:
-        _print_drops(site_straddle_drops(links, tile), printed)
+        straddles = _print_drops(site_straddle_drops(links, tile), printed)
     else:
-        _print_drops(straddle_drops(links, tile, args.expect_pairs), printed)
-    run = _Run(args.out, args.expect_pairs, links, tile, extent, counts, printed)
+        straddles = _print_drops(straddle_drops(links, tile, args.expect_pairs), printed)
+    source = f"Snapshot {args.snapshot}, DEM snapshot {args.dem_snapshot}."
+    run = _Run(args.out, args.expect_pairs, links, tile, extent, counts, printed, straddles, source)
     (_write_sites if args.sites_only else _write_both)(run)
     print(NEVER_PUBLISH)
 
