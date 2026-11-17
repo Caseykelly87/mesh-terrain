@@ -44,11 +44,13 @@ MAKE_MODIFIERS = r"(?:(?:export|override|private)[ \t]+)*"
 MAKE_VARIABLE = r"([A-Za-z_][\w.-]*)"
 # An optional target list before the variable makes it target-specific; the
 # lookahead keeps `NAME := value` from reading as target `NAME`.
+# Leading spaces, as inside `ifeq ... endif`, are allowed; a leading tab makes
+# a recipe line, which is shell, not make.
 MAKE_ASSIGNMENT = (
-    rf"^(?:[^\s:#=][^:#=\n]*:(?!:*=)[ \t]*)?{MAKE_MODIFIERS}{MAKE_VARIABLE}"
+    rf"^ *(?:[^\s:#=][^:#=\n]*:(?!:*=)[ \t]*)?{MAKE_MODIFIERS}{MAKE_VARIABLE}"
     r"[ \t]*(?::{1,3}|[+?!])?=(.*)$"
 )
-MAKE_DEFINE = rf"^{MAKE_MODIFIERS}define[ \t]+{MAKE_VARIABLE}[^\n]*\n(.*?)^endef\b"
+MAKE_DEFINE = rf"^ *{MAKE_MODIFIERS}define[ \t]+{MAKE_VARIABLE}[^\n]*\n(.*?)^ *endef\b"
 
 
 def in_target_schemas(nodes: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
@@ -99,9 +101,10 @@ def variable_assignments(makefile: str) -> list[tuple[str, str]]:
     It reads `=`, `:=`, `::=`, `:::=`, `?=`, `+=` and `!=`, with any
     `export`, `override` or `private` prefix, after a target as a
     target-specific variable, across backslash-continued lines, and
-    `define` blocks up to `endef`. It does not see a variable set inside
-    `$(eval ...)`, in an included file, or under a computed name such as
-    `$(PREFIX)_FLAG`.
+    `define` blocks up to `endef`, each indented with spaces or not. It does
+    not see a variable set inside `$(eval ...)`, in an included file, or
+    under a computed name such as `$(PREFIX)_FLAG`, and `references` does not
+    see one read through `$(value FLAG)`.
     """
     joined = makefile.replace("\\\n", " ")
     return [
