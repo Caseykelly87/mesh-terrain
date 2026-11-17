@@ -8,10 +8,11 @@ So a test names the rule `lnk_03` in one of three ways:
 - a dbt generic test in model YAML with `config: {meta: {contract: lnk_03}}`, or a
   list of ids when one test enforces several rules;
 - a Dagster asset check named `lnk_03` or `lnk_03_<what>`, as
-  `ing_04_decode_rate` names `ing_04` (Casey, issue #55, D11; ADR 0007).
+  `ing_04_decode_rate` names `ing_04` (Casey, issue #55, item 7; ADR 0007).
 
 Nothing else counts, a pytest function included, since the opening line names
-only those two kinds. Rules that no test names yet are on PENDING. The check
+only those two kinds (whether a pytest may ever count is open with Casey;
+docs/STATUS.md). Rules that no test names yet are on PENDING. The check
 fails when a rule off the list has no test, and when a rule on the list has
 one, so a rule leaves the list in the same change that adds its test. PENDING
 may only hold rules in PENDING_AT_B1, so it only shrinks. A new contract rule
@@ -19,9 +20,11 @@ enters both PENDING_AT_B1 and PENDING in the pull request that adds it to the
 contract, unless it lands with its test.
 
 A rule the contract leaves to the reviewer alone is on REVIEW_ONLY, never on
-PENDING (Casey, issue #55, D12): it needs no named test, its "Enforced by"
+PENDING (Casey, issue #55, item 8): it needs no named test, its "Enforced by"
 cell names no dbt test or asset check, and the reviewer's checklist in
-`.claude/agents/reviewer.md` has a line that opens with its id. The check
+`.claude/agents/reviewer.md` has a line that opens with its id. REVIEW_ONLY
+may only hold rules in REVIEW_ONLY_AT_D12, so no rule moves to it from
+PENDING without a change to that set in this file. The check
 needs one named test per rule, not every item of the contract's "Enforced by"
 column; the reviewer checks that.
 """
@@ -96,14 +99,19 @@ PENDING = frozenset(
         "ter_06",
         "ter_07",
         # val_01 leaves with its dbt singular test on the hold-out split, once
-        # the validation marts exist (Phase 4; Casey, issue #55, D12), and
+        # the validation marts exist (Phase 4; Casey, issue #55, item 8), and
         # val_03 with its singular dbt test.
         "val_01",
         "val_03",
     }
 )
 
-# Rules the contract enforces by the reviewer alone (Casey, issue #55, D12).
+# The rules Casey put on REVIEW_ONLY (issue #55, item 8, 2026-11-17).
+# REVIEW_ONLY must stay a subset of it, so a rule reaches REVIEW_ONLY only
+# through a change to this set and to the contract, which Casey sees.
+REVIEW_ONLY_AT_D12 = frozenset({"val_02"})
+
+# Rules the contract enforces by the reviewer alone (Casey, issue #55, item 8).
 REVIEW_ONLY = frozenset({"val_02"})
 
 NamedTest = tuple[str, frozenset[str]]
@@ -359,6 +367,10 @@ def test_pending_only_shrinks() -> None:
     assert PENDING <= PENDING_AT_B1
 
 
+def test_review_only_only_shrinks() -> None:
+    assert REVIEW_ONLY <= REVIEW_ONLY_AT_D12
+
+
 def test_asset_checks_are_read_from_specs_and_decorators() -> None:
     tree = ast.parse(
         "AssetCheckSpec('ing_07_second_load', asset=['raw'])\n"
@@ -408,6 +420,16 @@ def test_a_review_only_rule_that_breaks_a_condition_fails_the_check() -> None:
         "pos_02 is on REVIEW_ONLY but the contract names a test: accepted_values on the flag",
         "pos_02 is on REVIEW_ONLY but has no line in the reviewer's checklist",
     ]
+
+
+def test_a_rule_enforced_by_a_pytest_alone_cannot_move_to_review_only() -> None:
+    # Whether a pytest counts is open with Casey, so the cell check does not
+    # read one as a dbt test or asset check; the freeze on REVIEW_ONLY stops it.
+    cells = {"val_02": "reviewer checks", "val_01": "pytest on the split function"}
+    review_only = frozenset({"val_02", "val_01"})
+    checklist = frozenset({"val_02", "val_01"})
+    assert review_only_problems(cells, checklist, review_only, frozenset()) == []
+    assert not review_only <= REVIEW_ONLY_AT_D12
 
 
 def test_a_review_only_rule_needs_no_test_and_fails_when_it_gains_one() -> None:

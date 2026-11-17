@@ -240,6 +240,9 @@ FLAG_VALUE = "--vars '{real_build: true}'"
         "FLAG := --vars \\\n  '{real_build: true}'\n",
         f"define FLAG\n{FLAG_VALUE}\nendef\n",
         f"override define FLAG :=\n  --quiet\n  {FLAG_VALUE}\nendef\n",
+        f"ifeq ($(CI),)\n  FLAG := {FLAG_VALUE}\nendif\n",
+        f"ifdef CI\n  export FLAG = {FLAG_VALUE}\nendif\n",
+        f"ifndef CI\n  define FLAG\n  {FLAG_VALUE}\n  endef\nendif\n",
     ],
 )
 def test_the_makefile_scan_reads_every_assignment_form(assignment: str) -> None:
