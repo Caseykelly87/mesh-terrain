@@ -69,6 +69,9 @@ BOTH_ENDS_RELAYER = "both_ends_relayer"
 BOTH_ENDS_PAIR = "both-ends pair"
 BUSIEST_PAIR = "busiest pair"
 OTHER_PAIR = "other pair"
+# A drop line printed before the tile check names the kind only when the check
+# would pass; when it would refuse, no pair is selected yet.
+KIND_NOT_DETERMINED = "pair (kind not determined)"
 STRADDLES = "straddles the tile edge"
 FAILS_DEM = "fails the DEM edge check"
 IN, OUT, SPLIT = "in", "out", "split"
@@ -341,14 +344,15 @@ def dropped_pairs(
     states: dict[PairActivity, PairState],
     kinds: dict[PairActivity, str],
     dem_check: dict[str, bool],
+    other_kind: str = OTHER_PAIR,
 ) -> tuple[DroppedPair, ...]:
     """The pairs dropped under engine_inputs Q1 (a), each with every end that drops it.
 
     Args:
         states: Every pair's state from `pair_states`.
-        kinds: BOTH_ENDS_PAIR or BUSIEST_PAIR for each selected pair; any
-            other pair is OTHER_PAIR.
+        kinds: BOTH_ENDS_PAIR or BUSIEST_PAIR for each selected pair.
         dem_check: Per node the run places, whether it passes the DEM edge check.
+        other_kind: The kind of a pair not in kinds.
 
     Returns:
         A pair is dropped when either end straddles the tile edge, or an end the
@@ -363,8 +367,36 @@ def dropped_pairs(
             if (reason := _drop_reason(node, node_state, dem_check)) is not None
         )
         if reasons:
-            dropped.append(DroppedPair(pair, kinds.get(pair, OTHER_PAIR), reasons))
+            dropped.append(DroppedPair(pair, kinds.get(pair, other_kind), reasons))
     return tuple(dropped)
+
+
+def straddle_drops(links: CaptureLinks, tile: Tile) -> tuple[DroppedPair, ...]:
+    """The pairs a straddling node drops, found before the tile check can refuse.
+
+    Casey, PR #51, (a): the drop lines print before the count checks, so a
+    refusal shows which pair and which end caused it. The DEM edge check needs
+    a placed box, so its drops come later, from `select_nodes`.
+
+    Args:
+        links: The capture's pairs and node positions.
+        tile: The engine run's tile.
+
+    Returns:
+        Each pair with a straddling end, with its kind when the 2026-11-08
+        tile check and the busiest-pair ranking would pass, else
+        KIND_NOT_DETERMINED.
+
+    Raises:
+        SelectionError: if a node has no usable position.
+    """
+    states = pair_states(links, tile)
+    try:
+        kinds = _selected_pairs(links, states, tile)
+    except SelectionError:
+        # Not swallowed: select_nodes runs the same checks next and refuses there.
+        return dropped_pairs(states, {}, {}, other_kind=KIND_NOT_DETERMINED)
+    return dropped_pairs(states, kinds, {})
 
 
 def _place(nodes: dict[str, NodePositions], pseudonym: str, role: str) -> PlacedNode:

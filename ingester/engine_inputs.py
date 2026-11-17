@@ -48,13 +48,20 @@ import geopandas as gpd
 import pyarrow.parquet as pq
 import structlog
 
-from ingester.link_pairs import CaptureLinks, SelectionError, capture_links, read_capture_rows
+from ingester.link_pairs import (
+    CaptureLinks,
+    PairActivity,
+    SelectionError,
+    capture_links,
+    read_capture_rows,
+)
 from ingester.settings import get_ingester_settings
 from ingester.tile_selection import (
     BUSIEST_RULE,
     FAILS_DEM,
     LAYER_EPSG,
     STRADDLES,
+    DroppedPair,
     PlacedNode,
     Selection,
     Tile,
@@ -62,6 +69,7 @@ from ingester.tile_selection import (
     pair_states,
     parse_tile,
     select_nodes,
+    straddle_drops,
     tile_counts,
 )
 from pipeline.common.logging import configure_logging
@@ -112,8 +120,22 @@ def _print_tile(links: CaptureLinks, tile: Tile) -> dict[str, int]:
     return counts
 
 
-def _print_selection(selection: Selection) -> None:
-    """Per placed node its DEM edge check, then one line per end that drops a pair."""
+DropEnd = tuple[PairActivity, str, str]
+"""A pair, the end that drops it and the reason."""
+
+
+def _print_drops(dropped: Sequence[DroppedPair], printed: set[DropEnd]) -> None:
+    """One line per end that drops a pair, skipping ends already printed; adds to printed."""
+    for found in dropped:
+        pair = found.pair
+        for end, reason in found.reasons:
+            if (pair, end, reason) not in printed:
+                printed.add((pair, end, reason))
+                print(f"dropped {found.kind} {pair.relayer} to {pair.gateway}: {end} {reason}")
+
+
+def _print_selection(selection: Selection, printed: set[DropEnd]) -> None:
+    """Per placed node its DEM edge check, then the drop lines not printed yet."""
     print(f"busiest two pairs: {BUSIEST_RULE}")
     for node in selection.placed:
         inside = selection.dem_check[node.pseudonym]
@@ -122,10 +144,7 @@ def _print_selection(selection: Selection) -> None:
             f"precise source {str(node.precise_source).lower()}, box plus 50 m inside the DEM "
             f"(engine rule): extent {'pass' if inside else 'fail'}"
         )
-    for dropped in selection.dropped:
-        pair = dropped.pair
-        for end, reason in dropped.reasons:
-            print(f"dropped {dropped.kind} {pair.relayer} to {pair.gateway}: {end} {reason}")
+    _print_drops(selection.dropped, printed)
 
 
 def counts_line(links: CaptureLinks, tile: dict[str, int], selection: Selection) -> str:
@@ -291,8 +310,12 @@ def _run(args: argparse.Namespace) -> None:
     links = capture_links(rows)
     _print_pairs(links)
     counts = _print_tile(links, tile)
+    # Casey, PR #51, (a): straddle drop lines print before the count checks
+    # in select_nodes can refuse, so a refusal shows which pair and end caused it.
+    printed: set[DropEnd] = set()
+    _print_drops(straddle_drops(links, tile), printed)
     selection = select_nodes(links, tile, args.expect_pairs, extent)
-    _print_selection(selection)
+    _print_selection(selection, printed)
     # Casey's stop for a dropped selected pair comes here, after the drop lines
     # and before anything with real positions is written.
     sites, receiver = selection.layers()
