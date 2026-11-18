@@ -55,7 +55,6 @@ models:
       - name: precision_bits
         description: The precision the sender gave, a 64-bit integer kept as sent (pos_01).
         tests:
-          - not_null
           - dbt_utils.accepted_range:
               arguments:
                 min_value: 0

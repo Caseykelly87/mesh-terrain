@@ -145,4 +145,3 @@ def snapshot_registered(conn: psycopg.Connection, schema: str, snapshot_id: str)
     )
     row = conn.execute(query, (snapshot_id,)).fetchone()
     return bool(row and row[0])
-
