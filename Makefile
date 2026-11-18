@@ -50,7 +50,7 @@ DBT_DEV_TARGET_GUARD = $(if $(filter-out 1,$(words $(DBT_DEV_TARGET)))$(filter-o
 unexport DBT_DEV_TARGET_GUARD DBT_DEV_TARGETS DBT_DEV_TARGET_REFUSAL
 $(if $(filter check dbt-build,$(MAKECMDGOALS)),$(DBT_DEV_TARGET_GUARD))
 
-.PHONY: help env up down nuke rotate-owner-password check-credentials check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test
+.PHONY: help env up down nuke rotate-owner-password check-credentials check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test test-role
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
 
 help:
@@ -66,10 +66,13 @@ help:
 	@echo "                the .env.example placeholders; make up and rotate-owner-password run it first"
 	@echo "make nuke       stop the stack and delete every project volume after a typed confirmation"
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
+	@echo "make test-role  create or update the tests' database role in the running warehouse; it"
+	@echo "                cannot write raw, raw_dev_wh or raw_dev_ta (make up and make check run it)"
 	@echo "make check [DBT_DEV_TARGET=dev_ta]"
 	@echo "                ruff, mypy, pytest, dbt deps and dbt build against the local stack, on a"
 	@echo "                development target: dev_wh by default (Track B), schemas suffixed _dev_wh and"
-	@echo "                sources in raw_dev_wh; dev_ta for Track A, suffix _dev_ta; prod is refused"
+	@echo "                sources in raw_dev_wh; dev_ta for Track A, suffix _dev_ta; prod is refused."
+	@echo "                The tests and the build connect as the test role"
 	@echo "make check-itm  load the ITM library in the Dagster image, reproduce the ADR 0002 figure"
 	@echo "                and run tests/test_itm.py and tests/test_path_loss.py there, failing on a skip"
 	@echo "make check-p1812 [FIXTURE=<folder> EXPECT_DB=<dB>]"
@@ -132,6 +135,34 @@ check-credentials: env
 up: check-credentials
 	$(COMPOSE) up --build --detach
 	bash docker/wait-for-stack.sh
+	$(MAKE) --no-print-directory test-role
+
+# The database role the tests and the development dbt builds connect as
+# (docker/warehouse/test-role.sql says what it may and may not do). It is
+# applied here, on every make up and make check, and not from initdb/, which
+# runs only on a fresh volume, so an existing warehouse gets it too. The bare
+# -e names pass the name and password from the exported .env into the
+# container, where psql reads them, so the password is on no command line.
+# pg_isready waits on TCP because the server listens there only once the init
+# scripts of a fresh volume are done; until then the health check can pass
+# against the temporary server that runs them.
+TEST_ROLE_PSQL = tries=0; until pg_isready -q -h 127.0.0.1; do \
+    tries=$$((tries + 1)); [ $$tries -lt 60 ] || exit 1; sleep 1; done; \
+    psql -X -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f -
+TEST_ROLE_REQUIRED = : "$${WAREHOUSE_TEST_USER:?set WAREHOUSE_TEST_USER in .env, see .env.example}" \
+    "$${WAREHOUSE_TEST_PASSWORD:?set WAREHOUSE_TEST_PASSWORD in .env, see .env.example}"
+# The development dbt targets run as the test role: dbt replaces a view or
+# table only as its owner, and the fixture build in the tests builds into the
+# same schemas as that role. The shell reads the values from the exported
+# .env, so the recipe text holds only their names.
+DBT_AS_TEST_ROLE = WAREHOUSE_USER="$${WAREHOUSE_TEST_USER:?set WAREHOUSE_TEST_USER in .env, see .env.example}" \
+    WAREHOUSE_PASSWORD="$${WAREHOUSE_TEST_PASSWORD:?set WAREHOUSE_TEST_PASSWORD in .env, see .env.example}"
+unexport TEST_ROLE_PSQL TEST_ROLE_REQUIRED DBT_AS_TEST_ROLE
+
+test-role: env
+	@$(TEST_ROLE_REQUIRED)
+	$(COMPOSE) exec -T -e WAREHOUSE_TEST_USER -e WAREHOUSE_TEST_PASSWORD warehouse \
+	    sh -c '$(TEST_ROLE_PSQL)' < docker/warehouse/test-role.sql
 
 # Postgres reads POSTGRES_PASSWORD only when it creates a fresh volume, so a
 # new WAREHOUSE_PASSWORD in .env reaches an existing warehouse only through
@@ -181,7 +212,7 @@ dbt-deps:
 	$(DBT) deps $(DBT_ARGS)
 
 dbt-debug: dbt-deps
-	$(DBT) debug $(DBT_ARGS)
+	$(DBT_AS_TEST_ROLE) $(DBT) debug $(DBT_ARGS)
 
 # A development target builds into staging_<target>, core_<target> and
 # analytics_<target> and reads raw_<target>, never the real schemas
@@ -190,16 +221,19 @@ dbt-debug: dbt-deps
 # ever changes. The guard repeats the check above for a run that reaches this
 # recipe from another goal.
 dbt-build: dbt-deps
-	$(DBT_DEV_TARGET_GUARD)$(DBT) build $(DBT_ARGS) --target $(DBT_DEV_TARGET)
+	$(DBT_DEV_TARGET_GUARD)$(DBT_AS_TEST_ROLE) $(DBT) build $(DBT_ARGS) --target $(DBT_DEV_TARGET)
 
 # The real raw, staging, core and analytics schemas. The lead's target only
 # (dbt/README.md); no agent's unit runs it. dbt refuses a run on prod without
 # the real_build variable, so DBT_TARGET=prod alone cannot start one; this is
-# the one recipe that passes it.
+# the one recipe that passes it. It connects as the owner role, WAREHOUSE_USER,
+# since the test role cannot write the real schemas.
 dbt-build-real: dbt-deps
 	$(DBT) build $(DBT_ARGS) --target prod --vars '{real_build: true}'
 
-check: env lint test dbt-build
+# test-role runs before the tests so the grants they check are the file's,
+# whatever ran against the warehouse since the last make up.
+check: env lint test-role test dbt-build
 
 # Runs inside the Dagster image, not on the host, because the library is built
 # for Linux there (ADR 0002). The build comes first because compose run reuses
