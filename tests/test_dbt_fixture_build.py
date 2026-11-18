@@ -15,10 +15,11 @@ comparisons with the hand-worked values: `assert_pos_01_fixture_positions`,
 and the rest.
 
 The build runs three times, after `dbt seed --full-refresh`. First `dbt run
---full-refresh` without the second fixture snapshot; then that snapshot is loaded and `dbt build` runs
-incrementally, so the core model's incremental path must pick up the new
-snapshot and replace a copy with an earlier one; then `dbt build
---full-refresh`. Both builds must pass every test and leave the same core rows.
+--full-refresh` without the second fixture snapshot; then that snapshot is
+loaded and `dbt build` runs incrementally, so the core model's incremental
+path must pick up the new snapshot, replace a copy with an earlier one and add
+a broker flag a later copy carries; then `dbt build --full-refresh`. Both
+builds must pass every test and leave the same core rows.
 
 Dropping the schema also drops the staging views on the development target
 that read it (`cascade`); the next fixture build recreates them. Skipped where
