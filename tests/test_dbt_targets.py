@@ -129,14 +129,18 @@ def hook_schemas(target: str) -> set[str]:
 
 
 def make_dry_run(
-    *arguments: str, dbt_dev_target: str | None = None
+    *arguments: str, directory: Path, dbt_dev_target: str | None = None
 ) -> subprocess.CompletedProcess[str]:
-    """`make -n` in the checkout, printing the recipes it would run and running none.
+    """`make -n` on the checkout's Makefile, printing the recipes it would run and running none.
 
-    The environment loses what a calling make passes down (MAKEFLAGS carries
-    its command-line variables) and any DBT_DEV_TARGET, so `make check
-    DBT_DEV_TARGET=dev_ta` running this test does not change what it sees;
-    dbt_dev_target, when given, puts one back in the environment.
+    Make runs in directory, a temporary folder, because the Makefile includes
+    `.env` from the folder make runs in: in the checkout that file can set
+    DBT_DEV_TARGET, and in the main checkout it holds the HMAC key. A test
+    that wants a `.env` writes one into directory. The environment loses what
+    a calling make passes down (MAKEFLAGS carries its command-line variables)
+    and any DBT_DEV_TARGET, so `make check DBT_DEV_TARGET=dev_ta` running this
+    test does not change what it sees; dbt_dev_target, when given, puts one
+    back in the environment.
     """
     make = shutil.which("make")
     if make is None:
@@ -146,8 +150,8 @@ def make_dry_run(
     if dbt_dev_target is not None:
         environment["DBT_DEV_TARGET"] = dbt_dev_target
     return subprocess.run(
-        [make, "--no-print-directory", "-n", *arguments],
-        cwd=REPO_ROOT,
+        [make, "--no-print-directory", "-n", "-f", str(REPO_ROOT / "Makefile"), *arguments],
+        cwd=directory,
         capture_output=True,
         text=True,
         check=False,
@@ -294,15 +298,17 @@ def test_the_hook_creates_every_schema_the_development_target_reads_or_builds(
     assert hook_schemas(target) == read | built
 
 
-def test_make_dbt_build_uses_the_track_b_target_by_default() -> None:
-    result = make_dry_run("dbt-build")
+def test_make_dbt_build_uses_the_track_b_target_by_default(tmp_path: Path) -> None:
+    result = make_dry_run("dbt-build", directory=tmp_path)
     assert result.returncode == 0, result.stderr
     assert f"--target {DEVELOPMENT_TARGET}" in result.stdout
 
 
-def test_make_dbt_build_and_check_pass_the_development_target_they_are_given() -> None:
+def test_make_dbt_build_and_check_pass_the_development_target_they_are_given(
+    tmp_path: Path,
+) -> None:
     for goal in ("dbt-build", "check"):
-        result = make_dry_run(goal, f"DBT_DEV_TARGET={TRACK_A_TARGET}")
+        result = make_dry_run(goal, f"DBT_DEV_TARGET={TRACK_A_TARGET}", directory=tmp_path)
         assert result.returncode == 0, result.stderr
         assert f"--target {TRACK_A_TARGET}" in result.stdout
         assert f"--target {DEVELOPMENT_TARGET}" not in result.stdout
@@ -310,16 +316,18 @@ def test_make_dbt_build_and_check_pass_the_development_target_they_are_given() -
 
 @pytest.mark.parametrize("goal", ["check", "dbt-build"])
 @pytest.mark.parametrize("value", [REAL_TARGET, "", "dev_wh dev_ta", "dev"])
-def test_make_refuses_any_value_but_a_development_target(goal: str, value: str) -> None:
+def test_make_refuses_any_value_but_a_development_target(
+    goal: str, value: str, tmp_path: Path
+) -> None:
     """Refused before make prints or runs any recipe, so `make check` lints nothing first."""
-    result = make_dry_run(goal, f"DBT_DEV_TARGET={value}")
+    result = make_dry_run(goal, f"DBT_DEV_TARGET={value}", directory=tmp_path)
     assert result.returncode != 0
     assert "make dbt-build-real" in result.stderr
     assert result.stdout == ""
 
 
-def test_make_refuses_the_real_target_from_the_environment() -> None:
-    result = make_dry_run("check", dbt_dev_target=REAL_TARGET)
+def test_make_refuses_the_real_target_from_the_environment(tmp_path: Path) -> None:
+    result = make_dry_run("check", directory=tmp_path, dbt_dev_target=REAL_TARGET)
     assert result.returncode != 0
     assert "make dbt-build-real" in result.stderr
     assert result.stdout == ""
