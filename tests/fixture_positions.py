@@ -127,7 +127,9 @@ def expected_position(row: dict[str, Any]) -> dict[str, Any]:
         "precision_bits": bits,
         "position_quality": quality(bits) if has_position else None,
         "cell_width_i": width,
-        "precise_source": (bits >= 20 and row["seen_meshstl"]) if bits is not None else None,
+        "precise_source": (
+            bool(bits is not None and bits >= 20 and row["seen_meshstl"]) if has_position else None
+        ),
         "inside_msa": has_position and inside_msa(row["latitude_i"], row["longitude_i"]),
     }
     expected |= cell_columns(row, bits, width)
@@ -136,7 +138,9 @@ def expected_position(row: dict[str, Any]) -> dict[str, Any]:
 
 def cell_columns(row: dict[str, Any], bits: int | None, width: int | None) -> dict[str, Any]:
     if bits is None or width is None:
-        return dict.fromkeys(("south_i", "north_i", "west_i", "east_i", "half_width_ns_m", "half_width_ew_m"))
+        return dict.fromkeys(
+            ("south_i", "north_i", "west_i", "east_i", "half_width_ns_m", "half_width_ew_m")
+        )
     south = cell_low(row["latitude_i"], bits, width)
     west = cell_low(row["longitude_i"], bits, width)
     north_south, east_west = half_widths(width, row["latitude_i"])
@@ -151,7 +155,7 @@ def cell_columns(row: dict[str, Any], bits: int | None, width: int | None) -> di
 
 
 def mark_in_core(rows: list[dict[str, Any]], raw: list[dict[str, Any]]) -> None:
-    """Core keeps one row per delivery inside the MSA: the first copy by received_at, then snapshot."""
+    """Core keeps one row per delivery inside the MSA: its first copy by received_at, snapshot."""
     received = {(r["snapshot_id"], r["delivery_key"]): r["received_at"] for r in raw}
     first: dict[str, tuple[Any, str]] = {}
     for row in rows:

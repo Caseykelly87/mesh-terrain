@@ -138,7 +138,9 @@ def builds() -> Iterator[dict[str, Any]]:
 
 @pytest.mark.parametrize("build", ["incremental", "full_refresh"])
 def test_every_node_of_the_fixture_build_passes(builds: dict[str, Any], build: str) -> None:
-    failed = {name: status for name, status in builds[build].items() if status not in {"success", "pass"}}
+    failed = {
+        name: status for name, status in builds[build].items() if status not in {"success", "pass"}
+    }
     assert failed == {}
 
 
