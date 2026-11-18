@@ -3,12 +3,11 @@
 -- pos_04, written out here rather than through the models' macro. A position
 -- is precise_source exactly when it carries coordinates, its delivery has
 -- seen_meshstl true, and its precision_bits is 20 or more, or 0, Position or
--- MapReport alike. PR #71 words it: "or a position with precision_bits 0 that
--- carries coordinates, Position or MapReport, is flagged precise_source = true
--- exactly when seen_meshstl is true on its delivery" (Casey, issue #55 comment
--- 6989099568, item 2), and "a position carries coordinates when latitude_i and
--- longitude_i are both present and pos_03 does not map it to no position, so a
--- report at 0, 0 is not flagged" (Casey, PR #71 comment 6989275630, item 1).
+-- MapReport alike. The contract's pos_04 (PR #71), quoted whole, one quote per
+-- line. From Casey, issue #55 comment 6989099568, item 2:
+-- "or a position with `precision_bits` 0 that carries coordinates, Position or MapReport, is flagged `precise_source = true` exactly when `seen_meshstl` is true on its delivery"
+-- From Casey, PR #71 comment 6989275630, item 1:
+-- "a position carries coordinates when `latitude_i` and `longitude_i` are both present and `pos_03` does not map it to no position, so a report at 0, 0 is not flagged"
 -- A public-broker position never carries the flag (Casey, issue #55, D10).
 --
 -- stg_position reads this copy's seen_meshstl and leaves the flag null on a
