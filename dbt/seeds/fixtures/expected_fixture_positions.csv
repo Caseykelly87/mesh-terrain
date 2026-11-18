@@ -186,8 +186,10 @@ staging-fixture-a,s03-m002,s03-b,position,false,386000000,-903655616,0,unusable,
 staging-fixture-a,s03-m003,s03-c,mapreport,false,386000896,-903657472,20,usable,4096,385998848,386002944,-903659520,-903655424,22.734410153,17.840520683,true,true,true,true
 staging-fixture-a,s03-m004,s03-d,position,false,386000000,-903000000,33,unusable,,,,,,,,true,true,true,true
 staging-fixture-a,s04-m001,s04-a,position,false,386000000,-903400000,0,unusable,,,,,,,,true,true,true,true
-staging-fixture-a,s04-m002,s04-b,mapreport,false,386000000,-903300000,0,unusable,,,,,,,,false,true,true,false
+staging-fixture-a,s04-m002,s04-b,mapreport,false,386000000,-903300000,0,unusable,,,,,,,,true,true,true,true
 staging-fixture-a,s04-m003,s04-c,position,false,386100000,-903400000,0,unusable,,,,,,,,false,true,true,true
+staging-fixture-a,s04-m004,s04-d,mapreport,false,386100000,-903300000,0,unusable,,,,,,,,false,true,true,true
 staging-fixture-b,s01-m004,s01-r,position,false,386000896,-903657472,20,usable,4096,385998848,386002944,-903659520,-903655424,22.734410153,17.840520683,false,true,true,false
 staging-fixture-b,s01-m009,s01-r,position,false,386000896,-903657472,20,usable,4096,385998848,386002944,-903659520,-903655424,22.734410153,17.840520683,true,true,false,
 staging-fixture-b,s04-m003,s04-c,position,false,386100000,-903400000,0,unusable,,,,,,,,true,true,false,
+staging-fixture-b,s04-m004,s04-d,mapreport,false,386100000,-903300000,0,unusable,,,,,,,,true,true,false,
