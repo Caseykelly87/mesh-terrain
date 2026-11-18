@@ -7,8 +7,9 @@ How much of the variation in Meshtastic LoRa link quality across the St. Louis m
 Requirements: Docker (Compose v2), GNU Make, [uv](https://docs.astral.sh/uv/) 0.13, Python 3.12 (uv installs it if missing).
 
 ```
-make up      # builds and starts PostGIS with h3-pg, the object store and Dagster, waits for health checks
-make check   # ruff, mypy, pytest, dbt deps and dbt build against the local stack
+make up      # builds and starts PostGIS with h3-pg, the object store and Dagster, waits for health checks,
+             # then creates or updates the tests' database role (make test-role)
+make check   # ruff, mypy, make test-role, pytest, dbt deps and dbt build against the local stack
 make down    # stops the stack and removes its containers; the data is kept
 make nuke    # stops the stack and deletes every project volume, after you type "nuke"
 ```
@@ -17,7 +18,9 @@ make nuke    # stops the stack and deletes every project volume, after you type 
 
 The stack's data lives in Docker volumes, storage that Docker keeps apart from any container. Today there are two: `mesh-terrain_warehouse-data` holds the warehouse and Dagster databases, `mesh-terrain_minio-data` holds the object store bucket. `make down` leaves them in place, so the next `make up` finds the same tables and files. `make nuke` is the only target that deletes them, and it deletes every volume of the mesh-terrain project, including any added later. It lists the volumes, asks you to type `nuke`, and deletes nothing if you type anything else. `make nuke CONFIRM=nuke` skips the prompt, at a terminal too, so type it only when you mean it. With no terminal to ask on (CI, a script, a pipe) it refuses unless `CONFIRM=nuke` is on the make command line; a `CONFIRM` in your shell environment or in `.env` does not count. It also refuses, deleting nothing, if a container outside the stack still uses one of the volumes. After a nuke, `make up` recreates empty volumes with the schemas and the bucket, and `make check` reloads the dbt seeds. Snapshots (the MQTT capture, downloaded elevation and lidar tiles) are kept in folders on the host under `C:/Users/Casey/mesh-terrain-data/snapshots/`, never in these volumes, so a nuke cannot touch them.
 
-`make up` copies `.env.example` to `.env` if it is missing, and then stops until you have generated the credentials in it (Credentials, below). Dagster is at http://localhost:3000, the warehouse at localhost:5433 (database `mesh_terrain`, user `mesh`), the object store API at localhost:9000 and its console at localhost:9001, each reachable from this machine only: every published port is bound to 127.0.0.1. `make fmt` formats; `make reproduce` will rebuild every asset from the registered snapshots once Phase 1 lands the loader.
+The tests, and the dbt builds that `make check` and `make dbt-build` run, connect as a second role, `mesh_test` (`WAREHOUSE_TEST_USER` and `WAREHOUSE_TEST_PASSWORD` in `.env`), never as `mesh`. It has no privilege at all on `raw`, `raw_dev_wh` or `raw_dev_ta`, so a test that sends any write there, however it is written, gets "permission denied" (`tests/test_db_role.py` sends each form). It may create schemas, which the tests' throwaway `test_load_` and `test_fixture_` schemas need, and it owns the development build schemas such as `staging_dev_wh`, because dbt replaces a view only as its owner. `make test-role` applies `docker/warehouse/test-role.sql` to the running warehouse; `make up` and `make check` run it, so an existing volume gets the role as well as a new one. Everything else connects as `mesh`: `make dbt-build-real`, `make load`, `make register-snapshot` and Dagster.
+
+`make up` copies `.env.example` to `.env` if it is missing, and then stops until you have generated the credentials in it (Credentials, below). Dagster is at http://localhost:3000, the warehouse at localhost:5433 (database `mesh_terrain`, user `mesh`, the owner of every schema), the object store API at localhost:9000 and its console at localhost:9001, each reachable from this machine only: every published port is bound to 127.0.0.1. `make fmt` formats; `make reproduce` will rebuild every asset from the registered snapshots once Phase 1 lands the loader.
 
 ### Credentials
 
