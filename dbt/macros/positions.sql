@@ -69,16 +69,19 @@
 {%- endmacro %}
 
 {#
-  pos_04's precise flag for one position that carries coordinates: carried by
-  the MeshSTL broker, and either 20 bits or more, or 0 bits, Position or
+  pos_04's precise flag for one position: it carries coordinates, the MeshSTL
+  broker carried it, and it has 20 bits or more, or 0 bits, Position or
   MapReport alike. Firmware older than the precision field sends 0 bits with
   full-precision coordinates, and the rule is about privacy, not the message
-  type (Casey, issue #55 comment 6989099568, item 2; PR #71's pos_04: "or a position with precision_bits 0 that carries coordinates, Position or MapReport, is flagged precise_source = true exactly when seen_meshstl is true on its delivery").
-  False, never null, for a position without precision_bits.
+  type (Casey, issue #55 comment 6989099568, item 2). carries_coordinates is
+  the caller's test of PR #71's definition: "a position carries coordinates when latitude_i and longitude_i are both present and pos_03 does not map it to no position, so a report at 0, 0 is not flagged"
+  (Casey, PR #71 comment 6989275630, item 1). False, never null, for a position without
+  precision_bits.
 #}
-{% macro precise_flag(precision_bits, seen_meshstl) -%}
+{% macro precise_flag(precision_bits, seen_meshstl, carries_coordinates) -%}
     coalesce(
-        {{ seen_meshstl }}
+        ({{ carries_coordinates }})
+        and {{ seen_meshstl }}
         and ({{ precision_bits }} >= 20 or {{ precision_bits }} = 0),
         false
     )
