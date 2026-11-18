@@ -38,6 +38,8 @@ Run `make check` yourself before writing the report and include its result in on
 
 Before you finish, post your findings as a comment on the PR you reviewed, in the form you return them; the lead reads them there (Casey, issue #55 comment 6963192892, item 5).
 
+Every comment you post on a PR, your findings included, follows the counts-only rule for real data and never includes ids, positions or outcomes (Casey, issue #55 comment 6985802330, item 10).
+
 ## Writing
 
 Follow `docs/STYLE.md`. Plain sentences, no dashes other than hyphens in words.

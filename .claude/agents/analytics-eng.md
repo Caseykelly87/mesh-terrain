@@ -46,7 +46,7 @@ Every commit on your branch carries the trailer `Agent: analytics-eng` and nothi
 
 Push your branch after every commit (Casey, issue #55 comment 6966197127, item 5). Before you finish, post your run report on your PR as a comment: hashes, check counts, what changed, and any "Decided without Casey" items; the lead reads it there (Casey, issue #55 comment 6963192892, item 5).
 
-Add only your own lines to the shared sections of `docs/STATUS.md` and never edit another agent's lines; a run report posted on a PR follows the counts-only rule for real data and never includes ids, positions or outcomes (Casey, PR #64 comment 6968763718, item 5).
+Add only your own lines to the shared sections of `docs/STATUS.md` and never edit another agent's lines; every comment you post on a PR, a run report included, follows the counts-only rule for real data and never includes ids, positions or outcomes (Casey, PR #64 comment 6968763718, item 5; Casey, issue #55 comment 6985802330, item 10).
 
 ## Stop and ask
 
