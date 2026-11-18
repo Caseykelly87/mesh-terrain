@@ -5,7 +5,7 @@
   "reasoning": [
     "lnk_06: RSSI in [-150, 0) dBm and SNR in [-30, 20] dB, both present; RSSI 0 is treated as missing; a value that is not a number is missing.",
     "Counted: RSSI -150 with SNR -30 (both lower limits, included); RSSI -1 with SNR 20 (the upper SNR limit, included); RSSI -100 with SNR 0.0 (a valid reading, since RSSI is not 0).",
-    "Dropped by lnk_06: RSSI -151; RSSI 0; RSSI missing; SNR missing; SNR NaN (written \"NaN\" in the fixture); SNR -30.25; SNR 20.25. Each has the other reading in range.",
+    "Dropped by lnk_06: RSSI -151; RSSI 0; RSSI missing; SNR missing; SNR NaN (written \"NaN\" in the fixture); SNR -30.25; SNR 20.25. Each has the other reading in range. The RSSI 0 row (c37-m007) is the upper edge: [-150, 0) excludes 0, so an implementation that tests RSSI <= 0 counts it. Raw lands an RSSI of 0 as null (STATUS, interface agreed on 2026-11-14), so a real snapshot never holds this row; it tests the defensive path lnk_06 states, an RSSI of 0 treated as missing, and is kept for that.",
     "The three counted receipts pass lnk_05 at 2745.603 m: kept with 3 packets. Medians: SNR of -30, 0 and 20 is 0.0 dB; RSSI of -150, -100 and -1 is -100.0 dBm.",
     "position_uncertainty_m is the larger half-width of each end's box, r20 22.734410 m plus g16 363.750397 m, = 386.484807 m (lnk_05)."
   ],
