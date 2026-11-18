@@ -56,8 +56,8 @@ run can report them; `select_nodes` refuses on the first.
 `busiest_two` ranks pairs by link-hours, ties broken by receipts in those
 link-hours (Casey, issue #44, engine_inputs Q2 (a), 2026-11-16; the
 link-hours are now the merged snapshot's kept hours, where Casey's rule
-counted them over both spike runs), and refuses when second and third place are still equal on
-both. Casey keeps that ranking wherever one is needed later (issue #44,
+counted them over both spike runs), and refuses when second and third
+place are still equal on both. Casey keeps that ranking wherever one is needed later (issue #44,
 busiest pair, 2026-11-17); the selection does not call it.
 
 The DEM check uses the engine's rule: `engine.grid.run_grid` builds the grid
