@@ -8,9 +8,11 @@ SQL models and the ingester's Python are compared against the fixture in their
 own units.
 """
 
+import copy
 import json
 import re
 from collections import Counter
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -237,15 +239,19 @@ def test_positions_at_1_to_31_bits_are_on_the_firmware_grid() -> None:
             assert on_firmware_grid(longitude, bits), message["delivery_key"]
 
 
+def check_boxes(case: dict[str, Any]) -> None:
+    for name, box in case["boxes"].items():
+        label = f"{case['case_id']} {name}"
+        assert set(box) == BOX_KEYS, label
+        assert box["south_i"] < box["north_i"] and box["west_i"] < box["east_i"], label
+        assert isinstance(box["merged"], bool), label
+        assert 1 <= box["precision_bits"] <= 32, label
+        assert box["half_width_ns_m"] > 0 and box["half_width_ew_m"] > 0, label
+
+
 def test_boxes_are_well_formed() -> None:
     for case in load_cases():
-        for name, box in case["boxes"].items():
-            label = f"{case['case_id']} {name}"
-            assert set(box) == BOX_KEYS, label
-            assert box["south_i"] < box["north_i"] and box["west_i"] < box["east_i"], label
-            assert isinstance(box["merged"], bool), label
-            assert 1 <= box["precision_bits"] <= 32, label
-            assert box["half_width_ns_m"] > 0 and box["half_width_ew_m"] > 0, label
+        check_boxes(case)
 
 
 def check_receipt(row: dict[str, Any], case: dict[str, Any]) -> None:
@@ -264,16 +270,20 @@ def check_receipt(row: dict[str, Any], case: dict[str, Any]) -> None:
         assert box not in row or row[box] in case["boxes"], label
 
 
+def check_expected_receipts(case: dict[str, Any]) -> None:
+    messages = {m["delivery_key"] for m in case["messages"]}
+    listed = Counter(row["delivery_key"] for row in case["expected_receipts"])
+    assert set(listed) <= messages, case["case_id"]
+    assert [key for key, count in listed.items() if count > 1] == [], case["case_id"]
+    with_relay = {m["delivery_key"] for m in case["messages"] if m["relay_node"] is not None}
+    assert with_relay <= set(listed), case["case_id"]
+    for row in case["expected_receipts"]:
+        check_receipt(row, case)
+
+
 def test_expected_receipts_refer_to_messages_and_boxes_that_exist() -> None:
     for case in load_cases():
-        messages = {m["delivery_key"] for m in case["messages"]}
-        listed = Counter(row["delivery_key"] for row in case["expected_receipts"])
-        assert set(listed) <= messages, case["case_id"]
-        assert [key for key, count in listed.items() if count > 1] == [], case["case_id"]
-        with_relay = {m["delivery_key"] for m in case["messages"] if m["relay_node"] is not None}
-        assert with_relay <= set(listed), case["case_id"]
-        for row in case["expected_receipts"]:
-            check_receipt(row, case)
+        check_expected_receipts(case)
 
 
 def hour_of(text: str) -> datetime:
@@ -292,26 +302,91 @@ def check_hour(hour: dict[str, Any], case: dict[str, Any]) -> None:
         assert hour["gateway_box"] in case["boxes"], label
 
 
+def check_link_hours(case: dict[str, Any]) -> None:
+    messages = {m["delivery_key"]: m for m in case["messages"]}
+    counted = {
+        row["delivery_key"]: row for row in case["expected_receipts"] if row["outcome"] == "counted"
+    }
+    placed = Counter(key for hour in case["expected_link_hours"] for key in hour["receipts"])
+    assert set(placed) == set(counted), case["case_id"]
+    assert max(placed.values(), default=1) == 1, case["case_id"]
+    hours = case["expected_link_hours"]
+    grains = Counter((hour["relayer"], hour["gateway"], hour["hour"]) for hour in hours)
+    assert max(grains.values(), default=1) == 1, case["case_id"]
+    for hour in case["expected_link_hours"]:
+        check_hour(hour, case)
+        for key in hour["receipts"]:
+            assert counted[key]["relayer"] == hour["relayer"], key
+            assert messages[key]["gateway_pseudonym"] == hour["gateway"], key
+            assert hour_of(messages[key]["received_at"]) == utc(hour["hour"]), key
+
+
 def test_every_counted_receipt_is_in_exactly_one_link_hour_of_its_own() -> None:
     for case in load_cases():
-        messages = {m["delivery_key"]: m for m in case["messages"]}
-        counted = {
-            row["delivery_key"]: row
-            for row in case["expected_receipts"]
-            if row["outcome"] == "counted"
-        }
-        placed = Counter(key for hour in case["expected_link_hours"] for key in hour["receipts"])
-        assert set(placed) == set(counted), case["case_id"]
-        assert max(placed.values(), default=1) == 1, case["case_id"]
-        hours = case["expected_link_hours"]
-        grains = Counter((hour["relayer"], hour["gateway"], hour["hour"]) for hour in hours)
-        assert max(grains.values(), default=1) == 1, case["case_id"]
-        for hour in case["expected_link_hours"]:
-            check_hour(hour, case)
-            for key in hour["receipts"]:
-                assert counted[key]["relayer"] == hour["relayer"], key
-                assert messages[key]["gateway_pseudonym"] == hour["gateway"], key
-                assert hour_of(messages[key]["received_at"]) == utc(hour["hour"]), key
+        check_link_hours(case)
+
+
+def check_case(case: dict[str, Any]) -> None:
+    """Every per-case check, so that a malformed edit to one case can be shown to fail."""
+    check_boxes(case)
+    check_expected_receipts(case)
+    check_link_hours(case)
+
+
+def case_by_number(number: str) -> dict[str, Any]:
+    (case,) = [case for case in load_cases() if case["case_id"].startswith(number + "_")]
+    return case
+
+
+def wrong_width(case: dict[str, Any]) -> None:
+    case["boxes"]["r20"]["north_i"] += 4096
+
+
+def merged_single_cell(case: dict[str, Any]) -> None:
+    case["boxes"]["r20"]["merged"] = True
+
+
+def hour_names_a_box_its_receipts_do_not_use(case: dict[str, Any]) -> None:
+    case["expected_link_hours"][0]["relayer_box"] = "g16"
+
+
+def unknown_key_in_a_receipt(case: dict[str, Any]) -> None:
+    case["expected_receipts"][0]["note"] = "x"
+
+
+def unknown_key_in_an_hour(case: dict[str, Any]) -> None:
+    case["expected_link_hours"][0]["note"] = "x"
+
+
+def kept_hour_key_in_a_dropped_hour(case: dict[str, Any]) -> None:
+    case["expected_link_hours"][0]["median_snr_db"] = 6.0
+
+
+def box_nothing_refers_to(case: dict[str, Any]) -> None:
+    case["boxes"]["spare"] = dict(case["boxes"]["r20"])
+
+
+@pytest.mark.parametrize(
+    ("number", "edit", "message"),
+    [
+        ("c01", wrong_width, "not one grid cell"),
+        ("c01", merged_single_cell, "merged is true on one grid cell"),
+        ("c01", hour_names_a_box_its_receipts_do_not_use, "does not use"),
+        ("c01", unknown_key_in_a_receipt, "unknown keys"),
+        ("c01", unknown_key_in_an_hour, "unknown keys"),
+        ("c24", kept_hour_key_in_a_dropped_hour, "unknown keys"),
+        ("c01", box_nothing_refers_to, "no expected row names"),
+    ],
+)
+def test_a_malformed_edit_fails_the_checks(
+    number: str, edit: Callable[[dict[str, Any]], None], message: str
+) -> None:
+    """The reviewer's edits on PR #66, each of which passed the checks at 75a5b8a."""
+    case = copy.deepcopy(case_by_number(number))
+    check_case(case)
+    edit(case)
+    with pytest.raises(AssertionError, match=message):
+        check_case(case)
 
 
 @pytest.mark.parametrize(
