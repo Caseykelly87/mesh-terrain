@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from fixture_rows import LINK_RULES_CASES, read_cases
-from link_rules_expected import HOURS_SEED, RECEIPTS_SEED, box_columns, seeds
+from link_rules_expected import HOURS_SEED, RECEIPTS_SEED, box_columns, link_cases, seeds
 
 
 @pytest.mark.parametrize("path", [RECEIPTS_SEED, HOURS_SEED], ids=lambda path: path.name)
@@ -21,16 +21,19 @@ def seed_rows(path: Path) -> list[dict[str, str]]:
 
 
 def test_every_expected_receipt_and_link_hour_is_in_a_seed() -> None:
-    cases = read_cases(LINK_RULES_CASES)
+    cases = link_cases()
     receipts = sum(len(case["expected_receipts"]) for case in cases)
     hours = sum(len(case["expected_link_hours"]) for case in cases)
     assert (len(seed_rows(RECEIPTS_SEED)), len(seed_rows(HOURS_SEED))) == (receipts, hours)
-    assert len(cases) == 51
+    assert len(read_cases(LINK_RULES_CASES)) == 51
+    assert [case["case_id"][:3] for case in cases[51:]] == [f"s{n:02d}" for n in range(5, 13)]
 
 
 def test_the_seeds_hold_the_two_one_box_drops_and_three_contradicted_direct_hops() -> None:
     hours = seed_rows(HOURS_SEED)
-    one_box = sorted(row["case_id"] for row in hours if row["rule"] == "lnk_02")
+    one_box = sorted(
+        row["case_id"] for row in hours if row["rule"] == "lnk_02" and row["case_id"][0] == "c"
+    )
     assert one_box == [
         "c24_q6_two_fallback_boxes_drop_the_hour",
         "c42_gateway_two_fallback_boxes_drop_the_hour",

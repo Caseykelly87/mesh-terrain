@@ -20,7 +20,9 @@ The build runs three times, after `dbt seed --full-refresh`. First `dbt run
 loaded and `dbt build` runs incrementally, so the core model's incremental
 path must pick up the new snapshot, replace a copy with an earlier one and add
 a broker flag a later copy carries; then `dbt build --full-refresh`. Both
-builds must pass every test and leave the same core rows.
+builds must pass every test, every singular test in `dbt/tests` among them,
+and leave the same rows in `fct_node_position`, `fct_rx_observation` and
+`int_link_window`.
 
 Dropping the schema also drops the staging views on the development target
 that read it (`cascade`); the next fixture build recreates them. Skipped where
@@ -50,34 +52,16 @@ from ingester import load
 FIXTURE_PREFIX = "test_fixture_"
 FIXTURE_PATTERN = re.compile(rf"{FIXTURE_PREFIX}[0-9a-f]{{12}}")
 LATER_SNAPSHOT = "staging-fixture-b"
-CORE_ROWS = sql.SQL(
-    "select delivery_key, snapshot_id, received_at, precision_bits, seen_public, seen_meshstl, "
-    "precise_source "
-    "from {} order by delivery_key"
-)
-NAMED_TESTS = (
-    "assert_ing_06_first_copy_kept",
-    "assert_pos_01_fixture_positions",
-    "assert_pos_01_half_widths_formula",
-    "assert_pos_01_quality_and_width_by_precision",
-    "assert_pos_02_fixture_positions_in_core",
-    "assert_pos_02_inside_msa",
-    "assert_pos_03_no_zero_position",
-    "assert_pos_03_zero_mapped_count",
-    "assert_pos_04_precise_flag",
-    "assert_lnk_01_direct_hop_contradicted",
-    "assert_lnk_01_fixture_resolution",
-    "assert_lnk_02_finest_box_in_hour",
-    "assert_lnk_02_floor_box",
-    "assert_lnk_02_no_chaining",
-    "assert_lnk_02_one_box_per_end",
-    "assert_lnk_02_stationary_floor",
-    "assert_lnk_04_fixture_link_hours",
-    "assert_lnk_04_fixture_receipts",
-    "assert_lnk_05_hour_box",
-    "assert_lnk_07_fixture_point_order",
-    "assert_lnk_07_link_geometry",
-)
+# The core tables whose incremental and full-refresh rows must agree, each
+# read in full in its key order; geometry is compared as text.
+CORE_TABLES = {
+    "fct_node_position": "delivery_key",
+    "fct_rx_observation": "delivery_key",
+    "int_link_window": "tx_node_hash, gateway_node_hash, hour",
+}
+# Every singular test in dbt/tests runs in the fixture build, so a config
+# change that disabled one fails the build test instead of passing quietly.
+SINGULAR_TESTS = tuple(sorted(path.stem for path in (DBT_DIR / "tests").glob("*.sql")))
 # The tests that report a count on every run, Casey's lnk_06 count
 # (2026-11-14), warn by design; each must warn with the fixture's count.
 REPORTING_TESTS = {"assert_lnk_06_excluded_count": 7}
@@ -140,9 +124,14 @@ def reported_status(entry: dict[str, Any]) -> str:
     return str(entry["status"])
 
 
-def core_rows(conn: psycopg.Connection) -> list[tuple[Any, ...]]:
-    table = sql.Identifier(f"core_{DEVELOPMENT_TARGET}", "fct_node_position")
-    rows = conn.execute(CORE_ROWS.format(table)).fetchall()
+def core_rows(conn: psycopg.Connection) -> dict[str, list[tuple[Any, ...]]]:
+    """Every row of each table in CORE_TABLES, in its key order."""
+    rows = {}
+    for table, key in CORE_TABLES.items():
+        query = sql.SQL("select * from {} order by {}").format(
+            sql.Identifier(f"core_{DEVELOPMENT_TARGET}", table), sql.SQL(key)
+        )
+        rows[table] = conn.execute(query).fetchall()
     conn.rollback()
     return rows
 
@@ -184,14 +173,17 @@ def test_every_node_of_the_fixture_build_passes(builds: dict[str, Any], build: s
 
 @pytest.mark.parametrize("build", ["incremental", "full_refresh"])
 def test_the_fixture_build_runs_the_contract_tests(builds: dict[str, Any], build: str) -> None:
-    assert {*NAMED_TESTS, *REPORTING_TESTS} <= set(builds[build])
+    assert set(SINGULAR_TESTS) <= set(builds[build])
 
 
 def test_incremental_and_full_refresh_builds_leave_the_same_core_rows(
     builds: dict[str, Any],
 ) -> None:
     assert builds["incremental_rows"] == builds["full_refresh_rows"]
-    assert len(builds["full_refresh_rows"]) > 100
+    counts = {table: len(rows) for table, rows in builds["full_refresh_rows"].items()}
+    assert counts["fct_node_position"] > 100
+    assert counts["fct_rx_observation"] > 100
+    assert counts["int_link_window"] >= 40
 
 
 def test_the_fixture_schema_is_gone_after_use() -> None:
