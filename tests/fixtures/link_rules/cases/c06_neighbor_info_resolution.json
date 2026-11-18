@@ -1,0 +1,49 @@
+{
+  "case_id": "c06_neighbor_info_resolution",
+  "title": "NeighborInfo resolves, agrees with, contradicts or fails to resolve the relay byte",
+  "rules": ["lnk_01", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "c06-g heard by radio, between 07:00 and 07:30: c06-r1 and c06-r2 (both 0x51), c06-r3 (0x52) and c06-r5 (0x53). Its own NeighborInfo at 08:00 lists c06-r1 (0x51), c06-r4 (0x52), c06-r5 (0x53), c06-r6 (0x54), c06-r7 (0x55) and c06-r8 (0x55). All of it is within 24 hours before every receipt. The receipts come from c06-s (0x50).",
+    "10:10, relay 0x51: two candidates, so relay_node does not resolve; NeighborInfo lists exactly one neighbour with 0x51, c06-r1. Only one method resolves: relayer c06-r1, link_source neighbor_info (lnk_01).",
+    "10:20, relay 0x52: relay_node resolves to c06-r3 and NeighborInfo to c06-r4. They differ: dropped by lnk_01.",
+    "10:30, relay 0x53: both resolve to c06-r5 and agree: link_source relay_node.",
+    "10:40, relay 0x54: no candidate has 0x54; NeighborInfo lists only c06-r6: relayer c06-r6, link_source neighbor_info.",
+    "10:50, relay 0x55: no candidate, and NeighborInfo lists two neighbours with 0x55, so neither method resolves: dropped by lnk_01.",
+    "c06-r1, c06-r5, c06-r6 and c06-g are stationary on one 20-bit or 16-bit cell each (lnk_02); the distances to g16 are 2249.605, 2809.109 and 2221.417 m (lnk_05), so the three resolved receipts are counted.",
+    "Each resolved relayer has 1 counted packet in the 10:00 hour: three link-hours, each dropped by lnk_04."
+  ],
+  "messages": [
+    {"delivery_key": "c06-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c06-g", "origin_low_byte": 10, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c06-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c06-r1", "origin_low_byte": 81, "gateway_pseudonym": "c06-r1", "gateway_low_byte": 81, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903714816, "precision_bits": 20},
+    {"delivery_key": "c06-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c06-r5", "origin_low_byte": 83, "gateway_pseudonym": "c06-r5", "gateway_low_byte": 83, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386226176, "longitude_i": -904001536, "precision_bits": 20},
+    {"delivery_key": "c06-m004", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c06-r6", "origin_low_byte": 84, "gateway_pseudonym": "c06-r6", "gateway_low_byte": 84, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6004, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385775616, "longitude_i": -904001536, "precision_bits": 20},
+    {"delivery_key": "c06-m005", "received_at": "2026-10-23T07:00:00Z", "origin_pseudonym": "c06-r1", "origin_low_byte": 81, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6005, "relay_node": null, "portnum": 67},
+    {"delivery_key": "c06-m006", "received_at": "2026-10-23T07:10:00Z", "origin_pseudonym": "c06-r2", "origin_low_byte": 81, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6006, "relay_node": null, "portnum": 67},
+    {"delivery_key": "c06-m007", "received_at": "2026-10-23T07:20:00Z", "origin_pseudonym": "c06-r3", "origin_low_byte": 82, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6007, "relay_node": null, "portnum": 67},
+    {"delivery_key": "c06-m008", "received_at": "2026-10-23T07:30:00Z", "origin_pseudonym": "c06-r5", "origin_low_byte": 83, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6008, "relay_node": null, "portnum": 67},
+    {"delivery_key": "c06-m009", "received_at": "2026-10-23T08:00:00Z", "origin_pseudonym": "c06-g", "origin_low_byte": 10, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6009, "relay_node": null, "portnum": 71, "neighbour_pseudonyms": ["c06-r1", "c06-r4", "c06-r5", "c06-r6", "c06-r7", "c06-r8"], "neighbour_low_bytes": [81, 82, 83, 84, 85, 85]},
+    {"delivery_key": "c06-m010", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c06-s", "origin_low_byte": 80, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6010, "relay_node": 81, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c06-m011", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c06-s", "origin_low_byte": 80, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6011, "relay_node": 82, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c06-m012", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c06-s", "origin_low_byte": 80, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6012, "relay_node": 83, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100},
+    {"delivery_key": "c06-m013", "received_at": "2026-10-23T10:40:00Z", "origin_pseudonym": "c06-s", "origin_low_byte": 80, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6013, "relay_node": 84, "portnum": 1, "rx_snr": 8.0, "rx_rssi": -105},
+    {"delivery_key": "c06-m014", "received_at": "2026-10-23T10:50:00Z", "origin_pseudonym": "c06-s", "origin_low_byte": 80, "gateway_pseudonym": "c06-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 6014, "relay_node": 85, "portnum": 1, "rx_snr": 9.0, "rx_rssi": -110}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "r1_20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903716864, "east_i": -903712768, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521},
+    "r5_20": {"south_i": 386224128, "north_i": 386228224, "west_i": -904003584, "east_i": -903999488, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.734498, "half_width_ew_m": 17.834942},
+    "r6_20": {"south_i": 385773568, "north_i": 385777664, "west_i": -904003584, "east_i": -903999488, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.734322, "half_width_ew_m": 17.846096}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c06-m010", "outcome": "counted", "relayer": "c06-r1", "link_source": "neighbor_info", "relayer_box": "r1_20", "gateway_box": "g16", "distance_m": 2249.604889},
+    {"delivery_key": "c06-m011", "outcome": "dropped", "rule": "lnk_01"},
+    {"delivery_key": "c06-m012", "outcome": "counted", "relayer": "c06-r5", "link_source": "relay_node", "relayer_box": "r5_20", "gateway_box": "g16", "distance_m": 2809.109464},
+    {"delivery_key": "c06-m013", "outcome": "counted", "relayer": "c06-r6", "link_source": "neighbor_info", "relayer_box": "r6_20", "gateway_box": "g16", "distance_m": 2221.41659},
+    {"delivery_key": "c06-m014", "outcome": "dropped", "rule": "lnk_01"}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c06-r1", "gateway": "c06-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c06-m010"], "packets": 1, "outcome": "dropped", "rule": "lnk_04"},
+    {"relayer": "c06-r5", "gateway": "c06-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c06-m012"], "packets": 1, "outcome": "dropped", "rule": "lnk_04"},
+    {"relayer": "c06-r6", "gateway": "c06-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c06-m013"], "packets": 1, "outcome": "dropped", "rule": "lnk_04"}
+  ]
+}

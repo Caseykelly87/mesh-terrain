@@ -1,0 +1,31 @@
+{
+  "case_id": "c27_coarse_cell_not_read",
+  "title": "A 14-bit cell beside a usable 20-bit cell is not read",
+  "rules": ["pos_01", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "pos_01 makes 12 to 14 bits coarse, not usable, and lnk_02 reads only usable positions. c27-r's 14-bit cell, about 6 km south and not overlapping the 20-bit cell, is not read.",
+    "The one position read is the 20-bit cell: stationary at r20. Had the 14-bit cell been read, c27-r would have moved with no position within 30 minutes and every receipt would drop.",
+    "Kept with 3 packets at 2745.603 m. Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont).",
+    "position_uncertainty_m is the larger half-width of each end's box, r20 22.734410 m plus g16 363.750397 m, = 386.484807 m (lnk_05)."
+  ],
+  "messages": [
+    {"delivery_key": "c27-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c27-g", "origin_low_byte": 10, "gateway_pseudonym": "c27-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 27001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c27-m002", "received_at": "2026-10-21T09:05:00Z", "origin_pseudonym": "c27-r", "origin_low_byte": 20, "gateway_pseudonym": "c27-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 27002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c27-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c27-r", "origin_low_byte": 20, "gateway_pseudonym": "c27-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 27003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385482752, "longitude_i": -903741440, "precision_bits": 14},
+    {"delivery_key": "c27-m004", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c27-r", "origin_low_byte": 20, "gateway_pseudonym": "c27-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 27004, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c27-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c27-r", "origin_low_byte": 20, "gateway_pseudonym": "c27-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 27005, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c27-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c27-r", "origin_low_byte": 20, "gateway_pseudonym": "c27-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 27006, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "r20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c27-m004", "outcome": "counted", "relayer": "c27-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c27-m005", "outcome": "counted", "relayer": "c27-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c27-m006", "outcome": "counted", "relayer": "c27-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c27-r", "gateway": "c27-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c27-m004", "c27-m005", "c27-m006"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 2745.603337, "relayer_box": "r20", "relayer_precise_source": false, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 386.484807}
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "case_id": "c28_outside_the_msa_not_read",
+  "title": "A cell outside the MSA beside one inside is not read; a node with cells only outside has no position",
+  "rules": ["pos_02", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "Only positions inside the MSA polygon (the seed dbt/seeds/msa_boundary.csv) enter core (pos_02), and lnk_02 reads only those. c28-ra's second cell is near 38.6 N, 92.0 W, outside the polygon, so c28-ra is stationary on its one inside cell.",
+    "Kept with 3 packets at 2745.603 m. Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont).",
+    "position_uncertainty_m is the larger half-width of each end's box, ra_20 22.734410 m plus g16 363.750397 m, = 386.484807 m (lnk_05).",
+    "c28-rb's only cell is near 38.7 N, 92.1 W, outside: no position, its receipt is dropped by lnk_02."
+  ],
+  "messages": [
+    {"delivery_key": "c28-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c28-g", "origin_low_byte": 10, "gateway_pseudonym": "c28-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 28001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c28-m002", "received_at": "2026-10-21T09:05:00Z", "origin_pseudonym": "c28-ra", "origin_low_byte": 23, "gateway_pseudonym": "c28-ra", "gateway_low_byte": 23, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 28002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c28-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c28-ra", "origin_low_byte": 23, "gateway_pseudonym": "c28-ra", "gateway_low_byte": 23, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 28003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -920000512, "precision_bits": 20},
+    {"delivery_key": "c28-m004", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c28-rb", "origin_low_byte": 24, "gateway_pseudonym": "c28-rb", "gateway_low_byte": 24, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 28004, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 387000320, "longitude_i": -920999936, "precision_bits": 20},
+    {"delivery_key": "c28-m005", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c28-ra", "origin_low_byte": 23, "gateway_pseudonym": "c28-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 28005, "relay_node": 23, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c28-m006", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c28-ra", "origin_low_byte": 23, "gateway_pseudonym": "c28-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 28006, "relay_node": 23, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c28-m007", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c28-ra", "origin_low_byte": 23, "gateway_pseudonym": "c28-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 28007, "relay_node": 23, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100},
+    {"delivery_key": "c28-m008", "received_at": "2026-10-23T10:40:00Z", "origin_pseudonym": "c28-rb", "origin_low_byte": 24, "gateway_pseudonym": "c28-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 28008, "relay_node": 24, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "ra_20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c28-m005", "outcome": "counted", "relayer": "c28-ra", "link_source": "relay_node", "relayer_box": "ra_20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c28-m006", "outcome": "counted", "relayer": "c28-ra", "link_source": "relay_node", "relayer_box": "ra_20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c28-m007", "outcome": "counted", "relayer": "c28-ra", "link_source": "relay_node", "relayer_box": "ra_20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c28-m008", "outcome": "dropped", "rule": "lnk_02", "relayer": "c28-rb", "link_source": "relay_node"}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c28-ra", "gateway": "c28-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c28-m005", "c28-m006", "c28-m007"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 2745.603337, "relayer_box": "ra_20", "relayer_precise_source": false, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 386.484807}
+  ]
+}

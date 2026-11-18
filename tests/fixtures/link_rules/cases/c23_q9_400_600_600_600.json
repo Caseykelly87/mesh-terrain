@@ -1,0 +1,36 @@
+{
+  "case_id": "c23_q9_400_600_600_600",
+  "title": "Receipts at 400, 600, 600 and 600 m: the 400 m receipt fails first and the hour is kept with 3",
+  "rules": ["lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "c23-r's fix P1 (09:55) is about 400 m east of c23-g's fix and P2 (10:10) about 600 m east; P1 and P2 are about 200 m apart, so they are not the same place.",
+    "At 10:05 the 7-day window holds only P1: stationary, own box p1. At 10:14, 10:18 and 10:22 it holds P1 and P2: moved, so each takes the position nearest in time within 30 minutes, P2 (4, 8 and 12 minutes before) rather than P1 (19, 23 and 27 minutes before). c23-r is not stationary at every receipt, so there is no hour box (lnk_02, D2).",
+    "Per receipt (lnk_05): the 10:05 receipt is 399.999 m on p1 and fails; the other three are 599.998 m on p2 and pass.",
+    "The one-box test reads only the counted receipts (Q9 (a)): all three use p2 and g32, so the hour is not dropped; 3 packets; median 600 m: kept. Reading every receipt would drop the hour for two boxes.",
+    "The failed receipt's SNR 1 dB and RSSI -60 dBm stay out of the medians. Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont).",
+    "position_uncertainty_m is the larger half-width of each end's box, p2 0.005550 m plus g32 0.005550 m, = 0.011101 m (lnk_05)."
+  ],
+  "messages": [
+    {"delivery_key": "c23-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c23-g", "origin_low_byte": 10, "gateway_pseudonym": "c23-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 23001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385909866, "longitude_i": -904344341, "precision_bits": 32},
+    {"delivery_key": "c23-m002", "received_at": "2026-10-23T09:55:00Z", "origin_pseudonym": "c23-r", "origin_low_byte": 20, "gateway_pseudonym": "c23-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 23002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385909865, "longitude_i": -904298429, "precision_bits": 32},
+    {"delivery_key": "c23-m003", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c23-r", "origin_low_byte": 20, "gateway_pseudonym": "c23-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 23003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385909864, "longitude_i": -904275473, "precision_bits": 32},
+    {"delivery_key": "c23-m004", "received_at": "2026-10-23T10:05:00Z", "origin_pseudonym": "c23-r", "origin_low_byte": 20, "gateway_pseudonym": "c23-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 23004, "relay_node": 20, "portnum": 1, "rx_snr": 1.0, "rx_rssi": -60},
+    {"delivery_key": "c23-m005", "received_at": "2026-10-23T10:14:00Z", "origin_pseudonym": "c23-r", "origin_low_byte": 20, "gateway_pseudonym": "c23-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 23005, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c23-m006", "received_at": "2026-10-23T10:18:00Z", "origin_pseudonym": "c23-r", "origin_low_byte": 20, "gateway_pseudonym": "c23-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 23006, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c23-m007", "received_at": "2026-10-23T10:22:00Z", "origin_pseudonym": "c23-r", "origin_low_byte": 20, "gateway_pseudonym": "c23-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 23007, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g32": {"south_i": 385909866, "north_i": 385909867, "west_i": -904344341, "east_i": -904344340, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356},
+    "p1": {"south_i": 385909865, "north_i": 385909866, "west_i": -904298429, "east_i": -904298428, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356},
+    "p2": {"south_i": 385909864, "north_i": 385909865, "west_i": -904275473, "east_i": -904275472, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c23-m004", "outcome": "dropped", "rule": "lnk_05", "relayer": "c23-r", "link_source": "relay_node", "relayer_box": "p1", "gateway_box": "g32", "distance_m": 399.998748},
+    {"delivery_key": "c23-m005", "outcome": "counted", "relayer": "c23-r", "link_source": "relay_node", "relayer_box": "p2", "gateway_box": "g32", "distance_m": 599.998122},
+    {"delivery_key": "c23-m006", "outcome": "counted", "relayer": "c23-r", "link_source": "relay_node", "relayer_box": "p2", "gateway_box": "g32", "distance_m": 599.998122},
+    {"delivery_key": "c23-m007", "outcome": "counted", "relayer": "c23-r", "link_source": "relay_node", "relayer_box": "p2", "gateway_box": "g32", "distance_m": 599.998122}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c23-r", "gateway": "c23-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c23-m005", "c23-m006", "c23-m007"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 599.998122, "relayer_box": "p2", "relayer_precise_source": false, "gateway_box": "g32", "gateway_precise_source": false, "position_uncertainty_m": 0.011101}
+  ]
+}

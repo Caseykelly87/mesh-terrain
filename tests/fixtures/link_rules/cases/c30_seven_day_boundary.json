@@ -1,0 +1,27 @@
+{
+  "case_id": "c30_seven_day_boundary",
+  "title": "A position exactly 7 days before is read; 7 days and 1 minute before is not",
+  "rules": ["lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "c30-r's only position was sent at 2026-10-16 10:00:00. The receipt at 2026-10-23 10:00:00 is exactly 7 days later; 7 days is inclusive (Q5), so the position is read: stationary on r20. It passes lnk_05 at 2745.603 m and is counted.",
+    "The receipt at 10:01:00 is 7 days and 1 minute later: the position is outside the window, nothing lies within 30 minutes, so no position: dropped by lnk_02.",
+    "The 10:00 link-hour has 1 counted packet: dropped by lnk_04."
+  ],
+  "messages": [
+    {"delivery_key": "c30-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c30-g", "origin_low_byte": 10, "gateway_pseudonym": "c30-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 30001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c30-m002", "received_at": "2026-10-16T10:00:00Z", "origin_pseudonym": "c30-r", "origin_low_byte": 20, "gateway_pseudonym": "c30-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 30002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c30-m003", "received_at": "2026-10-23T10:00:00Z", "origin_pseudonym": "c30-r", "origin_low_byte": 20, "gateway_pseudonym": "c30-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 30003, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c30-m004", "received_at": "2026-10-23T10:01:00Z", "origin_pseudonym": "c30-r", "origin_low_byte": 20, "gateway_pseudonym": "c30-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 30004, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "r20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c30-m003", "outcome": "counted", "relayer": "c30-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c30-m004", "outcome": "dropped", "rule": "lnk_02", "relayer": "c30-r", "link_source": "relay_node"}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c30-r", "gateway": "c30-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c30-m003"], "packets": 1, "outcome": "dropped", "rule": "lnk_04"}
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "case_id": "c10_gateway_resolves_as_its_own_relayer",
+  "title": "The relay byte resolves to the gateway itself through its own packets",
+  "rules": ["lnk_01", "lnk_03"],
+  "reasoning": [
+    "lnk_01's candidates include the gateway's own packets. c10-g (0x81) uplinked its own telemetry at 08:00 (relay_node null, its own packet, so not a receipt) and is the only node heard with byte 0x81.",
+    "Receipts from c10-s with relay_node 0x81 therefore resolve to c10-g with link_source relay_node (lnk_01), and relayer equals gateway: dropped by lnk_03.",
+    "No link-hour."
+  ],
+  "messages": [
+    {"delivery_key": "c10-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c10-g", "origin_low_byte": 129, "gateway_pseudonym": "c10-g", "gateway_low_byte": 129, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 10001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c10-m002", "received_at": "2026-10-23T08:00:00Z", "origin_pseudonym": "c10-g", "origin_low_byte": 129, "gateway_pseudonym": "c10-g", "gateway_low_byte": 129, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 10002, "relay_node": null, "portnum": 67},
+    {"delivery_key": "c10-m003", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c10-s", "origin_low_byte": 128, "gateway_pseudonym": "c10-g", "gateway_low_byte": 129, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 10003, "relay_node": 129, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c10-m004", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c10-s", "origin_low_byte": 128, "gateway_pseudonym": "c10-g", "gateway_low_byte": 129, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 10004, "relay_node": 129, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c10-m005", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c10-s", "origin_low_byte": 128, "gateway_pseudonym": "c10-g", "gateway_low_byte": 129, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 10005, "relay_node": 129, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {},
+  "expected_receipts": [
+    {"delivery_key": "c10-m003", "outcome": "dropped", "rule": "lnk_03", "relayer": "c10-g", "link_source": "relay_node"},
+    {"delivery_key": "c10-m004", "outcome": "dropped", "rule": "lnk_03", "relayer": "c10-g", "link_source": "relay_node"},
+    {"delivery_key": "c10-m005", "outcome": "dropped", "rule": "lnk_03", "relayer": "c10-g", "link_source": "relay_node"}
+  ],
+  "expected_link_hours": []
+}

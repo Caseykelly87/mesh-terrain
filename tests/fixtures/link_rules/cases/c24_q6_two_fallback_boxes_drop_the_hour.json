@@ -1,0 +1,34 @@
+{
+  "case_id": "c24_q6_two_fallback_boxes_drop_the_hour",
+  "title": "A moved relayer whose counted receipts take two different fallback fixes: the hour is dropped and counted",
+  "rules": ["lnk_02", "lnk_05"],
+  "reasoning": [
+    "c24-r's 20-bit cells of 21 and 22 October are about 1 km apart, so it has moved at every receipt (lnk_02).",
+    "Fallback: at 10:10 the fix X (10:05, 5 minutes) is within 30 minutes and Y (10:45, 35 minutes) is not; at 10:40 Y (5 minutes) is and X (35 minutes) is not; at 10:50 Y (5 minutes) is and X (45 minutes) is not.",
+    "Each receipt passes lnk_05 on its own box: 1768.971 m on x32, 1758.882 m on y32. All three are counted.",
+    "Over the counted receipts the relayer used two boxes, x32 and y32, so the link-hour is dropped and counted in mart_data_quality (lnk_02, Q6 and Q9). The one-box test comes before lnk_04's 3 packets, so the rule is lnk_02."
+  ],
+  "messages": [
+    {"delivery_key": "c24-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c24-g", "origin_low_byte": 10, "gateway_pseudonym": "c24-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 24001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c24-m002", "received_at": "2026-10-21T09:05:00Z", "origin_pseudonym": "c24-r", "origin_low_byte": 20, "gateway_pseudonym": "c24-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 24002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c24-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c24-r", "origin_low_byte": 20, "gateway_pseudonym": "c24-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 24003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386091008, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c24-m004", "received_at": "2026-10-23T10:05:00Z", "origin_pseudonym": "c24-r", "origin_low_byte": 20, "gateway_pseudonym": "c24-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 24004, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385999977, "longitude_i": -903770411, "precision_bits": 32},
+    {"delivery_key": "c24-m005", "received_at": "2026-10-23T10:45:00Z", "origin_pseudonym": "c24-r", "origin_low_byte": 20, "gateway_pseudonym": "c24-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 24005, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385954936, "longitude_i": -903770425, "precision_bits": 32},
+    {"delivery_key": "c24-m006", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c24-r", "origin_low_byte": 20, "gateway_pseudonym": "c24-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 24006, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c24-m007", "received_at": "2026-10-23T10:40:00Z", "origin_pseudonym": "c24-r", "origin_low_byte": 20, "gateway_pseudonym": "c24-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 24007, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c24-m008", "received_at": "2026-10-23T10:50:00Z", "origin_pseudonym": "c24-r", "origin_low_byte": 20, "gateway_pseudonym": "c24-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 24008, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "x32": {"south_i": 385999977, "north_i": 385999978, "west_i": -903770411, "east_i": -903770410, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356},
+    "y32": {"south_i": 385954936, "north_i": 385954937, "west_i": -903770425, "east_i": -903770424, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c24-m006", "outcome": "counted", "relayer": "c24-r", "link_source": "relay_node", "relayer_box": "x32", "gateway_box": "g16", "distance_m": 1768.970669},
+    {"delivery_key": "c24-m007", "outcome": "counted", "relayer": "c24-r", "link_source": "relay_node", "relayer_box": "y32", "gateway_box": "g16", "distance_m": 1758.882174},
+    {"delivery_key": "c24-m008", "outcome": "counted", "relayer": "c24-r", "link_source": "relay_node", "relayer_box": "y32", "gateway_box": "g16", "distance_m": 1758.882174}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c24-r", "gateway": "c24-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c24-m006", "c24-m007", "c24-m008"], "packets": 3, "outcome": "dropped", "rule": "lnk_02"}
+  ]
+}
