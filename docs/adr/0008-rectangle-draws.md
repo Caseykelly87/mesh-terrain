@@ -12,7 +12,7 @@ The engine places each endpoint at random inside its position box 16 times per p
 The real box is the `lnk_02` box of `docs/data-quality-contract.md`: a rectangle in latitude and longitude, one cell or the rectangle around merged fixes, with edges stored as whole numbers in 1e-7 degrees and half-widths `half_width_ns_m` and `half_width_ew_m` (PLAN, Data model). Two things make the square wrong:
 
 - The square trims the long side. A 16-bit cell at the test tile (x72y429, latitude 38.69) has half-widths 363.8 m north-south and 285.1 m east-west, so the square drops 78.7 m from each north and south end. Two 32-bit fixes 30 m apart on one parallel merge into a box about 30 m by 1 cm, whose square is 1 cm across (reviewer, PR #70).
-- The rectangle is turned in EPSG:26915. East of the zone's central meridian (93 degrees west), true north lies west of grid north by the meridian convergence: 1.58 degrees at the tile's southwest corner, 1.66 at its northeast, 1.62 at its centre (pyproj `get_factors`). A cell drawn as an unrotated grid rectangle of the right size puts its corners 13 m from the real ones at 16 bits and 26 m at 15 bits, the coarsest cell `lnk_02` reads.
+- The rectangle is turned in EPSG:26915. East of the zone's central meridian (93 degrees west), true north lies west of grid north by the meridian convergence: 1.58 degrees at the tile's southwest corner, 1.66 at its northeast, 1.62 at its centre (pyproj `get_factors`). An unrotated grid rectangle of the right size puts a cell's corners 13 m from the real ones at 16 bits and 26 m at 15 bits, the coarsest cell `lnk_02` reads.
 
 ## Options
 
@@ -22,7 +22,7 @@ The real box is the `lnk_02` box of `docs/data-quality-contract.md`: a rectangle
 2. The same four edges, with the four corners converted once at the boundary and each draw placed between the converted corners in metres (a bilinear blend). Advantage: no arithmetic on degrees. Cost: converted parallels bow away from the pole, so a draw near the north edge can fall outside the box by up to 5 mm on a 16-bit cell and 20 mm on a 15-bit cell, the largest box `lnk_02` produces.
 3. Two metre half-widths, `box_half_width_ns_m` and `box_half_width_ew_m`, the rectangle turned by the convergence at its centre. Advantage: metres, which a caller without cells can supply. Cost: on a grid scaled by 1.0002, a 0.08 m strip at a 16-bit cell's north and south edges is never reached, and a sign error in the turn is easy to make and hard to see.
 
-Recommend option 1: it is exact and the code is the shortest.
+Recommend option 1: exact, with the shortest code.
 
 Under every option `box_half_width_m` and its `EndpointBox` stay, for callers with no cells and the fixtures, never both forms in one layer.
 
@@ -30,7 +30,7 @@ Under every option the `engine_inputs` DEM edge check tests the box's corners, n
 
 ### Question 2: versions
 
-Casey (PR #73, item 5): "if the input layers or the manifest change shape, the version that describes them bumps too, not only engine_version." No version names the input point layers today: `schema_version` fixes the artifact columns only, not the input layers. The edges add four optional input columns; no artifact column changes. The versions sit only in the manifest and square layers draw as today, so the fixture run keeps its `content_sha256` values.
+Casey (PR #73, item 5): "if the input layers or the manifest change shape, the version that describes them bumps too, not only engine_version." No version names the input point layers today: `schema_version` fixes the artifact columns only, not the input layers. The edges add four optional input columns; no artifact column changes. Square layers draw as today and versions sit only in the manifest, so fixture hashes hold.
 
 1. `schema_version` 1.2.0 to 1.3.0, its scope widened to the input point layers' columns (minor: four optional columns added); `manifest_version` stays 1.1.0 (no field added), so 1.2.0 stays free for the export-rule unit; `engine_version` 0.1.0 to 0.2.0 (edge layers draw differently). Advantage: one version for every column the engine reads or writes. Cost: a `schema_version` bump with `predictions.parquet` unchanged.
 2. A new manifest field `input_schema_version`, 1.0.0 for today's layers and 1.1.0 with the edges, and a field naming each input layer's box form: `manifest_version` 1.1.0 to 1.2.0 (two fields added); `schema_version` stays 1.2.0; `engine_version` 0.1.0 to 0.2.0. Advantage: a reader sees the box form without opening the layer. Cost: 1.2.0 cannot stay free; the export-rule unit takes 1.3.0.
