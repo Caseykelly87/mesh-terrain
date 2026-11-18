@@ -9,8 +9,10 @@
 -- copy of its packet, so only another copy of the same delivery, in another
 -- snapshot, collapses into it. Ties on received_at go to the snapshot and
 -- then the delivery key that sort first, so a rebuild keeps the same row.
--- Coordinates stay out: positions are stg_position's, and nothing leaves
--- staging at 0, 0 (pos_03). hop_limit stays out: it never decides anything.
+-- An SNR that is not a number lands as missing (lnk_06: impossible values
+-- are treated as missing). Coordinates stay out: positions are
+-- stg_position's, and nothing leaves staging at 0, 0 (pos_03). hop_start and
+-- hop_limit stay out: no link rule reads either (lnk_01).
 
 with deliveries as (
     select
@@ -70,7 +72,7 @@ select
     relay_node,
     via_mqtt,
     rx_time,
-    rx_snr,
+    case when rx_snr <> 'NaN'::real then rx_snr end as rx_snr,
     rx_rssi,
     channel,
     portnum,
