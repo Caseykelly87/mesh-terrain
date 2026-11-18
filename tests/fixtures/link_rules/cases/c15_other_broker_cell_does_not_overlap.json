@@ -1,6 +1,6 @@
 {
   "case_id": "c15_other_broker_cell_does_not_overlap",
-  "title": "A MeshSTL cell 300 m from the public-broker cell: moved",
+  "title": "A MeshSTL cell 272.8 m from the public-broker cell: moved",
   "rules": ["lnk_02"],
   "reasoning": [
     "lnk_02 reads both brokers together. c15-r's public 20-bit cell and its MeshSTL 20-bit cell are 272.813 m apart: their latitude intervals are disjoint, so they do not overlap, and they are beyond the 40 m floor. c15-r has moved.",

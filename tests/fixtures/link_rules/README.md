@@ -17,6 +17,7 @@ Every outcome was decided by hand from the contract on main (`docs/data-quality-
 - Half-widths: `pos_01`'s WGS84 formula, at the stored latitude for a single cell and at the box midpoint's latitude for a merged rectangle, from `(north_i - south_i) / 2` and `(east_i - west_i) / 2` (PLAN, Data model).
 - Medians: `percentile_cont(0.5)`, which averages the two middle values of an even count (`lnk_04`).
 - Inside the MSA: `shapely` `contains` on the polygon joined from `dbt/seeds/msa_boundary.csv`.
+- Distance to the MSA boundary (c29's reasoning only): the shortest `pyproj.Geod(ellps="WGS84").inv` distance from the fix to a point on the polygon's edges, each edge a straight line in degrees, searched along its length. The nearest point in degrees is not the geodesic nearest point.
 
 ## The order the cases follow
 
@@ -93,7 +94,7 @@ Comparison: the counted set and each dropped receipt's rule exactly; relayer and
 | `c26_fallback_from_a_position_after_the_receipt` | nothing before, 20 minutes after, 2 hours after | lnk_02 |
 | `c27_coarse_cell_not_read` | a 14-bit cell | pos_01, lnk_02 |
 | `c28_outside_the_msa_not_read` | cells outside the MSA | pos_02, lnk_02 |
-| `c29_msa_edge_just_inside_and_just_outside` | fixes 28.9 m either side of the boundary | pos_02, lnk_02 |
+| `c29_msa_edge_just_inside_and_just_outside` | fixes about 28.7 m either side of the boundary | pos_02, lnk_02 |
 | `c30_seven_day_boundary` | exactly 7 days, and 7 days and 1 minute | lnk_02 |
 | `c31_position_at_zero_or_missing_a_coordinate` | 0, 0 and a missing latitude | pos_01, pos_03, lnk_02 |
 | `c32_precision_bits_above_32_or_negative` | 33 and -1 bits | pos_01, lnk_02 |
