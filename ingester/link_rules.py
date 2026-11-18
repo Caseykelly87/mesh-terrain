@@ -36,6 +36,13 @@ The hour is `received_at` truncated to the hour in UTC, half-open (Q2).
 positions `lnk_02` read for it in the hour, look-back included (`pos_04`;
 Casey, D7 and PR #66, Q1 (c)).
 
+`direct_hop_contradicted` is the count the fixture names
+`lnk_01_direct_hop_contradicted` (Q4 (a)). It counts receipts, under three
+readings ingest-eng proposed on PR #68: a receipt counts once, after
+`ing_06` keeps the first copy; both bytes are compared after reading 0 as
+0xFF; and a receipt counts when `lnk_01` drops it, whatever later rules
+would have done.
+
 Two readings the fixture does not pin, each a choice of this module: the
 copies `ing_06` drops are left out as receipts only, so every position
 delivery, including a later copy of one packet, counts for the precise flag;
