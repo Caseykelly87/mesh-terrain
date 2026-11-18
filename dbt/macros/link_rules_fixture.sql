@@ -3,17 +3,24 @@
   hand-worked results (tests/fixtures/link_rules/README.md, Loading and
   comparing), for the singular tests that run in the fixture build. The
   expected rows are the seeds tests/link_rules_expected.py copies from the
-  cases. cases is a list of case prefixes such as ['c16', 'c18'], or none for
-  every case. Tolerances are the README's: distances 1e-4 m, half-widths and
+  link-rules cases and the staging cases s05 onwards. cases is a list of case
+  prefixes such as ['c16', 'c18'], or none for every case in the seeds. Tolerances are the README's: distances 1e-4 m, half-widths and
   position_uncertainty_m 1e-6 m, everything else exact.
 #}
 
 {% macro case_filter(column, cases) -%}
     {%- if cases is none -%}
-        {{ column }} like 'c__-%'
+        split_part({{ column }}, '-', 1) in (
+            select split_part(delivery_key, '-', 1) from {{ ref('expected_link_receipts') }}
+        )
     {%- else -%}
         ({% for case in cases %}{{ column }} like '{{ case }}-%'{{ ' or ' if not loop.last }}{% endfor %})
     {%- endif -%}
+{%- endmacro %}
+
+{# The link-rules fixture's own cases, for the counts its README states across that fixture. #}
+{% macro link_rules_cases_only(column) -%}
+    {{ column }} like 'c__-%'
 {%- endmacro %}
 
 {% macro boxes_differ(actual, expected, ends=['relayer', 'gateway']) -%}
@@ -41,7 +48,6 @@
     kept_copies as (
         select delivery_key
         from {{ ref('stg_packet') }}
-        where snapshot_id = 'link-rules-fixture'
     ),
 
     actual as (

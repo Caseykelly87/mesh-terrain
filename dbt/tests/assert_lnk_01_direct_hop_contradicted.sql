@@ -12,5 +12,5 @@ select
 from {{ ref('int_rx_resolution') }}
 where
     direct_hop_contradicted
-    and {{ case_filter('delivery_key', none) }}
+    and {{ link_rules_cases_only('delivery_key') }}
 having count(*) <> 3 or count(*) filter (where delivery_key like 'c48-%') <> 3

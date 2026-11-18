@@ -1,0 +1,46 @@
+{
+  "case_id": "s09_mixed_precise_cells_off_the_hour_box",
+  "title": "An end off the hour box whose box covers a precise and an imprecise cell is not precise",
+  "rules": ["lnk_02", "lnk_05", "pos_04"],
+  "reasoning": [
+    "PLAN, Data model: precise_source is \"true when each cell the box covers under lnk_02 (those holding no finer position) was sent, among the positions lnk_02 read for that end in that hour ... in at least one delivery that qualifies under pos_04\".",
+    "s09-r sent two 32-bit fixes 7.997 m apart, P on MeshSTL only (s09-m002, 20 bits or more, so it qualifies under pos_04) and Q on the public broker (s09-m003); then c20, about 1 km north, at 23 10:40 (s09-m004); then a 32-bit fix inside g16 at 10:55 (s09-m005).",
+    "10:10, 10:20 and 10:30: the look-back holds P and Q, the same place by the floor: stationary, own box the rectangle around both cells, as c16's r_floor.",
+    "10:50: the look-back also holds c20, 1011.0 m from P: moved. The fallback takes the 10:55 fix (5 minutes) over c20 (10 minutes); its cell lies inside g16, so the two boxes overlap and the receipt fails lnk_05 (0.007055 m between centres).",
+    "The relayer is not stationary at the 10:50 receipt, which has a position for both ends, so there is no hour box for it: each receipt keeps its own box. The three counted receipts use the same rectangle: one box. 3 packets, kept.",
+    "relayer_precise_source reads the positions the counted receipts read: P and Q. The box covers both cells; P's qualifies and Q's does not, so the flag is false. Every covered cell must qualify, not just one.",
+    "Distance 2764.556856 m; medians 6.0 dB and -95.0 dBm; position_uncertainty_m 367.753194 m; gateway not precise."
+  ],
+  "messages": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s09-g", "origin_low_byte": 10, "gateway_pseudonym": "s09-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 9001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m002", "received_at": "2026-10-21T09:05:00Z", "origin_pseudonym": "s09-r", "origin_low_byte": 20, "gateway_pseudonym": "s09-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 9002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385999949, "longitude_i": -903655616, "precision_bits": 32},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "s09-r", "origin_low_byte": 20, "gateway_pseudonym": "s09-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 9003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385999949, "longitude_i": -903654698, "precision_bits": 32},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m004", "received_at": "2026-10-23T10:40:00Z", "origin_pseudonym": "s09-r", "origin_low_byte": 20, "gateway_pseudonym": "s09-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 9004, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386091008, "longitude_i": -903657472, "precision_bits": 20},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m005", "received_at": "2026-10-23T10:55:00Z", "origin_pseudonym": "s09-r", "origin_low_byte": 20, "gateway_pseudonym": "s09-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 9005, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 32},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m006", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "s09-r", "origin_low_byte": 20, "gateway_pseudonym": "s09-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 9006, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m007", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "s09-r", "origin_low_byte": 20, "gateway_pseudonym": "s09-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 9007, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m008", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "s09-r", "origin_low_byte": 20, "gateway_pseudonym": "s09-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 9008, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m009", "received_at": "2026-10-23T10:50:00Z", "origin_pseudonym": "s09-r", "origin_low_byte": 20, "gateway_pseudonym": "s09-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 9009, "relay_node": 20, "portnum": 1, "rx_snr": 8.0, "rx_rssi": -105}
+  ],
+  "boxes": {
+    "r_floor": {"south_i": 385999949, "north_i": 385999950, "west_i": -903655616, "east_i": -903654697, "merged": true, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 4.002798},
+    "z32": {"south_i": 385974272, "north_i": 385974273, "west_i": -903970816, "east_i": -903970815, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356},
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876}
+  },
+  "expected_receipts": [
+    {"delivery_key": "s09-m006", "outcome": "counted", "relayer": "s09-r", "link_source": "relay_node", "relayer_box": "r_floor", "gateway_box": "g16", "distance_m": 2764.556856},
+    {"delivery_key": "s09-m007", "outcome": "counted", "relayer": "s09-r", "link_source": "relay_node", "relayer_box": "r_floor", "gateway_box": "g16", "distance_m": 2764.556856},
+    {"delivery_key": "s09-m008", "outcome": "counted", "relayer": "s09-r", "link_source": "relay_node", "relayer_box": "r_floor", "gateway_box": "g16", "distance_m": 2764.556856},
+    {"delivery_key": "s09-m009", "outcome": "dropped", "rule": "lnk_05", "relayer": "s09-r", "link_source": "relay_node", "relayer_box": "z32", "gateway_box": "g16", "distance_m": 0.007055}
+  ],
+  "expected_link_hours": [
+    {"relayer": "s09-r", "gateway": "s09-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["s09-m006", "s09-m007", "s09-m008"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 2764.556856, "relayer_box": "r_floor", "relayer_precise_source": false, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 367.753194}
+  ],
+  "expected_positions": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m001", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m002", "position_quality": "usable", "position_zero_mapped": false, "precise_source": true, "inside_msa": true, "in_core": true, "core_precise_source": true},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m003", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m004", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s09-m005", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false}
+  ]
+}

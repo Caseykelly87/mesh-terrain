@@ -1,4 +1,4 @@
-"""The link-rules fixture's expected receipts and link-hours, as dbt seeds.
+"""The expected receipts and link-hours of the link-rules and staging cases, as dbt seeds.
 
 The dbt tests compare `core.fct_rx_observation`, `core.int_link_window` and the
 link models' per-receipt and per-hour decisions with two seeds this module
@@ -7,7 +7,9 @@ writes: `dbt/seeds/fixtures/expected_link_receipts.csv` and
 
 Nothing here computes an expected value. Every value is copied from the
 hand-worked `expected_receipts` and `expected_link_hours` of the cases under
-`tests/fixtures/link_rules/cases/`; a named box is written out as its edges,
+`tests/fixtures/link_rules/cases/`, and of the staging cases under
+`tests/fixtures/staging_cases/cases/` that carry them (warehouse-eng's cases
+for link-rule clauses the shared fixture does not reach); a named box is written out as its edges,
 `merged`, `precision_bits` and half-widths from the case's `boxes`. A key the
 README does not list, or a box name the case does not define, stops the seed.
 
@@ -24,7 +26,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fixture_rows import LINK_RULES_CASES, REPO_ROOT, read_cases  # noqa: E402
+from fixture_rows import LINK_RULES_CASES, REPO_ROOT, STAGING_CASES, read_cases  # noqa: E402
 
 SEED_FOLDER = REPO_ROOT / "dbt" / "seeds" / "fixtures"
 RECEIPTS_SEED = SEED_FOLDER / "expected_link_receipts.csv"
@@ -167,9 +169,15 @@ def seed_text(columns: tuple[str, ...], rows: Iterable[dict[str, Any]]) -> str:
     return buffer.getvalue()
 
 
+def link_cases() -> list[dict[str, Any]]:
+    """The link-rules cases, then the staging cases with expected receipts."""
+    staging = [case for case in read_cases(STAGING_CASES) if "expected_receipts" in case]
+    return [*read_cases(LINK_RULES_CASES), *staging]
+
+
 def seeds() -> dict[Path, str]:
     """Each seed file and the text the cases give it."""
-    cases = read_cases(LINK_RULES_CASES)
+    cases = link_cases()
     return {
         RECEIPTS_SEED: seed_text(RECEIPT_COLUMNS, receipt_rows(cases)),
         HOURS_SEED: seed_text(HOUR_COLUMNS, hour_rows(cases)),

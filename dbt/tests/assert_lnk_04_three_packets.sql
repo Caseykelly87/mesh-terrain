@@ -1,20 +1,20 @@
 {{ config(enabled=reads_raw()) }}
 
--- lnk_04: every link-hour has at least 3 packets, counted after lnk_05's
--- per-receipt test, and its packet_count is the number of its counted
--- receipts, each in the clock hour that holds its received_at. Returns each
--- link-hour that breaks it.
+-- lnk_04 on every link-hour: at least 3 packets, no more than the receipts
+-- fct_rx_observation holds for that relayer, gateway and hour, and every
+-- counted receipt inside the clock hour, half-open. It reads the two tables
+-- only, so a real build does not rebuild the ephemeral link steps for it;
+-- the per-receipt order is compared on the fixture by
+-- assert_lnk_04_fixture_receipts and assert_lnk_04_fixture_link_hours.
+-- Returns each link-hour that breaks it.
 
-with counted as (
+with receipts as (
     select
         tx_node_hash,
         gateway_node_hash,
         hour,
         count(*) as receipts
-    from {{ ref('int_link_receipt') }}
-    where
-        drop_rule is null
-        and hour = {{ link_hour('received_at') }}
+    from {{ ref('fct_rx_observation') }}
     group by tx_node_hash, gateway_node_hash, hour
 )
 
@@ -23,11 +23,13 @@ select
     windows.gateway_node_hash,
     windows.hour
 from {{ ref('int_link_window') }} as windows
-left join counted
+left join receipts
     on
-        counted.tx_node_hash = windows.tx_node_hash
-        and counted.gateway_node_hash = windows.gateway_node_hash
-        and counted.hour = windows.hour
+        receipts.tx_node_hash = windows.tx_node_hash
+        and receipts.gateway_node_hash = windows.gateway_node_hash
+        and receipts.hour = windows.hour
 where
     windows.packet_count < 3
-    or windows.packet_count is distinct from counted.receipts
+    or windows.packet_count > coalesce(receipts.receipts, 0)
+    or {{ link_hour('windows.first_received_at') }} <> windows.hour
+    or {{ link_hour('windows.last_received_at') }} <> windows.hour

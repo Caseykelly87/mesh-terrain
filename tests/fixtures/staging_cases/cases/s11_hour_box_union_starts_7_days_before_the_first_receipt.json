@@ -1,0 +1,37 @@
+{
+  "case_id": "s11_hour_box_union_starts_7_days_before_the_first_receipt",
+  "title": "The hour's union reads from 7 days before the first receipt, not the last",
+  "rules": ["lnk_02", "lnk_05"],
+  "reasoning": [
+    "lnk_02: the hour's box is chosen over the positions \"those receipts read (from 7 days before the first of them to the last of them)\".",
+    "s11-r sent fix P at 16 10:20 and fix Q, 7.997 m away, at 22 09:05.",
+    "10:10 and 10:20: the look-back runs from 16 10:10 and from 16 10:20, both inclusive, so it holds P and Q, the same place by the floor: stationary. 10:30: it runs from 16 10:30 and holds Q alone: stationary.",
+    "The union runs from 7 days before 10:10, 16 10:10, to 10:30: P and Q, pairwise the same place. The hour's box is the rectangle around both cells, and every receipt uses it. A union from 7 days before the last receipt would hold Q alone.",
+    "Distance 2764.556856 m; kept with 3 packets; medians 6.0 dB and -95.0 dBm; position_uncertainty_m 367.753194 m; nothing precise (public broker only)."
+  ],
+  "messages": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s11-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s11-g", "origin_low_byte": 10, "gateway_pseudonym": "s11-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 11001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s11-m002", "received_at": "2026-10-16T10:20:00Z", "origin_pseudonym": "s11-r", "origin_low_byte": 20, "gateway_pseudonym": "s11-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 11002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385999949, "longitude_i": -903655616, "precision_bits": 32},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s11-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "s11-r", "origin_low_byte": 20, "gateway_pseudonym": "s11-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 11003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385999949, "longitude_i": -903654698, "precision_bits": 32},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s11-m004", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "s11-r", "origin_low_byte": 20, "gateway_pseudonym": "s11-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 11004, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s11-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "s11-r", "origin_low_byte": 20, "gateway_pseudonym": "s11-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 11005, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s11-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "s11-r", "origin_low_byte": 20, "gateway_pseudonym": "s11-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 11006, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "r_floor": {"south_i": 385999949, "north_i": 385999950, "west_i": -903655616, "east_i": -903654697, "merged": true, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 4.002798},
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876}
+  },
+  "expected_receipts": [
+    {"delivery_key": "s11-m004", "outcome": "counted", "relayer": "s11-r", "link_source": "relay_node", "relayer_box": "r_floor", "gateway_box": "g16", "distance_m": 2764.556856},
+    {"delivery_key": "s11-m005", "outcome": "counted", "relayer": "s11-r", "link_source": "relay_node", "relayer_box": "r_floor", "gateway_box": "g16", "distance_m": 2764.556856},
+    {"delivery_key": "s11-m006", "outcome": "counted", "relayer": "s11-r", "link_source": "relay_node", "relayer_box": "r_floor", "gateway_box": "g16", "distance_m": 2764.556856}
+  ],
+  "expected_link_hours": [
+    {"relayer": "s11-r", "gateway": "s11-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["s11-m004", "s11-m005", "s11-m006"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 2764.556856, "relayer_box": "r_floor", "relayer_precise_source": false, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 367.753194}
+  ],
+  "expected_positions": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s11-m001", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s11-m002", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s11-m003", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false}
+  ]
+}

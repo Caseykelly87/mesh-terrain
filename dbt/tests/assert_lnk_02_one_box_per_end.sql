@@ -16,5 +16,5 @@ select
 from {{ ref('int_link_hour') }}
 where
     drop_rule = 'lnk_02'
-    and {{ case_filter('tx_node_hash', none) }}
+    and {{ link_rules_cases_only('tx_node_hash') }}
 having count(*) <> 2

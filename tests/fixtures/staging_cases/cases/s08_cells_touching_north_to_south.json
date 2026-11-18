@@ -1,0 +1,30 @@
+{
+  "case_id": "s08_cells_touching_north_to_south",
+  "title": "Two 16-bit cells that share a latitude edge do not overlap",
+  "rules": ["lnk_02"],
+  "reasoning": [
+    "lnk_02: \"Two cells overlap when, on both axes, the larger low is less than the smaller low + width; cells that only touch do not overlap.\"",
+    "s08-r sent a16, latitude [385941504, 386007040), and the cell directly north of it, latitude [386007040, 386072576), with the same longitude interval. On the latitude axis the larger low equals the smaller high, so they only touch and do not overlap. c14 tests the longitude axis.",
+    "Their stored values are 727.5 m apart, beyond 40 m: not the same place, so s08-r has moved at every receipt. It sent nothing within 30 minutes of any receipt, so each receipt has no relayer position and is dropped by lnk_02. No link-hour."
+  ],
+  "messages": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s08-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s08-g", "origin_low_byte": 10, "gateway_pseudonym": "s08-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s08-m002", "received_at": "2026-10-21T09:05:00Z", "origin_pseudonym": "s08-r", "origin_low_byte": 20, "gateway_pseudonym": "s08-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903643136, "precision_bits": 16},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s08-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "s08-r", "origin_low_byte": 20, "gateway_pseudonym": "s08-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386039808, "longitude_i": -903643136, "precision_bits": 16},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s08-m004", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "s08-r", "origin_low_byte": 20, "gateway_pseudonym": "s08-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8004, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s08-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "s08-r", "origin_low_byte": 20, "gateway_pseudonym": "s08-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8005, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s08-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "s08-r", "origin_low_byte": 20, "gateway_pseudonym": "s08-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8006, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {},
+  "expected_receipts": [
+    {"delivery_key": "s08-m004", "outcome": "dropped", "rule": "lnk_02", "relayer": "s08-r", "link_source": "relay_node"},
+    {"delivery_key": "s08-m005", "outcome": "dropped", "rule": "lnk_02", "relayer": "s08-r", "link_source": "relay_node"},
+    {"delivery_key": "s08-m006", "outcome": "dropped", "rule": "lnk_02", "relayer": "s08-r", "link_source": "relay_node"}
+  ],
+  "expected_link_hours": [],
+  "expected_positions": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s08-m001", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s08-m002", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s08-m003", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false}
+  ]
+}
