@@ -454,11 +454,12 @@ class KindConflict:
 def kind_conflicts(links: CaptureLinks, tile: Tile) -> tuple[KindConflict, ...]:
     """The pairs whose kind by their own rows differs from their kind in the counts check.
 
-    An interim guard (reviewer, PR #70 comment 6989619559, Blocking 1): until
-    Casey says which states decide a pair's kind after the counts check, a
-    strict run refuses on any such pair (`select_nodes`), and a sites-only run
-    reports it and goes on with the kinds by rows. A two-box pair has no row
-    and takes its kind from the counted states, so it never conflicts.
+    Casey (issue #55 comment 6990646633, item 3): each pair's own row decides its
+    kind and its gateway's role. A moving node near the tile edge can make the two disagree, one of
+    its pairs' rows inside the tile and another outside, so every such pair is
+    listed in the local run report for Casey in the session, and no run stops
+    for it. A two-box pair has no row and takes its kind from the counted
+    states, so it never disagrees.
 
     Raises:
         SelectionError: if a node has no box.
@@ -760,7 +761,11 @@ def _rows(
     """The site rows, then the receiver: the both-ends pair's relayer at the box that pair used.
 
     A both-ends pair with two boxes gives no receiver row; it is dropped, and
-    `Selection.layers` refuses.
+    `Selection.layers` refuses. When the counts check passes but no pair has
+    both ends in the tile by its own rows, no row is the receiver either, and
+    `Selection.layers` refuses with "no receiver row": a strict run's
+    receiver is the both-ends pair's relayer (Casey, issue #44, busiest pair,
+    2026-11-17).
     """
     sites = _site_rows(links, kinds, ids)
     both = [p for p, kind in kinds.items() if kind == BOTH_ENDS_PAIR]
@@ -791,8 +796,7 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
 
     Raises:
         SelectionError: when the pairs do not reproduce the 2026-11-08 tile
-            counts, a pair's kind by its own rows differs from its counted
-            kind (`kind_conflicts`), or a node of a pair has no box.
+            counts, or a node of a pair has no box.
     """
     # The pair count refuses before pair_states, so a call with a wrong count
     # and a node with no box names the count. The command calls
@@ -803,12 +807,6 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
     kinds = _tile_check(links, tile, expect_pairs)
     if isinstance(kinds, str):
         raise SelectionError(kinds)
-    conflicts = kind_conflicts(links, tile)
-    if conflicts:
-        raise SelectionError(
-            f"{len(conflicts)} pairs have a kind by their own rows that differs from the counts "
-            "check; Casey decides which states set a pair's kind (PR #70, interim guard)"
-        )
     ids = site_row_ids(links)
     rows = _rows(links, kinds, ids)
     placed = tuple(_place(links, row) for row in rows if row_state(row[3], tile) != SPLIT)
