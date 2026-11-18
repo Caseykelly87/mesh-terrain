@@ -8,7 +8,8 @@ receipt's rule exactly; relayer and `link_source` exactly; boxes by all four
 edges, `merged` and `precision_bits` exactly; distances within 1e-4 m;
 half-widths and `position_uncertainty_m` within 1e-6 m; medians and the
 precise flags exactly. Each case runs alone, and all cases run together as one
-table, as the SQL side loads them, where the one-box drops count 2.
+table, as the SQL side loads them, where the one-box drops count 2 and the
+direct hops NeighborInfo contradicts count 3.
 """
 
 import json
@@ -28,6 +29,8 @@ CASE_FILES = sorted(CASES.glob("c*.json"))
 DISTANCE_TOLERANCE_M = 1e-4
 HALF_WIDTH_TOLERANCE_M = 1e-6
 ONE_BOX_DROPS_OVER_THE_FIXTURE = 2
+# lnk_01_direct_hop_contradicted across the fixture (README, Casey's Q4 (a); c48).
+DIRECT_HOPS_CONTRADICTED_OVER_THE_FIXTURE = 3
 
 
 def load_case(path: Path) -> dict[str, Any]:
@@ -152,7 +155,8 @@ def test_every_case_loaded_together_gives_the_same_rows(inside_msa: Any) -> None
     for case in cases:
         assert_case(case, result)
     assert result.one_box_dropped_hours == ONE_BOX_DROPS_OVER_THE_FIXTURE
+    assert result.direct_hop_contradicted == DIRECT_HOPS_CONTRADICTED_OVER_THE_FIXTURE
 
 
 def test_the_fixture_has_cases() -> None:
-    assert len(CASE_FILES) >= 43
+    assert len(CASE_FILES) >= 51
