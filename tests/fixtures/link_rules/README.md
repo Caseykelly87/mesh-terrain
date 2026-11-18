@@ -62,7 +62,7 @@ Both sides fill raw's other not-null columns the same way: `snapshot_id` `link-r
 
 Comparison: the counted set and each dropped receipt's rule exactly; relayer and `link_source` exactly; boxes by all four edges, `merged` and `precision_bits` exactly; distances within 1e-4 m (the boundary cases in c34 and c35 are 0.25 mm to 11 mm from their limit, and both libraries compute the same geodesic); half-widths and `position_uncertainty_m` within 1e-6 m; medians exactly; the precise flags exactly. Across the fixture two hours are dropped by step 8 (c24 on the relayer side, c42 on the gateway side), so `mart_data_quality` counts 2.
 
-Geometry (`lnk_07`, SQL only, since the Python side builds none): each kept hour's link geometry is valid and is a two-point LINESTRING with one point at the centre of its relayer box and the other at the centre of its gateway box (PLAN, Data model), each within 1e-9 degrees, a centre being the midpoint of the box's edges times 1e-7. The order of the two points is not compared, since neither the contract nor PLAN states it.
+Geometry (`lnk_07`, SQL only, since the Python side builds none): each kept hour's link geometry is valid and is a two-point LINESTRING with one point at the centre of its relayer box and the other at the centre of its gateway box (PLAN, Data model), x being the centre's longitude and y its latitude (SRID 4326), each coordinate within 1e-9 degrees, a centre being the midpoint of the box's edges times 1e-7. The order of the two points is not compared, since neither the contract nor PLAN states it.
 
 ## Cases
 
