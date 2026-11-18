@@ -1,7 +1,12 @@
-"""The expected-positions seed is current and agrees with the hand-worked fixture boxes.
+"""The expected-positions seed is current, and its computed parts agree with the hand-worked values.
 
-`tests/fixture_positions.py` computes the seed the dbt fixture tests compare
-`stg_position` and `core.fct_node_position` with. These tests read files only.
+`tests/fixture_positions.py` writes the seed the dbt fixture tests compare
+`stg_position` and `core.fct_node_position` with. Its quality, 0, 0, precise,
+MSA and core columns are copied from rows written by hand; these tests check
+that every fixture position has one, and that an independent Python
+computation of the same columns agrees with every hand row. Cells and
+half-widths are computed, and checked against the boxes worked out by hand in
+the link-rules cases. These tests read files only.
 """
 
 import csv
@@ -9,11 +14,14 @@ import io
 import math
 
 from fixture_positions import (
+    HAND_COLUMNS,
     SEED,
     cell_low,
     cell_width,
+    computed_positions,
     expected_positions,
     half_widths,
+    hand_rows,
     inside_msa,
     quality,
     seed_text,
@@ -30,6 +38,25 @@ def test_the_committed_seed_is_what_the_fixtures_give() -> None:
         "dbt/seeds/fixtures/expected_fixture_positions.csv is stale; "
         "run uv run python tests/fixture_positions.py"
     )
+
+
+def test_every_fixture_position_has_a_hand_written_row_and_no_hand_row_is_spare() -> None:
+    computed = {(row["snapshot_id"], row["delivery_key"]) for row in computed_positions()}
+    assert computed == set(hand_rows())
+
+
+def test_the_python_computation_agrees_with_every_hand_written_row() -> None:
+    # A disagreement is a question about the contract, settled by hand, never
+    # by changing a hand row to match the code.
+    hand = hand_rows()
+    disagreements = [
+        (row["snapshot_id"], row["delivery_key"], column, row[column], written[column])
+        for row in computed_positions()
+        for written in [hand[(row["snapshot_id"], row["delivery_key"])]]
+        for column in HAND_COLUMNS
+        if row[column] != written[column]
+    ]
+    assert disagreements == []
 
 
 def test_the_seed_has_one_row_per_fixture_position_row() -> None:

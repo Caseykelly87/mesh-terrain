@@ -6,10 +6,15 @@
     "pos_02 tests a 32-bit position's stored value, not its cell centre (Casey, PR #66, Q3). At 32 bits the cell is [value, value + 1) on each axis, so its centre is half a unit, 0.5e-7 degrees, north and east of the stored value.",
     "s02-m001 (38.7420017 N, 89.2497389 W) lies inside the MSA polygon and its cell centre lies outside, across the edge from (-89.250071, 38.742015) to (-89.246748, 38.741882): it enters core.",
     "s02-m002 (38.5051560 N, 89.1843564 W) lies outside and its centre inside, across the edge from (-89.184197, 38.505149) to (-89.187382, 38.505289): it does not enter core.",
-    "Both were found by walking the boundary's edges with shapely contains on the polygon joined from dbt/seeds/msa_boundary.csv, the method the link-rules README names; tests/test_fixture_positions.py checks that the stored value and the centre disagree for each."
+    "Both were found by walking the boundary's edges with shapely contains on the polygon joined from dbt/seeds/msa_boundary.csv, the method the link-rules README names; tests/test_fixture_positions.py checks that the stored value and the centre disagree for each.",
+    "Expected positions, by hand: both are 32-bit, public-only Positions, so usable and not precise; s02-m001 is inside and in core, s02-m002 outside and not in core."
   ],
   "messages": [
     {"snapshot_id": "staging-fixture-a", "delivery_key": "s02-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s02-a", "origin_low_byte": 30, "gateway_pseudonym": "s02-a", "gateway_low_byte": 30, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 2001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 387420017, "longitude_i": -892497389, "precision_bits": 32},
     {"snapshot_id": "staging-fixture-a", "delivery_key": "s02-m002", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s02-b", "origin_low_byte": 31, "gateway_pseudonym": "s02-b", "gateway_low_byte": 31, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 2002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385051560, "longitude_i": -891843564, "precision_bits": 32}
+  ],
+  "expected_positions": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s02-m001", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s02-m002", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": false, "in_core": false, "core_precise_source": null}
   ]
 }

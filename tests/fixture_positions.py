@@ -1,20 +1,31 @@
 """Expected staging and core values for every position in the synthetic fixtures.
 
 The dbt tests compare `stg_position` and `core.fct_node_position` with the seed
-`dbt/seeds/fixtures/expected_fixture_positions.csv`. This module computes that
-seed in Python, apart from the SQL, with the arithmetic the link-rules README
-names: the firmware grid in integers, `pos_01`'s WGS84 formula for the
-half-widths, and shapely `contains` on the polygon joined from
-`dbt/seeds/msa_boundary.csv` for the MSA. `tests/test_fixture_positions.py`
-fails when the committed seed differs from what this computes, and checks the
-computed cells against the boxes worked out by hand in the link-rules cases.
+`dbt/seeds/fixtures/expected_fixture_positions.csv`, which this module writes.
 
-Regenerate the seed after a fixture change with
-`uv run python tests/fixture_positions.py`.
+Expected results are worked out by hand, never by running B3 code (Casey's
+rule for the conformance fixture). So the seed's `position_quality`,
+`position_zero_mapped`, `precise_source`, `inside_msa`, `in_core` and
+`core_precise_source` are copied from the rows written by hand: the
+`expected_positions` of each staging case and
+`tests/fixtures/staging_cases/link_rules_positions.json` for the link-rules
+cases. A position row without a hand-written row stops the seed.
+
+The rest of each row is computed here, apart from the SQL, with the arithmetic
+the link-rules README names: the firmware grid in integers and `pos_01`'s WGS84
+formula for the half-widths. Those values are anchored to the boxes worked out
+by hand in the link-rules cases. The same Python also computes the hand-written
+columns, with shapely `contains` on the polygon joined from
+`dbt/seeds/msa_boundary.csv` for the MSA, as a cross-check:
+`tests/test_fixture_positions.py` fails where it disagrees with a hand row.
+
+After a fixture change, write the hand rows for its new positions first, then
+regenerate the seed with `uv run python tests/fixture_positions.py`.
 """
 
 import csv
 import io
+import json
 import math
 import sys
 from collections.abc import Iterable
@@ -28,10 +39,25 @@ from shapely.geometry.base import BaseGeometry
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from fixture_rows import REPO_ROOT, all_rows  # noqa: E402
+from fixture_rows import (  # noqa: E402
+    LINK_RULES_SNAPSHOT,
+    REPO_ROOT,
+    STAGING_CASES,
+    all_rows,
+    read_cases,
+)
 
 SEED = REPO_ROOT / "dbt" / "seeds" / "fixtures" / "expected_fixture_positions.csv"
 MSA_CSV = REPO_ROOT / "dbt" / "seeds" / "msa_boundary.csv"
+LINK_RULES_HAND_ROWS = STAGING_CASES.parent / "link_rules_positions.json"
+HAND_COLUMNS = (
+    "position_quality",
+    "position_zero_mapped",
+    "precise_source",
+    "inside_msa",
+    "in_core",
+    "core_precise_source",
+)
 
 # WGS84 (pos_01).
 SEMI_MAJOR_M = 6378137.0
@@ -58,6 +84,7 @@ COLUMNS = (
     "precise_source",
     "inside_msa",
     "in_core",
+    "core_precise_source",
 )
 
 
@@ -154,25 +181,76 @@ def cell_columns(row: dict[str, Any], bits: int | None, width: int | None) -> di
     }
 
 
-def mark_in_core(rows: list[dict[str, Any]], raw: list[dict[str, Any]]) -> None:
-    """Core keeps one row per delivery inside the MSA: its first copy by received_at, snapshot."""
-    received = {(r["snapshot_id"], r["delivery_key"]): r["received_at"] for r in raw}
+def copy_order(row: dict[str, Any], raw: dict[tuple[str, str], Any]) -> tuple[Any, str]:
+    return raw[(row["snapshot_id"], row["delivery_key"])]["received_at"], row["snapshot_id"]
+
+
+def mark_in_core(rows: list[dict[str, Any]], raw: dict[tuple[str, str], Any]) -> None:
+    """Core keeps a delivery inside the MSA once, from its first copy by received_at, snapshot.
+
+    Its precise flag reads seen_meshstl on any copy of the delivery (pos_04, the
+    reading awaiting Casey on PR #69).
+    """
     first: dict[str, tuple[Any, str]] = {}
+    meshstl: dict[str, bool] = {}
     for row in rows:
+        key = row["delivery_key"]
         if row["inside_msa"]:
-            order = (received[(row["snapshot_id"], row["delivery_key"])], row["snapshot_id"])
-            first[row["delivery_key"]] = min(first.get(row["delivery_key"], order), order)
+            first[key] = min(first.get(key, copy_order(row, raw)), copy_order(row, raw))
+            seen = raw[(row["snapshot_id"], key)]["seen_meshstl"]
+            meshstl[key] = meshstl.get(key, False) or seen
     for row in rows:
-        order = (received[(row["snapshot_id"], row["delivery_key"])], row["snapshot_id"])
-        row["in_core"] = row["inside_msa"] and first[row["delivery_key"]] == order
+        key = row["delivery_key"]
+        row["in_core"] = row["inside_msa"] and first[key] == copy_order(row, raw)
+        bits = row["precision_bits"]
+        in_core_flag = bits is not None and bits >= 20 and meshstl.get(key, False)
+        row["core_precise_source"] = in_core_flag if row["in_core"] else None
+
+
+def computed_positions() -> list[dict[str, Any]]:
+    """Every column of the seed computed in Python, the hand-written ones included."""
+    raw = {
+        (row["snapshot_id"], row["delivery_key"]): row
+        for row in all_rows()
+        if row["position_source"] is not None
+    }
+    rows = [expected_position(row) for row in raw.values()]
+    mark_in_core(rows, raw)
+    return sorted(rows, key=lambda row: (row["snapshot_id"], row["delivery_key"]))
+
+
+def hand_rows() -> dict[tuple[str, str], dict[str, Any]]:
+    """The rows written by hand, keyed by snapshot and delivery key."""
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    link_rules = json.loads(LINK_RULES_HAND_ROWS.read_text(encoding="utf-8"))
+    for values in link_rules["rows"]:
+        row = dict(zip(link_rules["columns"], values, strict=True))
+        row["core_precise_source"] = row["precise_source"] if row["in_core"] else None
+        rows[(LINK_RULES_SNAPSHOT, row["delivery_key"])] = row
+    for case in read_cases(STAGING_CASES):
+        for row in case["expected_positions"]:
+            rows[(row["snapshot_id"], row["delivery_key"])] = row
+    return rows
 
 
 def expected_positions() -> list[dict[str, Any]]:
-    """One expected row per fixture position message, ordered by snapshot and delivery key."""
-    raw = [row for row in all_rows() if row["position_source"] is not None]
-    rows = [expected_position(row) for row in raw]
-    mark_in_core(rows, raw)
-    return sorted(rows, key=lambda row: (row["snapshot_id"], row["delivery_key"]))
+    """The seed: computed cells and half-widths, hand-written values for HAND_COLUMNS.
+
+    Raises:
+        ValueError: when a fixture position has no hand-written row, or a hand
+            row names no fixture position.
+    """
+    computed = computed_positions()
+    hand = hand_rows()
+    keys = {(row["snapshot_id"], row["delivery_key"]) for row in computed}
+    if keys != set(hand):
+        missing = sorted(keys - set(hand))
+        extra = sorted(set(hand) - keys)
+        raise ValueError(f"hand rows missing for {missing}; hand rows without a position {extra}")
+    for row in computed:
+        written = hand[(row["snapshot_id"], row["delivery_key"])]
+        row |= {column: written[column] for column in HAND_COLUMNS}
+    return computed
 
 
 def cell_text(value: Any) -> str:
