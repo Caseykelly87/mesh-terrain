@@ -50,6 +50,7 @@ NAMES_A_TEST = re.compile(
 )
 ASSET_CHECK_PACKAGES = ("ingester", "pipeline", "engine", "terrain")
 ASSET_CHECK_CALLS = {"AssetCheckSpec", "asset_check"}
+LISTING_FIXTURE_SCHEMA = "test_fixture_000000000000"
 
 # The rules pending when this test was written (issue #55, B1, 2026-11-17):
 # all 33, since no dbt test or asset check carried a rule id exactly then.
@@ -71,15 +72,8 @@ PENDING_AT_B1 = frozenset(
 # the change that adds its test.
 PENDING = frozenset(
     {
-        # ing_01 (key derivation), ing_05 (loader refusal) and prv_01
-        # (allowlist) have pytest tests, which the parser does not count.
-        "ing_01",
+        # prv_01 (allowlist) has pytest tests, which the parser does not count.
         "ing_02",
-        "ing_05",
-        "ing_06",
-        "pos_01",
-        "pos_02",
-        "pos_04",
         "lnk_01",
         "lnk_02",
         "lnk_03",
@@ -221,7 +215,11 @@ def asset_checks() -> list[NamedTest]:
 
 
 def all_named_tests() -> list[NamedTest]:
-    return [*dbt_tests(dbt_nodes(DEVELOPMENT_TARGET)), *asset_checks()]
+    # With the var raw_schema set, the development target lists every test,
+    # those on the models that read raw included (dbt/macros/raw_schema.sql);
+    # dbt ls needs only the name, not a schema that exists.
+    nodes = dbt_nodes(DEVELOPMENT_TARGET, LISTING_FIXTURE_SCHEMA)
+    return [*dbt_tests(nodes), *asset_checks()]
 
 
 def contract_problems(

@@ -4,14 +4,32 @@ sources:
   - name: raw
     description: >
       The tables the raw loader lands from registered snapshots (ingest-eng).
-      On prod this is the real raw schema; on the development target dev_wh it
-      is raw_dev_wh, which holds synthetic fixture tables only.
-    # Same rule as the schema macro: the real name on prod, suffixed by the
-    # target's name everywhere else (macros/target_schemas.sql).
-    schema: "{{ 'raw' if target.name == 'prod' else 'raw_' ~ target.name }}"
+      On prod this is the real raw schema. On a development target (dev_wh or
+      dev_ta) it is raw_<target>, which holds no tables, unless a test passes
+      the throwaway schema it loaded the synthetic fixtures into as the var
+      raw_schema. On prod the var is ignored (macros/raw_schema.sql).
+    schema: "{{ 'raw' if target.name == 'prod' else var('raw_schema', 'raw_' ~ target.name) }}"
     tables:
       - name: mqtt_message
         description: One row per stored delivery per snapshot, keyed by snapshot_id and delivery_key.
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: ["snapshot_id", "delivery_key"]
+              config:
+                enabled: "{{ target.name == 'prod' or var('raw_schema', none) is not none }}"
+                meta: {contract: ing_01}
+        columns:
+          - name: snapshot_id
+            description: The registered snapshot the delivery was loaded from.
+            tests:
+              - relationships:
+                  arguments:
+                    to: source('raw', 'snapshot')
+                    field: snapshot_id
+                  config:
+                    enabled: "{{ target.name == 'prod' or var('raw_schema', none) is not none }}"
+                    meta: {contract: ing_05}
       - name: mqtt_copy_count
         description: Internet copies counted per snapshot, hour, topic and gateway pseudonym.
       - name: mqtt_dropped_count

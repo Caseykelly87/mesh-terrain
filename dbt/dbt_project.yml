@@ -46,3 +46,30 @@ seeds:
         source: text
         part: integer
         geometry_wkt: text
+    # Expected values for the synthetic fixtures (tests/fixture_positions.py).
+    # Built only where the fixture build runs, a development target with the
+    # var raw_schema set (macros/raw_schema.sql, fixture_build), and never on
+    # prod; dbt does not offer project macros here, so the test is inline.
+    fixtures:
+      +enabled: "{{ target.name != 'prod' and var('raw_schema', none) is not none }}"
+      expected_fixture_positions:
+        +column_types:
+          snapshot_id: text
+          delivery_key: text
+          node_pseudonym: text
+          position_source: text
+          position_zero_mapped: boolean
+          latitude_i: integer
+          longitude_i: integer
+          precision_bits: bigint
+          position_quality: text
+          cell_width_i: bigint
+          south_i: bigint
+          north_i: bigint
+          west_i: bigint
+          east_i: bigint
+          half_width_ns_m: double precision
+          half_width_ew_m: double precision
+          precise_source: boolean
+          inside_msa: boolean
+          in_core: boolean

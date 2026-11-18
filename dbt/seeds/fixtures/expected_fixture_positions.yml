@@ -1,0 +1,18 @@
+version: 2
+
+seeds:
+  - name: expected_fixture_positions
+    description: >
+      The expected stg_position values for every position row in the synthetic
+      fixtures, and whether core keeps it, computed apart from the SQL by
+      tests/fixture_positions.py. Built only on a development target with the
+      var raw_schema set; never on prod.
+    columns:
+      - name: snapshot_id
+        description: The fixture snapshot of the raw row.
+      - name: delivery_key
+        description: The raw row's delivery key.
+      - name: in_core
+        description: True when core.fct_node_position keeps this copy (inside the MSA, first copy by received_at).
+      - name: inside_msa
+        description: True when the stored value lies inside the MSA polygon, by shapely contains.

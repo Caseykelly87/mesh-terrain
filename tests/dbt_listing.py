@@ -63,9 +63,20 @@ def run_dbt(arguments: list[str], work_dir: Path) -> str:
     return result.stdout
 
 
+def raw_schema_vars(raw_schema: str | None) -> list[str]:
+    """The --vars argument that points the raw sources at a fixture schema, or nothing."""
+    return [] if raw_schema is None else ["--vars", json.dumps({"raw_schema": raw_schema})]
+
+
 @cache
-def dbt_nodes(target: str) -> tuple[dict[str, Any], ...]:
-    """Every node and source of the project, as dbt lists it for the target."""
+def dbt_nodes(target: str, raw_schema: str | None = None) -> tuple[dict[str, Any], ...]:
+    """Every node and source of the project, as dbt lists it for the target.
+
+    Args:
+        target: The dbt target.
+        raw_schema: The var raw_schema to list with (macros/raw_schema.sql), or
+            None for none. Only a name is needed: dbt ls opens no connection.
+    """
     with tempfile.TemporaryDirectory() as work:
         work_dir = Path(work)
         # The definitions test installs packages the same way when they are
@@ -83,6 +94,7 @@ def dbt_nodes(target: str) -> tuple[dict[str, Any], ...]:
                 "json",
                 "--output-keys",
                 *OUTPUT_KEYS,
+                *raw_schema_vars(raw_schema),
             ],
             work_dir,
         )

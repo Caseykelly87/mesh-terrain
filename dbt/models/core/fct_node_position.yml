@@ -1,0 +1,91 @@
+version: 2
+
+models:
+  - name: fct_node_position
+    description: >
+      One row per position delivery whose stored value lies inside the MSA
+      (pos_02), from the delivery's first copy by received_at when two
+      snapshots hold it. Every precision is kept; the link rules read only
+      usable positions (lnk_02).
+    columns:
+      - name: delivery_key
+        description: The position delivery's key, the grain of this table (ing_01).
+        tests:
+          - unique
+          - not_null
+      - name: snapshot_id
+        description: The snapshot of the copy kept.
+        tests:
+          - not_null
+      - name: received_at
+        description: When our capture received the kept copy, in UTC; the incremental watermark.
+        tests:
+          - not_null
+      - name: node_pseudonym
+        description: The pseudonym of the node the position belongs to.
+        tests:
+          - not_null
+      - name: position_source
+        description: position or mapreport (pos_04).
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["position", "mapreport"]
+      - name: latitude_i
+        description: Latitude in 1e-7 degrees as sent, the cell centre for 1 to 31 bits and the raw value at 32 (pos_01).
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -900000000
+                max_value: 900000000
+              config:
+                meta: {contract: pos_03}
+      - name: longitude_i
+        description: Longitude in 1e-7 degrees as sent, under the same rules as latitude_i.
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -1800000000
+                max_value: 1800000000
+              config:
+                meta: {contract: pos_03}
+      - name: precision_bits
+        description: The precision the sender gave, a 64-bit integer kept as sent (pos_01).
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 32
+              config:
+                where: "cell_width_i is not null"
+                meta: {contract: pos_01}
+      - name: position_quality
+        description: usable for 15 to 32 bits, coarse for 12 to 14, unusable otherwise (pos_01).
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["usable", "coarse", "unusable"]
+              config:
+                meta: {contract: pos_01}
+      - name: cell_width_i
+        description: The cell's width on each axis in 1e-7 degrees; null at 0 bits and outside 0 to 32 (pos_01).
+      - name: half_width_ns_m
+        description: Half the cell's north-south extent in metres at the stored latitude, WGS84 (pos_01).
+      - name: half_width_ew_m
+        description: Half the cell's east-west extent in metres at the stored latitude, WGS84 (pos_01).
+      - name: seen_public
+        description: True when the public broker carried the kept delivery.
+      - name: seen_meshstl
+        description: True when the MeshSTL broker carried the kept delivery.
+      - name: precise_source
+        description: >
+          True when precision_bits is 20 or more and the MeshSTL broker carried
+          the delivery (pos_04). Such a position never leaves core at its own
+          precision (prv_02).
+        tests:
+          - not_null
