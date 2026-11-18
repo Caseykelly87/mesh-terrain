@@ -54,7 +54,7 @@ cells as (
         case when has_position then {{ cell_width_i('precision_bits') }} end as cell_width_i,
         case
             when has_position
-                then {{ precise_flag('precision_bits', 'position_source', 'seen_meshstl') }}
+                then {{ precise_flag('precision_bits', 'seen_meshstl') }}
         end as precise_source
     from positioned
 )

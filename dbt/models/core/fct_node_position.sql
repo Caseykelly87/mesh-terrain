@@ -137,11 +137,8 @@ select
     first_copies.half_width_ew_m,
     broker_flags.seen_public,
     broker_flags.seen_meshstl,
-    {{ precise_flag(
-        'first_copies.precision_bits',
-        'first_copies.position_source',
-        'broker_flags.seen_meshstl'
-    ) }} as precise_source
+    {{ precise_flag('first_copies.precision_bits', 'broker_flags.seen_meshstl') }}
+        as precise_source
 from first_copies
 inner join broker_flags
     on broker_flags.delivery_key = first_copies.delivery_key
