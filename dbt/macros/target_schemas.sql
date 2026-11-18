@@ -2,8 +2,9 @@
   Which schemas a target builds into. The target prod uses the warehouse
   schemas of the data model (raw, staging, core, analytics) by their own
   names; only the lead runs it. Every other target appends its own name, so
-  the default target dev_wh builds staging_dev_wh, core_dev_wh and
-  analytics_dev_wh and reads raw_dev_wh. The target comes from --target, or
+  the default target dev_wh (Track B) builds staging_dev_wh, core_dev_wh and
+  analytics_dev_wh and reads raw_dev_wh, and dev_ta (Track A) does the same
+  with the suffix _dev_ta. The target comes from --target, or
   from the DBT_TARGET environment variable when no --target is given, or else
   the profile's default, dev_wh. Because DBT_TARGET can pick prod, the target
   alone does not keep a build off the real schemas; create_target_schemas
@@ -41,17 +42,18 @@
   model's schema when it builds the model, but nothing in dbt builds into raw,
   and core and analytics have no models yet, so the sources and later models
   always find them. The real schemas come from the warehouse init SQL, which
-  runs once per volume, so the hook never creates them. raw_dev_wh is created
-  empty: only synthetic fixture tables go in it, and nothing here copies real
-  rows.
+  runs once per volume, so the hook never creates them. A development raw
+  schema, raw_dev_wh or raw_dev_ta, is created empty: only synthetic fixture
+  tables go in it, and nothing here copies real rows.
 #}
 {% macro create_target_schemas() -%}
     {%- if target.name == 'prod' -%}
         {%- if execute and var('real_build', false) is not sameas true -%}
             {{ exceptions.raise_compiler_error(
                 "dbt on the target prod rebuilds the real staging, core and analytics "
-                ~ "schemas; only the lead runs it, through make dbt-build-real. Use the "
-                ~ "development target dev_wh (make dbt-build) instead."
+                ~ "schemas; only the lead runs it, through make dbt-build-real. Use a "
+                ~ "development target instead: dev_wh, the default, or dev_ta "
+                ~ "(make dbt-build DBT_DEV_TARGET=dev_ta)."
             ) }}
         {%- endif -%}
     {%- else -%}
