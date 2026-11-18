@@ -213,13 +213,16 @@ class Selection:
     dem_check: dict[str, bool]
     dropped: tuple[DroppedPair, ...]
 
-    def layers(self) -> tuple[list[PlacedNode], PlacedNode]:
+    def layers(self) -> tuple[list[PlacedNode], PlacedNode | None]:
         """The site rows and the receiver row, unless a selected pair was dropped.
+
+        The receiver is None when no pair has both ends in the tile by its own
+        rows: Casey (PR #70 comment 6992903491), (b), "do not stop; write the sites with no
+        receiver layer".
 
         Raises:
             SelectionError: when the both-ends pair or a gateway-only pair was
-                dropped: the run stops for Casey (issue #44, engine_inputs Q1 (a));
-                or when no receiver row was placed.
+                dropped: the run stops for Casey (issue #44, engine_inputs Q1 (a)).
         """
         stopped = [dropped.kind for dropped in self.dropped if dropped.kind != OTHER_PAIR]
         if stopped:
@@ -229,9 +232,7 @@ class Selection:
             )
         sites = [node for node in self.placed if node.role != BOTH_ENDS_RELAYER]
         receivers = [node for node in self.placed if node.role == BOTH_ENDS_RELAYER]
-        if not receivers:
-            raise SelectionError("no receiver row: no both-ends pair has a row of its own")
-        return sites, receivers[0]
+        return sites, receivers[0] if receivers else None
 
 
 def parse_tile(name: str) -> Tile:
@@ -763,9 +764,7 @@ def _rows(
     A both-ends pair with two boxes gives no receiver row; it is dropped, and
     `Selection.layers` refuses. When the counts check passes but no pair has
     both ends in the tile by its own rows, no row is the receiver either, and
-    `Selection.layers` refuses with "no receiver row": a strict run's
-    receiver is the both-ends pair's relayer (Casey, issue #44, busiest pair,
-    2026-11-17).
+    the run writes the sites with no receiver layer (Casey, PR #70 comment 6992903491, (b)).
     """
     sites = _site_rows(links, kinds, ids)
     both = [p for p, kind in kinds.items() if kind == BOTH_ENDS_PAIR]

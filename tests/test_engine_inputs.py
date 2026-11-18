@@ -666,6 +666,7 @@ def counts_for_issue(lines: list[str]) -> str:
 
 REPORT_PREFIXES = (
     "data-quality",
+    "no real receiver",
     "kind differs",
     "pairs kept with another box",
     "kept pair",

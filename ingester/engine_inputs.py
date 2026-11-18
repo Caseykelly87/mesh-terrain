@@ -175,6 +175,13 @@ SITES_ONLY_RULE = (
 # count in the run report". The name is the one B2b gave it (PR #68).
 DIRECT_HOP_CONTRADICTED = "lnk_01_direct_hop_contradicted"
 ONE_BOX_DROPPED_HOURS = "one_box_dropped_hours"
+# Casey, PR #70 comment 6992903491, (b): "The local report states plainly that this strict
+# run produced no real receiver."
+NO_RECEIVER_LINE = (
+    "no real receiver: this strict run produced no real receiver and wrote no rx_real.parquet, "
+    "because no pair has both ends in the tile by its own rows; engine.prepare refuses this "
+    "folder unless --no-real-receivers is passed (Casey, PR #70 comment 6992903491)"
+)
 # Casey's answer that each pair's own row decides its kind and role.
 KIND_SOURCE = "issue #55 comment 6990646633, item 3"
 OTHER_BOX_COUNT = "pairs kept with another box in hours not kept:"
@@ -554,7 +561,9 @@ def _write_both(run: _Run) -> None:
 
     Beside the layers it writes the local run report, so the lines for Casey
     in the session (the kind disagreements, the other-box and two-box pairs)
-    are kept with the layers they belong to; a refusal writes neither.
+    are kept with the layers they belong to; a refusal writes neither. With
+    no both-ends pair by rows it writes the sites alone and says so in a line
+    of its own (Casey, PR #70 comment 6992903491, (b)).
     """
     selection = select_nodes(run.links, run.tile, run.expect_pairs, run.extent)
     record = [*run.capture_lines, *run.straddle_lines]
@@ -562,13 +571,13 @@ def _write_both(run: _Run) -> None:
     # Casey's stop for a dropped selected pair comes here, after the drop lines
     # and before anything with real positions is written.
     sites, receiver = selection.layers()
+    if receiver is None:
+        _say(NO_RECEIVER_LINE, record)
     counts = counts_line(run.links, run.tile_counts, selection)
     heading = f"engine_inputs, {run.tile.name}"
     write_layers(run.out, sites, receiver, report_text(heading, run.source, [*record, counts]))
-    print(
-        f"wrote {SITES_FILE} ({len(sites)} sites), {RECEIVERS_FILE} (1 receiver) and "
-        f"{REPORT_FILE} (local only)"
-    )
+    written = f"{RECEIVERS_FILE} (1 receiver)" if receiver is not None else f"no {RECEIVERS_FILE}"
+    print(f"wrote {SITES_FILE} ({len(sites)} sites), {written} and {REPORT_FILE} (local only)")
     print(counts)
 
 
