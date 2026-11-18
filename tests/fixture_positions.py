@@ -130,11 +130,11 @@ def half_widths(width: int, latitude_i: int) -> tuple[float, float]:
     return angle * meridian, angle * prime_vertical * math.cos(phi)
 
 
-def precise(bits: int | None, source: str, seen_meshstl: bool) -> bool:
-    """pos_04 with Casey's item 8: MeshSTL, and 20 bits or more or a Position at 0 bits."""
+def precise(bits: int | None, seen_meshstl: bool) -> bool:
+    """pos_04: MeshSTL, and 20 bits or more or 0 bits, Position or MapReport alike."""
     if not seen_meshstl or bits is None:
         return False
-    return bits >= 20 or (source == "position" and bits == 0)
+    return bits >= 20 or bits == 0
 
 
 def zero_mapped(row: dict[str, Any]) -> bool:
@@ -161,9 +161,7 @@ def expected_position(row: dict[str, Any]) -> dict[str, Any]:
         "precision_bits": bits,
         "position_quality": quality(bits) if has_position else None,
         "cell_width_i": width,
-        "precise_source": (
-            precise(bits, row["position_source"], row["seen_meshstl"]) if has_position else None
-        ),
+        "precise_source": (precise(bits, row["seen_meshstl"]) if has_position else None),
         "inside_msa": has_position and inside_msa(row["latitude_i"], row["longitude_i"]),
     }
     expected |= cell_columns(row, bits, width)
@@ -210,7 +208,7 @@ def mark_in_core(rows: list[dict[str, Any]], raw: dict[tuple[str, str], Any]) ->
         key = row["delivery_key"]
         row["in_core"] = row["inside_msa"] and first[key] == copy_order(row, raw)
         bits = row["precision_bits"]
-        in_core_flag = precise(bits, row["position_source"], meshstl.get(key, False))
+        in_core_flag = precise(bits, meshstl.get(key, False))
         row["core_precise_source"] = in_core_flag if row["in_core"] else None
 
 
