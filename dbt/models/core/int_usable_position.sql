@@ -4,8 +4,9 @@
 -- either broker and either source (fct_node_position holds only positions
 -- inside the MSA). One broadcast heard by several gateways is several
 -- deliveries in core; here it is one position, at the received_at of its
--- first copy, as ADR 0005 times a delivery by its first sighting, and
--- precise when any copy qualifies under pos_04. A position without a
+-- first copy, and precise when any copy qualifies under pos_04 (Casey, PR
+-- #72, Q3: "(a). A broadcast's gateway copies count as one position, timed
+-- by the first copy, precise if any copy qualifies."). A position without a
 -- packet_id stays one row per delivery.
 --
 -- Each carries its cell's half-open edges and next_conflict_at, the earliest
