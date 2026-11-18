@@ -1,12 +1,13 @@
 mesh_terrain:
-  # The default is the development target. dbt uses it when a command gives
-  # no --target and DBT_TARGET is unset; a run on prod refuses to start unless
-  # make dbt-build-real started it. dbt/README.md says who runs which.
+  # The default is Track B's development target. dbt uses it when a command
+  # gives no --target and DBT_TARGET is unset; a run on prod refuses to start
+  # unless make dbt-build-real started it. dbt/README.md says who runs which.
   target: dev_wh
   outputs:
     # Builds into staging_dev_wh, core_dev_wh and analytics_dev_wh and reads
     # raw_dev_wh, which holds synthetic fixture tables only
-    # (macros/target_schemas.sql). make check and make dbt-build use it.
+    # (macros/target_schemas.sql). make check and make dbt-build use it unless
+    # DBT_DEV_TARGET names another development target.
     dev_wh: &warehouse
       type: postgres
       host: "{{ env_var('WAREHOUSE_HOST') }}"
@@ -19,6 +20,11 @@ mesh_terrain:
       schema: staging
       threads: 4
       connect_timeout: 10
+    # Track A's copy of dev_wh, so a Track A make check and a Track B one
+    # running at once never build into the same schemas: staging_dev_ta,
+    # core_dev_ta and analytics_dev_ta, reading raw_dev_ta. Track A runs
+    # make check DBT_DEV_TARGET=dev_ta.
+    dev_ta: *warehouse
     # The real raw, staging, core and analytics schemas. Only the lead runs it,
     # through make dbt-build-real.
     prod: *warehouse

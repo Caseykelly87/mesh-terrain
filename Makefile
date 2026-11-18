@@ -32,6 +32,23 @@ UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt
 
+# make check and make dbt-build build on a development target, one per track,
+# so a Track A run and a Track B run at once never share schemas (Casey, issue
+# #55 comment 6966197127, item 3): dev_wh, the default, for Track B, and dev_ta
+# for Track A (make check DBT_DEV_TARGET=dev_ta). Any other value, prod
+# included, stops make before any recipe runs, since the real build is
+# make dbt-build-real alone. The guard is unexported because the bare export
+# would expand it, and so raise the error, for every recipe's environment.
+DBT_DEV_TARGET ?= dev_wh
+DBT_DEV_TARGETS := dev_wh dev_ta
+DBT_DEV_TARGET_REFUSAL = make check and make dbt-build take DBT_DEV_TARGET=dev_wh or \
+    dev_ta, not '$(DBT_DEV_TARGET)'; the real schemas are built only by make \
+    dbt-build-real, the lead's target
+DBT_DEV_TARGET_GUARD = $(if $(filter-out 1,$(words $(DBT_DEV_TARGET)))$(filter-out \
+    $(DBT_DEV_TARGETS),$(DBT_DEV_TARGET)),$(error $(DBT_DEV_TARGET_REFUSAL)))
+unexport DBT_DEV_TARGET_GUARD
+$(if $(filter check dbt-build,$(MAKECMDGOALS)),$(DBT_DEV_TARGET_GUARD))
+
 .PHONY: help env up down nuke check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
 
@@ -41,8 +58,10 @@ help:
 	@echo "                (up and down are the only start and stop; no service restarts on its own)"
 	@echo "make nuke       stop the stack and delete every project volume after a typed confirmation"
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
-	@echo "make check      ruff, mypy, pytest, dbt deps and dbt build against the local stack,"
-	@echo "                on the development target: schemas suffixed _dev_wh, sources in raw_dev_wh"
+	@echo "make check [DBT_DEV_TARGET=dev_ta]"
+	@echo "                ruff, mypy, pytest, dbt deps and dbt build against the local stack, on a"
+	@echo "                development target: dev_wh by default (Track B), schemas suffixed _dev_wh and"
+	@echo "                sources in raw_dev_wh; dev_ta for Track A, suffix _dev_ta; prod is refused"
 	@echo "make check-itm  load the ITM library in the Dagster image, reproduce the ADR 0002 figure"
 	@echo "                and run tests/test_itm.py and tests/test_path_loss.py there, failing on a skip"
 	@echo "make check-p1812 [FIXTURE=<folder> EXPECT_DB=<dB>]"
@@ -125,12 +144,14 @@ dbt-deps:
 dbt-debug: dbt-deps
 	$(DBT) debug $(DBT_ARGS)
 
-# The development target dev_wh builds into staging_dev_wh, core_dev_wh and
-# analytics_dev_wh and reads raw_dev_wh, never the real schemas
-# (dbt/macros/target_schemas.sql). It is also the profile's default; naming it
-# here keeps make check off the real schemas if the default ever changes.
+# A development target builds into staging_<target>, core_<target> and
+# analytics_<target> and reads raw_<target>, never the real schemas
+# (dbt/macros/target_schemas.sql). dev_wh is also the profile's default;
+# naming the target here keeps make check off the real schemas if the default
+# ever changes. The guard repeats the check above for a run that reaches this
+# recipe from another goal.
 dbt-build: dbt-deps
-	$(DBT) build $(DBT_ARGS) --target dev_wh
+	$(DBT_DEV_TARGET_GUARD)$(DBT) build $(DBT_ARGS) --target $(DBT_DEV_TARGET)
 
 # The real raw, staging, core and analytics schemas. The lead's target only
 # (dbt/README.md); no agent's unit runs it. dbt refuses a run on prod without
