@@ -1,0 +1,82 @@
+version: 2
+
+models:
+  - name: stg_packet
+    description: >
+      One row per packet heard at a gateway: of several copies of one packet
+      (origin, packet_id) at one gateway, across deliveries and across
+      snapshots, the first by received_at (ing_06). Every packet type is here;
+      positions are also in stg_position, without this deduplication.
+    columns:
+      - name: delivery_key
+        description: The kept copy's delivery key, the HMAC of its topic and payload (ing_01).
+        tests:
+          - unique
+          - not_null
+      - name: snapshot_id
+        description: The snapshot the kept copy was loaded from.
+        tests:
+          - not_null
+      - name: received_at
+        description: When our capture received the kept copy, in UTC; every ordering uses it, never rx_time (ing_06).
+        tests:
+          - not_null
+      - name: topic
+        description: The MQTT topic the kept copy arrived on, with the gateway pseudonym in place of its id.
+      - name: modem_preset
+        description: The modem preset parsed from the topic's channel segment, null for a custom channel name.
+      - name: seen_public
+        description: True when the public broker carried the kept delivery.
+      - name: seen_meshstl
+        description: True when the MeshSTL broker carried the kept delivery.
+      - name: decode_status
+        description: How the payload decoded, one of ok, unknown_port, decrypt_failed, stripped and malformed (ing_03).
+      - name: origin_pseudonym
+        description: The sending node's pseudonym.
+        tests:
+          - not_null
+      - name: origin_low_byte
+        description: >
+          The sending node's low id byte, with 0 read as 255, since firmware
+          sends a relayer whose low byte is 0 as relay_node 0xFF.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 255
+      - name: gateway_pseudonym
+        description: The pseudonym of the gateway that uplinked the packet.
+      - name: gateway_low_byte
+        description: The gateway's low id byte, with 0 read as 255 as for origin_low_byte.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 255
+      - name: packet_id
+        description: The packet's id from its sender; null where raw landed 0.
+      - name: relay_node
+        description: The low id byte of the last node that relayed the packet into the gateway, null where raw landed 0.
+      - name: via_mqtt
+        description: True when the packet reached the gateway over MQTT rather than by radio.
+      - name: rx_time
+        description: The gateway's own receive time in Unix seconds, as sent; stored and never used to order anything (ing_06).
+      - name: rx_snr
+        description: The gateway's signal-to-noise ratio for the packet in dB, as raw holds it.
+      - name: rx_rssi
+        description: The gateway's received signal strength in dBm, as raw holds it, null where it was 0.
+      - name: channel
+        description: The packet's channel hash.
+      - name: portnum
+        description: The application port the payload decoded to, 3 for Position, 67 telemetry, 71 NeighborInfo, 73 MapReport.
+      - name: payload_length
+        description: The payload's length in bytes; the bytes themselves are never stored.
+      - name: decoder_version
+        description: The decoder build that produced the raw row (ing_07).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ["origin_pseudonym", "packet_id", "gateway_pseudonym"]
+          config:
+            where: "packet_id is not null and gateway_pseudonym is not null"
+            meta: {contract: ing_06}
