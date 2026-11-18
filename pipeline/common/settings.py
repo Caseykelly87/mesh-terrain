@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     warehouse_password: SecretStr
     warehouse_db: str
 
+    # The tests' database role (docker/warehouse/test-role.sql); only
+    # tests/conftest.py reads it, so the containers run without it.
+    warehouse_test_user: str | None = None
+    warehouse_test_password: SecretStr | None = None
+
     dagster_pg_db: str
 
     s3_endpoint_url: str
