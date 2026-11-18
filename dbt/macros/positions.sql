@@ -69,20 +69,17 @@
 {%- endmacro %}
 
 {#
-  pos_04's precise flag for one position: carried by the MeshSTL broker, and
-  either 20 bits or more, or a Position sent at 0 bits, which firmware older
-  than the precision field sends with full-precision coordinates (Casey, issue #55 comment 6985802330, item 8;
-  the pos_04 wording follows in the next contract PR). A MapReport at 0 bits
-  is not flagged: item 8 names a Position. False, never null, for a position
-  without precision_bits.
+  pos_04's precise flag for one position that carries coordinates: carried by
+  the MeshSTL broker, and either 20 bits or more, or 0 bits, Position or
+  MapReport alike. Firmware older than the precision field sends 0 bits with
+  full-precision coordinates, and the rule is about privacy, not the message
+  type (Casey, issue #55 comment 6989099568, item 2; PR #71's pos_04: "or a position with precision_bits 0 that carries coordinates, Position or MapReport, is flagged precise_source = true exactly when seen_meshstl is true on its delivery").
+  False, never null, for a position without precision_bits.
 #}
-{% macro precise_flag(precision_bits, position_source, seen_meshstl) -%}
+{% macro precise_flag(precision_bits, seen_meshstl) -%}
     coalesce(
         {{ seen_meshstl }}
-        and (
-            {{ precision_bits }} >= 20
-            or ({{ position_source }} = 'position' and {{ precision_bits }} = 0)
-        ),
+        and ({{ precision_bits }} >= 20 or {{ precision_bits }} = 0),
         false
     )
 {%- endmacro %}

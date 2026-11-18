@@ -95,6 +95,6 @@ models:
       - name: precise_source
         description: >
           True when the MeshSTL broker carried this copy of the delivery and
-          precision_bits is 20 or more, or the row is a Position at 0 bits
-          (pos_04; Casey, issue #55 comment 6985802330, item 8); null when the row
+          precision_bits is 20 or more, or 0, Position or MapReport alike
+          (pos_04; Casey, issue #55 comment 6989099568, item 2); null when the row
           has no position. Core reads every copy.

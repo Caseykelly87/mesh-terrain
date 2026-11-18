@@ -72,8 +72,9 @@ models:
       - name: precise_source
         description: >
           True when the MeshSTL broker carried any copy of the delivery, in any
-          snapshot, and precision_bits is 20 or more, or the row is a Position
-          at 0 bits (pos_04; Casey, issue #55 comment 6985802330, items 7 and 8).
+          snapshot, and precision_bits is 20 or more, or 0, Position or MapReport
+          alike (pos_04; Casey, issue #55 comment 6985802330, item 7, and comment
+          6989099568, item 2).
           Such a position never leaves core at its own precision (prv_02).
         tests:
           - not_null
