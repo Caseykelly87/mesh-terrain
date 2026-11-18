@@ -17,8 +17,9 @@ under the contract's link-hour rules on the merged snapshot
 - B to G2, G2 inside the tile and B east of it, public, 4 link-hours, one of
   them carried by both brokers.
 - C to G3, G3 inside the tile 300 m from its east edge and C east of the
-  tile, public, 3 link-hours. With `g3_at_edge`, G3 sends a box 45 m from the
-  edge instead, whose box plus 50 m reaches outside the DEM.
+  tile, public, 3 link-hours. With `g3_at_edge`, G3 sends a box that crosses
+  the tile's east edge instead. With the DEM `NARROW_DEM_BOUNDS_M`, G3's own
+  box lies inside the tile but its box plus 50 m reaches outside the DEM.
 - D to E, both east of the tile, public, 1 link-hour. With `busy_outside_pair`,
   6 link-hours, which makes it the busiest pair by link-hours though it does
   not touch the tile.
@@ -35,14 +36,19 @@ an invented partner (`PARTNERS`, 12 km east of that box, outside the tile)
 reads it by the 30-minute fallback, since the node's 7-day look-back then
 holds two places. The partner is the relayer when the node is a gateway and
 the gateway otherwise. The node then used a different box in each of two
-pairs: it straddles the tile edge when the two lie on both sides of it, and
-otherwise it is a node with more than one box. `straddler` gives one node of
-`STRADDLE_SHIFTS_M` its second place across the tile edge; `moved_a` gives A
-one 2 km east and `moved_g3` gives G3 one 2 km west, both inside the tile.
+pairs, a layer row each. `straddler` gives one node of `STRADDLE_SHIFTS_M` a
+second place whose box crosses the tile edge, so that row straddles it
+(Casey, issue #55 comment 6985802330, item 6); `moved_a` gives A one 2 km
+east and `moved_g3` gives G3 one 2 km west, both inside the tile.
 
 `contradicted_d` gives E a NeighborInfo report, before D's receipts, that
 names an invented node with D's low byte: each of D's direct hops to E is then
 dropped by `lnk_01` and counted (Casey, PR #66, Q4 (a)), so D to E is no pair.
+
+`moved_short_hour` gives C to G3 the same 14:00 hour with two receipts only,
+so it is not kept (`lnk_04`): the pair is kept at its own boxes, which its
+kept hours used, and reported for the other box (Casey, issue #55 comment
+6985802330, item 2, (b)).
 
 `moved_in_pair` gives C to G3 a fourth link-hour, at 14:00 on 23 October,
 where G3 reads a box 2 km west by the fallback: the pair's counted receipts
@@ -82,6 +88,9 @@ DEM_SNAPSHOT_ID = "dem-fixture-x72y429"
 # The real x72y429 DEM's bounds (issue #44, step 2), held by a 2 by 2 raster of
 # 5006 m pixels: the command reads only the bounds.
 DEM_BOUNDS_M = (719_994.0, 4_279_994.0, 730_006.0, 4_290_006.0)
+# A square DEM whose east edge lies 36 m east of G3's own box: G3 is inside the
+# tile but its box plus the engine's 50 m margin is not inside the DEM.
+NARROW_DEM_BOUNDS_M = (719_774.0, 4_280_000.0, 729_780.0, 4_290_006.0)
 TELEMETRY_APP = 67
 POSITION_APP = 3
 NEIGHBORINFO_APP = 71
@@ -163,16 +172,16 @@ NODES = {
     )
 }
 # East and north shifts, metres, that put a node's second box across the
-# tile edge: G2 (a gateway-only pair's gateway) and A (the both-ends pair's
-# relayer) east of the tile, D (an unselected pair's relayer) and B (a
-# gateway-only pair's relayer) inside it.
+# tile edge, so that row straddles it: G2 (a gateway-only pair's gateway)
+# across the west edge, A (the both-ends pair's relayer), D (an unselected
+# pair's relayer) and B (a gateway-only pair's relayer) across the east edge.
 STRADDLE_SHIFTS_M = {
-    "G2": (10_000.0, 0.0),
-    "A": (5_000.0, 0.0),
-    "D": (-15_000.0, -10_000.0),
-    "B": (-10_000.0, 0.0),
+    "G2": (-2_000.0, 0.0),
+    "A": (3_500.0, 0.0),
+    "D": (-10_000.0, -10_000.0),
+    "B": (-5_000.0, 0.0),
 }
-# G3's box 45 m from the tile's east edge, as the fixture first placed it.
+# G3's box across the tile's east edge (its 18-bit cell steps about 142 m).
 G3_EDGE_SHIFT_M = 250.0
 # G3's second box with moved_g3 or moved_in_pair: 2 km west, still inside the tile.
 G3_MOVED_SHIFT_M = -2_000.0
@@ -372,11 +381,11 @@ def second_place(rows: RowMaker, key: str) -> None:
 NEIGHBOUR_LIKE_D = FakeNode("N", 0x24, 0.0, 0.0, 16)
 
 
-def _moved_in_pair(rows: RowMaker) -> None:
+def _moved_in_pair(rows: RowMaker, minutes: tuple[int, ...] = SECOND_PLACE_MINUTES) -> None:
     """C to G3 at 14:00 on 23 October, with G3 on a box 2 km west (module docstring)."""
     n = NODES
     rows.position(n["G3"], n["G3"], at(23, 13, 50), PUBLIC, n["G3"].box(G3_MOVED_SHIFT_M))
-    rows.receipts(n["C"], n["G3"], at(23, 14), PUBLIC, SECOND_PLACE_MINUTES)
+    rows.receipts(n["C"], n["G3"], at(23, 14), PUBLIC, minutes)
 
 
 def position_row(name: str, place: tuple[int, int, int], meshstl: bool = False) -> dict[str, Any]:
@@ -398,6 +407,7 @@ def build_capture(
     *,
     moved_a: bool = False,
     moved_in_pair: bool = False,
+    moved_short_hour: bool = False,
     contradicted_d: bool = False,
     one_coordinate: bool = True,
     g3_at_edge: bool = False,
@@ -416,11 +426,12 @@ def build_capture(
             second pair (`second_place`).
         moved_in_pair: Give C to G3 a link-hour where G3 uses a second box,
             so the pair used two boxes for G3.
+        moved_short_hour: Give C to G3 an hour of two receipts where G3 uses a
+            second box; the hour is not kept, so the pair keeps one box.
         contradicted_d: Give E a NeighborInfo report naming another node
             with D's low byte, so D's direct hops to E are dropped (Q4).
         one_coordinate: Include A's Position with no latitude.
-        g3_at_edge: Place G3 45 m from the tile's east edge, where its box plus
-            50 m reaches outside the DEM.
+        g3_at_edge: Place G3's box across the tile's east edge.
         straddler: A key of STRADDLE_SHIFTS_M: that node has a second place
             on the other side of the tile edge, in a second pair.
         busy_outside_pair: Give D to E, which does not touch the tile, 5 more
@@ -440,6 +451,8 @@ def build_capture(
         second_place(rows, key)
     if moved_in_pair:
         _moved_in_pair(rows)
+    if moved_short_hour:
+        _moved_in_pair(rows, SECOND_PLACE_MINUTES[:2])
     if contradicted_d:
         rows.neighbours(NODES["E"], at(23, 10, 30), [NEIGHBOUR_LIKE_D], PUBLIC)
     _links(rows, busy_outside_pair)
