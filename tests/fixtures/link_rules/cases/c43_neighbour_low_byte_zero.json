@@ -1,0 +1,36 @@
+{
+  "case_id": "c43_neighbour_low_byte_zero",
+  "title": "A NeighborInfo neighbour whose low byte is 0 is matched as relay_node 0xFF",
+  "rules": ["lnk_01", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "Firmware sends a relayer whose low byte is 0 as relay_node 0xFF, so staging maps an origin, gateway or neighbour low byte of 0 to 0xFF before lnk_01 matches it (STATUS, interface agreed on 2026-11-14; ADR 0005, relay_node). c07 tests origin bytes; this case tests a neighbour byte.",
+    "c43-s (0x11) sends three packets to c43-g with relay_node 255. 0x11 is not 0xFF, so none is a direct hop (lnk_01).",
+    "Candidates are the senders of the radio deliveries c43-g heard in the 24 hours before each receipt: c43-g's own NeighborInfo at 08:00 (0x0A) and, for the later receipts, c43-s's earlier receipts (0x11). c43-g's own Position of 22 October 09:00 is more than 24 hours before 10:10. c43-n's only delivery is its own Position, uplinked by itself, so c43-n is never a candidate at c43-g. No candidate has 0xFF, so relay_node does not resolve.",
+    "c43-g's own NeighborInfo at 08:00, within 24 hours before every receipt, lists c43-n with low byte 0 and c43-k with 0x30. Read as 0xFF, c43-n's byte is the only one equal to relay_node, so NeighborInfo resolves each receipt to c43-n. Only NeighborInfo resolves, so link_source is neighbor_info (lnk_01). An implementation that does not map the neighbour byte finds no neighbour with 0xFF and drops all three receipts by lnk_01.",
+    "Relayer c43-n and gateway c43-g differ (lnk_03); every RSSI and SNR is in range (lnk_06).",
+    "c43-n (20-bit cell n20) and c43-g (16-bit cell g16) each have one usable position inside the MSA in the 7 days before every receipt, so each is stationary with that cell as its box, and the hour's box is the same cell (lnk_02).",
+    "Distance between the box centres 2745.603 m, inside 500 to 60 000 m, and the cells' longitude intervals are disjoint (lnk_05). One box per end, 3 packets, median distance at least 500 m: kept.",
+    "Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont).",
+    "position_uncertainty_m is the larger half-width of each end's box, n20 22.734410 m plus g16 363.750397 m, = 386.484807 m (lnk_05). Neither end is precise: n20 was sent on the public broker only, and g16 has fewer than 20 bits (pos_04)."
+  ],
+  "messages": [
+    {"delivery_key": "c43-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c43-g", "origin_low_byte": 10, "gateway_pseudonym": "c43-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 43001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c43-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c43-n", "origin_low_byte": 0, "gateway_pseudonym": "c43-n", "gateway_low_byte": 0, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 43002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c43-m003", "received_at": "2026-10-23T08:00:00Z", "origin_pseudonym": "c43-g", "origin_low_byte": 10, "gateway_pseudonym": "c43-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 43003, "relay_node": null, "portnum": 71, "neighbour_pseudonyms": ["c43-n", "c43-k"], "neighbour_low_bytes": [0, 48]},
+    {"delivery_key": "c43-m004", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c43-s", "origin_low_byte": 17, "gateway_pseudonym": "c43-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 43004, "relay_node": 255, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c43-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c43-s", "origin_low_byte": 17, "gateway_pseudonym": "c43-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 43005, "relay_node": 255, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c43-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c43-s", "origin_low_byte": 17, "gateway_pseudonym": "c43-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 43006, "relay_node": 255, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "n20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c43-m004", "outcome": "counted", "relayer": "c43-n", "link_source": "neighbor_info", "relayer_box": "n20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c43-m005", "outcome": "counted", "relayer": "c43-n", "link_source": "neighbor_info", "relayer_box": "n20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c43-m006", "outcome": "counted", "relayer": "c43-n", "link_source": "neighbor_info", "relayer_box": "n20", "gateway_box": "g16", "distance_m": 2745.603337}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c43-n", "gateway": "c43-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c43-m004", "c43-m005", "c43-m006"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 2745.603337, "relayer_box": "n20", "relayer_precise_source": false, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 386.484807}
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "case_id": "c42_gateway_two_fallback_boxes_drop_the_hour",
+  "title": "c24 on the gateway side: a moved gateway whose counted receipts take two different fallback fixes, so the hour is dropped and counted",
+  "rules": ["lnk_02", "lnk_05"],
+  "reasoning": [
+    "Every receipt is a radio receipt at c42-g from c42-r with relay_node 20, c42-r's own low byte: a direct hop, relayer c42-r, link_source relay_node (lnk_01). Relayer and gateway differ (lnk_03); every RSSI and SNR is in range (lnk_06).",
+    "c42-r's only position is its 16-bit cell (c42-m001), sent the day before, so it is stationary at every receipt with that cell, r16, as its box (lnk_02).",
+    "c42-g's 20-bit cells of 21 and 22 October (c42-m002 and c42-m003) do not overlap (their latitude intervals are disjoint) and their stored coordinates are 1000.315 m apart, beyond the 40 m floor. Both lie in the 7 days before every receipt, so c42-g has moved at every receipt and takes the position nearest in time within 30 minutes (lnk_02, Q5). lnk_02 applies to 'the relayer or the gateway', so the gateway end follows the same steps as c24's relayer.",
+    "Fallback for the gateway: at 10:10 the fix X (c42-m004, 10:05, 5 minutes before) is within 30 minutes and Y (c42-m005, 10:45, 35 minutes after) is not; at 10:40 Y (5 minutes after) is and X (35 minutes before) is not; at 10:50 Y (5 minutes before) is and X (45 minutes before) is not. So the receipts use x32, y32 and y32.",
+    "Step 6: c42-g is not stationary at the hour's receipts, so each receipt keeps its own box.",
+    "Each receipt passes lnk_05 on its own boxes: r16 to x32 is 1768.971 m and r16 to y32 is 1758.882 m, inside 500 to 60 000 m, and r16's longitude interval is disjoint from both 32-bit cells. These are c24's distances with the ends swapped, since the geodesic between two box centres does not depend on which end is which. All three are counted.",
+    "Over the counted receipts the gateway used two boxes, x32 and y32, so the link-hour is dropped and counted in mart_data_quality (lnk_02: a link-hour in which the relayer or the gateway used more than one box is dropped; Q6 and Q9). The one-box test comes before lnk_04's 3 packets, so the rule is lnk_02. An implementation that applies the one-box test to the relayer only keeps this hour."
+  ],
+  "messages": [
+    {"delivery_key": "c42-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c42-r", "origin_low_byte": 20, "gateway_pseudonym": "c42-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 42001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c42-m002", "received_at": "2026-10-21T09:05:00Z", "origin_pseudonym": "c42-g", "origin_low_byte": 10, "gateway_pseudonym": "c42-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 42002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c42-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c42-g", "origin_low_byte": 10, "gateway_pseudonym": "c42-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 42003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386091008, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c42-m004", "received_at": "2026-10-23T10:05:00Z", "origin_pseudonym": "c42-g", "origin_low_byte": 10, "gateway_pseudonym": "c42-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 42004, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385999977, "longitude_i": -903770411, "precision_bits": 32},
+    {"delivery_key": "c42-m005", "received_at": "2026-10-23T10:45:00Z", "origin_pseudonym": "c42-g", "origin_low_byte": 10, "gateway_pseudonym": "c42-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 42005, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385954936, "longitude_i": -903770425, "precision_bits": 32},
+    {"delivery_key": "c42-m006", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c42-r", "origin_low_byte": 20, "gateway_pseudonym": "c42-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 42006, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c42-m007", "received_at": "2026-10-23T10:40:00Z", "origin_pseudonym": "c42-r", "origin_low_byte": 20, "gateway_pseudonym": "c42-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 42007, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c42-m008", "received_at": "2026-10-23T10:50:00Z", "origin_pseudonym": "c42-r", "origin_low_byte": 20, "gateway_pseudonym": "c42-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 42008, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "r16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "x32": {"south_i": 385999977, "north_i": 385999978, "west_i": -903770411, "east_i": -903770410, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356},
+    "y32": {"south_i": 385954936, "north_i": 385954937, "west_i": -903770425, "east_i": -903770424, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c42-m006", "outcome": "counted", "relayer": "c42-r", "link_source": "relay_node", "relayer_box": "r16", "gateway_box": "x32", "distance_m": 1768.970669},
+    {"delivery_key": "c42-m007", "outcome": "counted", "relayer": "c42-r", "link_source": "relay_node", "relayer_box": "r16", "gateway_box": "y32", "distance_m": 1758.882174},
+    {"delivery_key": "c42-m008", "outcome": "counted", "relayer": "c42-r", "link_source": "relay_node", "relayer_box": "r16", "gateway_box": "y32", "distance_m": 1758.882174}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c42-r", "gateway": "c42-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c42-m006", "c42-m007", "c42-m008"], "packets": 3, "outcome": "dropped", "rule": "lnk_02"}
+  ]
+}
