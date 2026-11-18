@@ -37,7 +37,6 @@ from dbt_listing import (
 
 from pipeline.common.settings import get_settings
 
-SUFFIX = f"_{DEVELOPMENT_TARGET}"
 # Track A's development target; DEVELOPMENT_TARGET (dev_wh) is Track B's.
 TRACK_A_TARGET = "dev_ta"
 DEVELOPMENT_TARGETS = (DEVELOPMENT_TARGET, TRACK_A_TARGET)
