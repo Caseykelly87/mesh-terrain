@@ -17,12 +17,14 @@ Positions follow the contract's link-hour rules (`ingester.link_rules`):
 a node's boxes are the boxes its pairs' counted receipts used under `lnk_02`
 (Casey, issue #44, 2026-11-17: "gives each pair the box its counted receipts
 used"), a pair whose end used more than one box being dropped before this
-module sees it (`ingester.link_pairs`). A node whose pairs all used one box,
-all four edges equal, is placed there (`NodePositions.one_box`) and is in or
-out of the tile by that box's centre, the midpoint of its edges. A node that
-used a different box in two pairs is in, out or straddling by the centres of
-all its boxes; such a node is not placed (decided without Casey in the item 4
-unit, since one layer row per node cannot hold a node at two places).
+module sees it (`ingester.link_pairs`). A node is placed once per pair, at
+the box that pair used (Casey, issue #44, 2026-11-17: "a moving node is
+placed per pair"): one layer row per distinct (node, box), whose id is the
+node's pseudonym when all its pairs used one box and `<pseudonym>.<n>`
+otherwise, n counting its boxes from 1 in the capture's pair order
+(`site_row_ids`). A row is placed at the midpoint of its box's edges. A node
+is in or out of the tile by the centres of all its boxes, so a node whose
+pairs used boxes on both sides of the tile edge straddles it.
 
 A node straddles the tile when it has more than one box and its boxes lie on
 both sides of the tile edge. The rule for it (Casey, issue #44,
@@ -34,8 +36,8 @@ straddling node counted as in the tile. Then a pair is dropped when either of
 its nodes straddles, or a node of it that the run places fails the DEM edge
 check. A node shared with another pair stays in that pair unless it fails
 there too. Dropping the both-ends pair or a gateway-only pair stops the run
-for Casey (`Selection.layers`). A selected node with more than one box that
-does not straddle, two boxes inside the tile for example, is refused.
+for Casey (`Selection.layers`). A node with more than one box that does not
+straddle, two boxes inside the tile for example, gets a row per box.
 
 With the count check as it is, three touching pairs and all three selected,
 an unselected pair can only be dropped if it touches the tile, and a fourth
@@ -47,8 +49,8 @@ them first (Casey, PR #51, (a)).
 `select_sites` is the x72y429 run with no real receiver (Casey, 2026-11-17,
 engine_inputs (c)): the same candidates and roles, counted with a straddling
 node in the tile, but no count check, no stop on a dropped pair and no
-receiver. A gateway is kept only when it has one box, does not straddle
-and passes the DEM edge check; the others are returned with their reason.
+receiver. A gateway row is kept only when its node does not straddle and
+the row passes the DEM edge check; the others are returned with their reason.
 `count_differences` lists every count that differs from 2026-11-08, so that
 run can report them; `select_nodes` refuses on the first.
 `site_straddle_drops` gives that run's straddle drops with their kinds.
@@ -68,7 +70,7 @@ puts a coordinate in an error message.
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,7 +82,7 @@ from engine.errors import ConfigError
 from engine.grid import run_grid
 from engine.points import Endpoint
 from engine.snapshots import resolve_snapshots
-from ingester.link_cells import LinkBox
+from ingester.link_cells import Edges, LinkBox
 from ingester.link_pairs import (
     CaptureLinks,
     NodePositions,
@@ -105,8 +107,6 @@ SITE_RULE = (
 KIND_NOT_DETERMINED = "pair (kind not determined)"
 STRADDLES = "straddles the tile edge"
 FAILS_DEM = "fails the DEM edge check"
-# Why a sites-only run leaves a gateway out, beside STRADDLES and FAILS_DEM.
-SEVERAL_BOXES = "used more than one box across its pairs (lnk_02)"
 IN, OUT, SPLIT = "in", "out", "split"
 ENDS = ("relayer", "gateway")
 TILE_SIZE_M = 10_000.0
@@ -154,6 +154,7 @@ class PlacedNode:
         half_width_m: The box's smaller half-width in metres: the inscribed square
             (Casey, issue #44, 1 (b)), by `pos_01`'s WGS84 formula.
         precise_source: Whether the node is a precise MeshSTL source (`pos_04`).
+        row_id: The layer row's id when it is not the pseudonym (`site_row_ids`).
     """
 
     pseudonym: str
@@ -162,6 +163,12 @@ class PlacedNode:
     northing_m: float
     half_width_m: float
     precise_source: bool
+    row_id: str | None = None
+
+    @property
+    def layer_id(self) -> str:
+        """The `site_id` or `rx_id` the row is written with."""
+        return self.row_id or self.pseudonym
 
 
 @dataclass(frozen=True)
@@ -187,7 +194,7 @@ class Selection:
     Attributes:
         placed: The selected nodes that do not straddle, at their boxes'
             centres: the sites in order, then the receiver.
-        dem_check: Per placed node's pseudonym, whether its box plus the
+        dem_check: Per placed row's `layer_id`, whether its box plus the
             engine's margin lies inside the DEM (`inside_dem`).
         dropped: The dropped pairs, in the capture's pair order.
     """
@@ -368,12 +375,16 @@ def tile_counts(states: dict[PairActivity, PairState]) -> dict[str, int]:
     }
 
 
-def _drop_reason(node: str, state: str, dem_check: dict[str, bool]) -> str | None:
+def _drop_reason(row: str, state: str, dem_check: dict[str, bool]) -> str | None:
     if state == SPLIT:
         return STRADDLES
-    if dem_check.get(node) is False:
+    if dem_check.get(row) is False:
         return FAILS_DEM
     return None
+
+
+RowOf = Callable[[PairActivity, str], str]
+"""The layer row id of a pair's `relayer` or `gateway` end."""
 
 
 def dropped_pairs(
@@ -381,26 +392,33 @@ def dropped_pairs(
     kinds: dict[PairActivity, str],
     dem_check: dict[str, bool],
     other_kind: str = OTHER_PAIR,
+    row_of: RowOf | None = None,
 ) -> tuple[DroppedPair, ...]:
     """The pairs dropped under engine_inputs Q1 (a), each with every end that drops it.
 
     Args:
         states: Every pair's state from `pair_states`.
         kinds: BOTH_ENDS_PAIR or GATEWAY_ONLY_PAIR for each selected pair.
-        dem_check: Per node the run places, whether it passes the DEM edge check.
+        dem_check: Per row the run places, whether it passes the DEM edge check.
         other_kind: The kind of a pair not in kinds.
+        row_of: The row id of a pair end; the end's pseudonym when None.
 
     Returns:
-        A pair is dropped when either end straddles the tile edge, or an end the
-        run places fails the DEM edge check; the other pairs are not listed.
+        A pair is dropped when either end straddles the tile edge, or the row
+        the run places for an end fails the DEM edge check; the other pairs
+        are not listed.
     """
     dropped = []
     for pair, state in states.items():
-        ends = zip(ENDS, (pair.relayer, pair.gateway), state, strict=True)
+        nodes = (pair.relayer, pair.gateway)
+        rows = [
+            node if row_of is None else row_of(pair, end)
+            for end, node in zip(ENDS, nodes, strict=True)
+        ]
         reasons = tuple(
             (end, reason)
-            for end, node, node_state in ends
-            if (reason := _drop_reason(node, node_state, dem_check)) is not None
+            for end, row, node_state in zip(ENDS, rows, state, strict=True)
+            if (reason := _drop_reason(row, node_state, dem_check)) is not None
         )
         if reasons:
             dropped.append(DroppedPair(pair, kinds.get(pair, other_kind), reasons))
@@ -434,18 +452,79 @@ def straddle_drops(links: CaptureLinks, tile: Tile, expect_pairs: int) -> tuple[
     return dropped_pairs(states, kinds, {})
 
 
-def _place(nodes: dict[str, NodePositions], pseudonym: str, role: str) -> PlacedNode:
-    found = nodes[pseudonym]
-    box = found.one_box
-    if box is None:
+def end_box(links: CaptureLinks, pair: PairActivity, end: str) -> LinkBox:
+    """The box a pair used for its `relayer` or `gateway` end.
+
+    A pair from `link_pairs.capture_links` always carries both boxes; a pair
+    without one takes its node's only box.
+
+    Raises:
+        SelectionError: if the node has no box, or the pair carries none and
+            the node has more than one; the message names no node.
+    """
+    box = pair.relayer_box if end == "relayer" else pair.gateway_box
+    if box is not None:
+        return box
+    found = links.nodes.get(pair.relayer if end == "relayer" else pair.gateway)
+    if found is None:
+        raise SelectionError("a node of a pair has no box")
+    if found.one_box is None:
         raise SelectionError(
-            f"the {role} used {len(found.boxes)} boxes across its pairs; the layers place "
-            "a node at one box (lnk_02)"
+            f"a pair carries no {end} box and that node used {len(found.boxes)}; the rows "
+            "need the box each pair used (lnk_02)"
         )
+    return found.one_box
+
+
+def site_row_ids(links: CaptureLinks) -> dict[tuple[str, Edges], str]:
+    """The layer row id of each (node, box edges) the pairs used.
+
+    A node whose pairs all used one box keeps its pseudonym. A node with more
+    than one box gets `<pseudonym>.<n>`, n counting its boxes from 1 in the
+    order the capture's pairs (sorted by relayer, then gateway; relayer end
+    first) first use them, so the id says nothing of where a box lies. The
+    engine takes such ids: `site_id` matches `engine.run.SITE_ID` and every id
+    in a layer is distinct (`engine.points.read_points`).
+
+    Raises:
+        SelectionError: if a pair carries no box for an end (`end_box`).
+    """
+    order: dict[str, list[Edges]] = {}
+    for pair in links.pairs:
+        for end, node in zip(ENDS, (pair.relayer, pair.gateway), strict=True):
+            edges = end_box(links, pair, end).edges
+            seen = order.setdefault(node, [])
+            if edges not in seen:
+                seen.append(edges)
+    ids: dict[tuple[str, Edges], str] = {}
+    for node, boxes in order.items():
+        found = links.nodes.get(node)
+        several = len(boxes) > 1 or (found is not None and found.one_box is None)
+        for n, edges in enumerate(boxes, start=1):
+            ids[(node, edges)] = f"{node}.{n}" if several else node
+    return ids
+
+
+def _row_of(links: CaptureLinks, ids: dict[tuple[str, Edges], str]) -> RowOf:
+    def row_of(pair: PairActivity, end: str) -> str:
+        node = pair.relayer if end == "relayer" else pair.gateway
+        return ids[(node, end_box(links, pair, end).edges)]
+
+    return row_of
+
+
+SiteRow = tuple[str, str, str, LinkBox]
+"""A layer row to place: its id, the node's pseudonym, its role and the box."""
+
+
+def _place(links: CaptureLinks, row: SiteRow) -> PlacedNode:
+    row_id, node, role, box = row
     easting_m, northing_m = _project(box)
+    precise = links.nodes[node].precise_source if node in links.nodes else False
     return PlacedNode(
-        pseudonym, role, easting_m, northing_m, box.smaller_half_width_m, found.precise_source
-    )
+        node, role, easting_m, northing_m, box.smaller_half_width_m, precise,
+        None if row_id == node else row_id,
+    )  # fmt: skip
 
 
 def count_differences(
@@ -518,20 +597,31 @@ def _straddling(states: dict[PairActivity, PairState]) -> set[str]:
     }
 
 
-def _site_roles(kinds: dict[PairActivity, str]) -> list[tuple[str, str]]:
-    """(pseudonym, role) per site: each gateway once, in the order of kinds, both-ends first."""
-    sites: dict[str, str] = {}
+def _site_rows(
+    links: CaptureLinks, kinds: dict[PairActivity, str], ids: dict[tuple[str, Edges], str]
+) -> list[SiteRow]:
+    """One row per gateway box the selected pairs used, in the order of kinds, both-ends first.
+
+    A gateway that used one box in every selected pair is one row, with the
+    role of its first pair; a gateway at two places is a row per place.
+    """
+    rows: dict[str, SiteRow] = {}
     for pair, kind in kinds.items():
-        sites.setdefault(
-            pair.gateway, BOTH_ENDS_GATEWAY if kind == BOTH_ENDS_PAIR else GATEWAY_ONLY_GATEWAY
-        )
-    return list(sites.items())
+        box = end_box(links, pair, "gateway")
+        row_id = ids[(pair.gateway, box.edges)]
+        role = BOTH_ENDS_GATEWAY if kind == BOTH_ENDS_PAIR else GATEWAY_ONLY_GATEWAY
+        rows.setdefault(row_id, (row_id, pair.gateway, role, box))
+    return list(rows.values())
 
 
-def _roles(kinds: dict[PairActivity, str]) -> list[tuple[str, str]]:
-    """(pseudonym, role) per selected node: each gateway once, both-ends first, then receiver."""
-    receiver = next(pair.relayer for pair, kind in kinds.items() if kind == BOTH_ENDS_PAIR)
-    return [*_site_roles(kinds), (receiver, BOTH_ENDS_RELAYER)]
+def _rows(
+    links: CaptureLinks, kinds: dict[PairActivity, str], ids: dict[tuple[str, Edges], str]
+) -> list[SiteRow]:
+    """The site rows, then the receiver: the both-ends pair's relayer at the box that pair used."""
+    pair = next(pair for pair, kind in kinds.items() if kind == BOTH_ENDS_PAIR)
+    box = end_box(links, pair, "relayer")
+    receiver = (ids[(pair.relayer, box.edges)], pair.relayer, BOTH_ENDS_RELAYER, box)
+    return [*_site_rows(links, kinds, ids), receiver]
 
 
 def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Extent) -> Selection:
@@ -544,17 +634,17 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
         extent: The DEM's edges in EPSG:26915 metres, from `dem_extent`.
 
     Returns:
-        The placed nodes (the both-ends pair's gateway, then the gateway-only
-        pairs' gateways in the capture's pair order, each gateway once, with
-        the both-ends role first, then the both-ends pair's relayer), less any
-        that straddle the tile edge, with their DEM edge check and the dropped
+        The placed rows (the both-ends pair's gateway, then the gateway-only
+        pairs' gateways in the capture's pair order, a row per gateway box
+        the selected pairs used, the both-ends role first, then the
+        both-ends pair's relayer at that pair's box), less any whose node
+        straddles the tile edge, with their DEM edge check and the dropped
         pairs. No busiest-pair ranking enters the choice (SITE_RULE).
         `Selection.layers` refuses when a selected pair was dropped.
 
     Raises:
         SelectionError: when the pairs do not reproduce the 2026-11-08 tile
-            counts, a node of a pair has no box, or a selected node that does
-            not straddle has more than one box.
+            counts, or a node of a pair has no box.
     """
     # The pair count refuses before pair_states, so a call with a wrong count
     # and a node with no box names the count. The command calls
@@ -566,16 +656,17 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
     if isinstance(kinds, str):
         raise SelectionError(kinds)
     straddling = _straddling(states)
-    placed = tuple(
-        _place(links.nodes, node, role) for node, role in _roles(kinds) if node not in straddling
-    )
+    ids = site_row_ids(links)
+    rows = _rows(links, kinds, ids)
+    placed = tuple(_place(links, row) for row in rows if row[1] not in straddling)
     dem_check = _dem_check(placed, extent)
-    return Selection(placed, dem_check, dropped_pairs(states, kinds, dem_check))
+    dropped = dropped_pairs(states, kinds, dem_check, row_of=_row_of(links, ids))
+    return Selection(placed, dem_check, dropped)
 
 
 def _dem_check(placed: Sequence[PlacedNode], extent: Extent) -> dict[str, bool]:
     return {
-        node.pseudonym: inside_dem((node.easting_m, node.northing_m), node.half_width_m, extent)
+        node.layer_id: inside_dem((node.easting_m, node.northing_m), node.half_width_m, extent)
         for node in placed
     }
 
@@ -587,12 +678,18 @@ class LeftOutSite:
     Attributes:
         pseudonym: The gateway's pseudonym.
         role: The role it would have had, `both_ends_gateway` or `gateway_only_gateway`.
-        reason: STRADDLES, SEVERAL_BOXES or FAILS_DEM.
+        reason: STRADDLES or FAILS_DEM.
+        row_id: The row's id when it is not the pseudonym (`site_row_ids`).
     """
 
     pseudonym: str
     role: str
     reason: str
+    row_id: str | None = None
+
+    @property
+    def layer_id(self) -> str:
+        return self.row_id or self.pseudonym
 
 
 @dataclass(frozen=True)
@@ -600,9 +697,9 @@ class SiteSelection:
     """The sites of a sites-only run, the gateways left out and the pairs dropped.
 
     Attributes:
-        selection: The gateways placed (one box, not straddling), their DEM
-            edge check and the pairs dropped; no receiver is placed.
-        left_out: The gateways not written, in site order.
+        selection: The gateway rows placed (not straddling), their DEM edge
+            check and the pairs dropped; no receiver is placed.
+        left_out: The gateway rows not written, in site order.
     """
 
     selection: Selection
@@ -616,7 +713,7 @@ class SiteSelection:
         """
         if not self.selection.placed and not self.left_out:
             raise SelectionError("no site: no pair touching the tile has its gateway in it")
-        kept = [node for node in self.selection.placed if self.selection.dem_check[node.pseudonym]]
+        kept = [node for node in self.selection.placed if self.selection.dem_check[node.layer_id]]
         if not kept:
             raise SelectionError(
                 f"no site left; all {len(self.left_out)} in-tile gateways were left out"
@@ -639,24 +736,19 @@ def site_straddle_drops(links: CaptureLinks, tile: Tile) -> tuple[DroppedPair, .
 
 
 def _place_sites(
-    links: CaptureLinks, roles: list[tuple[str, str]], straddling: set[str], extent: Extent
+    links: CaptureLinks, rows: list[SiteRow], straddling: set[str], extent: Extent
 ) -> tuple[tuple[PlacedNode, ...], dict[str, bool], tuple[LeftOutSite, ...]]:
-    """Place each gateway that can be placed; the rest, and DEM failures, are left out."""
-    placed: list[PlacedNode] = []
-    reasons: dict[str, str] = {}
-    for node, role in roles:
-        if node in straddling:
-            reasons[node] = STRADDLES
-        elif links.nodes[node].one_box is None:
-            reasons[node] = SEVERAL_BOXES
-        else:
-            placed.append(_place(links.nodes, node, role))
+    """Place each gateway row whose node does not straddle; the rest, and DEM failures, left out."""
+    placed = tuple(_place(links, row) for row in rows if row[1] not in straddling)
     dem_check = _dem_check(placed, extent)
-    reasons.update({node: FAILS_DEM for node, inside in dem_check.items() if not inside})
+    reasons = {row[0]: STRADDLES for row in rows if row[1] in straddling}
+    reasons.update({row_id: FAILS_DEM for row_id, inside in dem_check.items() if not inside})
     left_out = tuple(
-        LeftOutSite(node, role, reasons[node]) for node, role in roles if node in reasons
+        LeftOutSite(node, role, reasons[row_id], None if row_id == node else row_id)
+        for row_id, node, role, _ in rows
+        if row_id in reasons
     )
-    return tuple(placed), dem_check, left_out
+    return placed, dem_check, left_out
 
 
 def select_sites(links: CaptureLinks, tile: Tile, extent: Extent) -> SiteSelection:
@@ -665,10 +757,10 @@ def select_sites(links: CaptureLinks, tile: Tile, extent: Extent) -> SiteSelecti
     Casey, 2026-11-17, engine_inputs (c): the site rule of `select_nodes`
     without its count check, its stop on a dropped pair or its receiver. The
     candidates are the in-tile gateway of every pair touching the tile, a
-    straddling node counted as in the tile, each gateway once with the
-    both-ends role first; roles follow those counted states. A candidate is
-    written only when its pairs used one box for it, it does not straddle the
-    tile edge and it passes the DEM edge check. The relayers are not placed, so
+    straddling node counted as in the tile, a row per gateway box those pairs
+    used, the both-ends role first; roles follow those counted states. A row
+    is written only when its node does not straddle the tile edge and the
+    row passes the DEM edge check. The relayers are not placed, so
     only a gateway's DEM check can drop a pair.
 
     Args:
@@ -686,8 +778,8 @@ def select_sites(links: CaptureLinks, tile: Tile, extent: Extent) -> SiteSelecti
     """
     states = pair_states(links, tile)
     kinds = _gateway_pairs(states)
-    placed, dem_check, left_out = _place_sites(
-        links, _site_roles(kinds), _straddling(states), extent
-    )
-    selection = Selection(placed, dem_check, dropped_pairs(states, kinds, dem_check))
-    return SiteSelection(selection, left_out)
+    ids = site_row_ids(links)
+    rows = _site_rows(links, kinds, ids)
+    placed, dem_check, left_out = _place_sites(links, rows, _straddling(states), extent)
+    dropped = dropped_pairs(states, kinds, dem_check, row_of=_row_of(links, ids))
+    return SiteSelection(Selection(placed, dem_check, dropped), left_out)

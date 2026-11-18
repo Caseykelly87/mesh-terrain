@@ -22,8 +22,12 @@ Each pair carries the box its counted receipts used at each end (Casey,
 issue #44, 2026-11-17), under `lnk_02` with the floor, the box around merged
 fixes, one box per end for the hour and the half-open cell. A pair whose end
 used more than one box over its kept hours is dropped before the tile is
-looked at, and the command prints one local line for it. A node is placed at
-the one box its pairs used and is in or out of the tile by that box's centre.
+looked at, and the command prints one local line for it. A node is placed
+once per pair at the box that pair used (Casey: "a moving node is placed per
+pair"), one row per distinct box: a node with one box keeps its pseudonym as
+`site_id` or `rx_id`, and a node at two or more places gets `<pseudonym>.<n>`
+(`ingester.tile_selection.site_row_ids`). A node is in or out of the tile by
+the centres of its boxes.
 The command also prints the data-quality counts the rules give: receipts
 dropped as a direct hop that the gateway's NeighborInfo contradicts (Casey,
 PR #66, Q4 (a): "count these drops as a data-quality count in the run
@@ -53,8 +57,9 @@ dropped pair stops the run. The candidates are the in-tile gateways of the
 site rule above. Their roles follow the counted states, a straddling node
 counted as in the tile, so a straddling relayer can make a second pair a
 both-ends pair and give its gateway the `both_ends_gateway` role. A candidate
-is written only when its pairs used one box for it, it does not straddle the
-tile edge and it passes the DEM edge check
+is written once per box its pairs used, with the row ids of
+`ingester.tile_selection.site_row_ids`, unless it straddles the tile edge or
+the row fails the DEM edge check
 (`ingester.tile_selection.select_sites`). Each gateway left out gets a local
 `left out` line with its reason. A run with no site left refuses, with its
 own message when no pair touching the tile has its gateway in it. No relayer
@@ -156,9 +161,10 @@ NEVER_PUBLISH = (
 # no real receiver. Corridor runs keep the strict checks (issue #44 fallback).
 SITES_ONLY_TILE = "x72y429"
 SITES_ONLY_RULE = (
-    "sites only (Casey, 2026-11-17, engine_inputs (c)): a gateway is written when its pairs "
-    "used one box for it under lnk_02, it does not straddle the tile edge and it passes the "
-    "DEM edge check; no real receiver; neither a dropped pair nor the counts check stops the run"
+    "sites only (Casey, 2026-11-17, engine_inputs (c)): a gateway is written once per box its "
+    "pairs used under lnk_02 (Casey, issue #44, 2026-11-17: a moving node is placed per pair), "
+    "unless it straddles the tile edge or the row fails the DEM edge check; no real receiver; "
+    "neither a dropped pair nor the counts check stops the run"
 )
 # Casey, PR #66, Q4 (a): "drop the receipt, and count these drops as a data-quality
 # count in the run report". The name is the one B2b gave it (PR #68).
@@ -261,9 +267,9 @@ def _print_selection(selection: Selection, printed: set[DropEnd]) -> list[str]:
     record: list[str] = []
     _say(f"sites by tile membership: {SITE_RULE}", record)
     for node in selection.placed:
-        inside = selection.dem_check[node.pseudonym]
+        inside = selection.dem_check[node.layer_id]
         line = (
-            f"{node.pseudonym} {node.role}: box half-width {node.half_width_m:.1f} m, "
+            f"{node.layer_id} {node.role}: box half-width {node.half_width_m:.1f} m, "
             f"precise source {str(node.precise_source).lower()}, box plus 50 m inside the DEM "
             f"(engine rule): extent {'pass' if inside else 'fail'}"
         )
@@ -278,7 +284,7 @@ def counts_line(links: CaptureLinks, tile: dict[str, int], selection: Selection)
     under each reason.
     """
     pairs = links.pair_counts
-    verdicts = [selection.dem_check[node.pseudonym] for node in selection.placed]
+    verdicts = [selection.dem_check[node.layer_id] for node in selection.placed]
     reasons = [
         reason for dropped in selection.dropped for reason in {r for _, r in dropped.reasons}
     ]
@@ -332,7 +338,7 @@ def _check_targets(out: Path, report: bool = False) -> list[Path]:
 
 
 def _frame(nodes: list[PlacedNode], id_column: str, with_role: bool) -> gpd.GeoDataFrame:
-    columns: dict[str, list[object]] = {id_column: [node.pseudonym for node in nodes]}
+    columns: dict[str, list[object]] = {id_column: [node.layer_id for node in nodes]}
     geometry = gpd.points_from_xy(
         [node.easting_m for node in nodes], [node.northing_m for node in nodes]
     )
@@ -540,7 +546,7 @@ def _write_sites(run: _Run) -> None:
     record += _print_selection(chosen.selection, run.printed)
     _say(SITES_ONLY_RULE, record)
     for site in chosen.left_out:
-        _say(f"left out {site.pseudonym} {site.role}: {site.reason}", record)
+        _say(f"left out {site.layer_id} {site.role}: {site.reason}", record)
     sites = chosen.sites()
     counts = sites_only_counts_line(run.links, run.tile_counts, chosen)
     heading = f"engine_inputs --sites-only, {run.tile.name}"

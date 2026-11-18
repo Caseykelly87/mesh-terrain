@@ -17,11 +17,11 @@ two different boxes at an end, all four edges compared, is dropped here and
 listed in `moved_pairs`. The pair count `--expect-pairs` checks is the
 contract's, kept and dropped together.
 
-A node's boxes are the boxes the remaining pairs used for it. A node with one
-box is placed there, a merged rectangle at the midpoint of its edges; a node
-that used a different box in two pairs has both, and `ingester.tile_selection`
-decides what that means for the tile (it straddles the edge, or it is not
-placed). Its precise flag is true when any of its pairs' kept hours flagged
+A node's boxes are the boxes the remaining pairs used for it.
+`ingester.tile_selection` places a node once per pair, at the box that pair
+used, a merged rectangle at the midpoint of its edges, with one layer row per
+distinct box; a node whose boxes lie on both sides of the tile edge
+straddles it. Its precise flag is true when any of its pairs' kept hours flagged
 it (`pos_04`; Casey, D7), so a node is never treated as less precise than one
 of its hours.
 
