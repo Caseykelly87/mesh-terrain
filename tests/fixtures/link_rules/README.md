@@ -109,6 +109,8 @@ Comparison: the counted set and each dropped receipt's rule exactly; relayer and
 
 The Rules column lists the main rules; each file's `rules` also names the rules its other expected rows cite.
 
+The named tests in the contract's `lnk_02` and `lnk_05` rows and their cases (ADR 0003, Link-rule amendment, Tests): `assert_lnk_02_stationary_floor`, c16 (8 m) and c18 (the nearest grid pairs on each side of 40 m); `assert_lnk_02_no_chaining`, c19; `assert_lnk_02_floor_box`, c16 (the rectangle and its `position_uncertainty_m`) and c17 (the lower and upper edges); `assert_lnk_02_finest_box_in_hour`, c21; `assert_lnk_05_hour_box`, c22.
+
 Casey's minimum list (issue #55 comment 6963192892, item 4): Q9's 400/600/600/600 m hour, c23; the A-B-C chain, c19; fixes inside and outside the floor, c16 and c18; a fix exactly on a coarser cell's edge, c17; D9's 510 m and 490 m, c22; a finer box mid-hour, c21; `precision_bits` above 32 and negative, c32; D7's precise flag, c41; an outlier node kept at one fallback fix, c20.
 
 The case list in issue #55's body (section 2, 1 to 35) maps as follows: 1 c01; 2 c02; 3 c03; 4 c04; 5 to 7 c05; 8 c06; 9 c07; 10 c08; 11 c09; 12 c11; 13 c12; 14 c13; 15 c14; 16 c18 and c19; 17 c15; 18 c23; 19 c25; 20 c26; 21 c27; 22 c28; 23 c29; 24 c30; 25 c31; 26 c10; 27 c33; 28 c34, c35 and c23; 29 c36; 30 every kept hour, c16 for a merged box; 31 c37; 32 c38; 33 every kept hour; 34 c39; 35 c40. Where the list predates the contract, the contract wins: case 16 ("two different 32-bit readings: moved") now depends on the 40 m floor, and case 28's 400, 600 and 700 m hour is replaced by Q9's 400/600/600/600 m hour, which tests the same order.
@@ -117,5 +119,5 @@ The case list in issue #55's body (section 2, 1 to 35) maps as follows: 1 c01; 2
 
 - A delivery present in two snapshots (`ing_01`): the fixture is one snapshot, as the Python side reads one; B3's `stg_packet` test covers it.
 - The thresholds for impossible readings (`lnk_06`): they wait on warehouse-eng's staging proposal. Every impossible value is outside the ranges anyway, so the outcome is the same.
-- Times exactly 24 hours before a receipt, or equal to it, for the candidate window and the 7-day window, and a 32-bit position within half a unit of the MSA boundary: see the questions in the B2 pull request. No case sits on those instants or that line.
+- Times exactly 24 hours before a receipt, or equal to it, for the candidate window and the 7-day window, and a 32-bit position within half a unit of the MSA boundary: see the questions in PR #66. No case sits on those instants or that line.
 - Validation's 3 km filter (`lnk_05`, marts) and `link_source` in `int_link_window`.
