@@ -13,9 +13,21 @@ kept link-hours (Casey, issue #44, 2026-11-17: "gives each pair the box its
 counted receipts used, so a moving node is placed per pair, and a pair whose
 receipts used more than one box is dropped and reported to me"). A kept hour
 has one box per end already (`lnk_02`, step 8); a pair whose kept hours used
-two different boxes at an end, all four edges compared, is dropped here and
-listed in `moved_pairs`. The pair count `--expect-pairs` checks is the
+two different boxes at an end, all four edges compared, is listed in
+`moved_pairs` with those boxes, and `ingester.tile_selection` drops it after
+the 2026-11-08 counts check, as it drops a straddling row (Casey, issue #55
+comment 6985802330, item 3). The pair count `--expect-pairs` checks is the
 contract's, kept and dropped together.
+
+Only receipts in kept link-hours set a pair's box (Casey, the same comment,
+item 2, (b): "only the receipts the validation uses must agree on
+position"). A kept pair whose hours not kept show another box at an end, on
+their counted receipts, is listed in `other_box_pairs`, so the command can
+report it to Casey locally ("kept but reported to me in the session, never
+on issue #44"). Worked example: C to G3 kept at 11:00, 12:00 and 13:00 on
+G3's own box, and heard twice at 14:00 while G3 read a box 2 km west, is kept
+at the own box and listed; under reading (a), every counted receipt, the pair
+would have two boxes and be dropped.
 
 A node's boxes are the boxes the remaining pairs used for it.
 `ingester.tile_selection` places a node once per pair, at the box that pair
@@ -120,19 +132,38 @@ class PairActivity:
 
 @dataclass(frozen=True)
 class MovedPair:
-    """A pair dropped because an end used more than one box across its kept hours.
+    """A pair to drop because an end used more than one box across its kept hours.
 
     Attributes:
         relayer: The relayer's pseudonym.
         gateway: The gateway's pseudonym.
         ends: `relayer`, `gateway` or both, relayer first.
         link_hours: Its kept link-hours.
+        relayer_boxes: The boxes its kept hours used for the relayer.
+        gateway_boxes: The boxes they used for the gateway.
     """
 
     relayer: str
     gateway: str
     ends: tuple[str, ...]
     link_hours: int
+    relayer_boxes: frozenset[LinkBox] = frozenset()
+    gateway_boxes: frozenset[LinkBox] = frozenset()
+
+
+@dataclass(frozen=True)
+class OtherBoxPair:
+    """A kept pair whose hours not kept show another box at an end (Casey, item 2, (b)).
+
+    Attributes:
+        relayer: The relayer's pseudonym.
+        gateway: The gateway's pseudonym.
+        ends: `relayer`, `gateway` or both, relayer first.
+    """
+
+    relayer: str
+    gateway: str
+    ends: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -144,7 +175,8 @@ class CaptureLinks:
         nodes: Per node in those pairs, its boxes.
         rows: Delivery rows read.
         one_coordinate_missing: Position rows with exactly one coordinate null.
-        moved_pairs: The pairs dropped for an end with more than one box.
+        moved_pairs: The pairs to drop for an end with more than one box.
+        other_box_pairs: The kept pairs whose hours not kept show another box.
         direct_hop_contradicted: Receipts `lnk_01` dropped under Q4 (a).
         one_box_dropped_hours: Link-hours dropped for more than one box (step 8).
     """
@@ -154,6 +186,7 @@ class CaptureLinks:
     rows: int
     one_coordinate_missing: int
     moved_pairs: tuple[MovedPair, ...] = ()
+    other_box_pairs: tuple[OtherBoxPair, ...] = ()
     direct_hop_contradicted: int = 0
     one_box_dropped_hours: int = 0
 
@@ -222,8 +255,8 @@ def capture_links(rows: Sequence[dict[str, Any]], inside: InArea | None = None) 
         and (row["latitude_i"] is None) != (row["longitude_i"] is None)
     )
     links = CaptureLinks(
-        pairs, _nodes(pairs), len(rows), missing, moved, result.direct_hop_contradicted,
-        result.one_box_dropped_hours,
+        pairs, _nodes(pairs), len(rows), missing, moved, _other_box_pairs(result, pairs),
+        result.direct_hop_contradicted, result.one_box_dropped_hours,
     )  # fmt: skip
     duration_s = round(time.monotonic() - started, 3)
     log.info("pairs_found", **links.pair_counts, duration_s=duration_s)
@@ -264,10 +297,44 @@ def _pairs(
     for (relayer, gateway), tally in sorted(tallies.items()):
         ends = _ends_with_two_boxes(tally.hours)
         if ends:
-            moved.append(MovedPair(relayer, gateway, ends, len(tally.hours)))
+            moved.append(_moved(relayer, gateway, ends, tally.hours))
         else:
             pairs.append(_activity(relayer, gateway, tally))
     return tuple(pairs), tuple(moved)
+
+
+def _moved(
+    relayer: str, gateway: str, ends: tuple[str, ...], hours: Sequence[LinkHour]
+) -> MovedPair:
+    return MovedPair(
+        relayer, gateway, ends, len(hours),
+        frozenset(hour.relayer_box for hour in hours if hour.relayer_box is not None),
+        frozenset(hour.gateway_box for hour in hours if hour.gateway_box is not None),
+    )  # fmt: skip
+
+
+def _other_box_pairs(
+    result: LinkRulesResult, pairs: Sequence[PairActivity]
+) -> tuple[OtherBoxPair, ...]:
+    """The kept pairs whose hours not kept used another box on a counted receipt."""
+    kept = {(pair.relayer, pair.gateway): pair for pair in pairs}
+    found: dict[tuple[str, str], set[str]] = {}
+    for hour in result.link_hours:
+        pair = kept.get((hour.relayer, hour.gateway))
+        if pair is None or hour.outcome == KEPT:
+            continue
+        for key in hour.receipts:
+            receipt = result.receipts[key]
+            for end, used, own in (
+                ("relayer", receipt.relayer_box, pair.relayer_box),
+                ("gateway", receipt.gateway_box, pair.gateway_box),
+            ):
+                if used is not None and own is not None and used.edges != own.edges:
+                    found.setdefault((hour.relayer, hour.gateway), set()).add(end)
+    return tuple(
+        OtherBoxPair(relayer, gateway, tuple(end for end in ENDS if end in ends))
+        for (relayer, gateway), ends in sorted(found.items())
+    )
 
 
 def _ends_with_two_boxes(hours: Sequence[LinkHour]) -> tuple[str, ...]:

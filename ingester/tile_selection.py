@@ -14,43 +14,47 @@ rule for its two busiest pairs is lost. By Casey's decision nothing selected
 depends on a ranking.
 
 Positions follow the contract's link-hour rules (`ingester.link_rules`):
-a node's boxes are the boxes its pairs' counted receipts used under `lnk_02`
-(Casey, issue #44, 2026-11-17: "gives each pair the box its counted receipts
-used"), a pair whose end used more than one box being dropped before this
-module sees it (`ingester.link_pairs`). A node is placed once per pair, at
-the box that pair used (Casey, issue #44, 2026-11-17: "a moving node is
-placed per pair"): one layer row per distinct (node, box), whose id is the
-node's pseudonym when all its pairs used one box and `<pseudonym>.<n>`
-otherwise, n counting its boxes from 1 in the capture's pair order
-(`site_row_ids`). A row is placed at the midpoint of its box's edges. A node
-is in or out of the tile by the centres of all its boxes, so a node whose
-pairs used boxes on both sides of the tile edge straddles it.
+a node's boxes are the boxes its pairs' counted receipts in kept hours used
+under `lnk_02` (Casey, issue #44, 2026-11-17, and issue #55 comment
+6985802330, item 2, (b)). A node is placed once per pair, at the box that
+pair used (Casey: "a moving node is placed per pair"): one layer row per
+distinct (node, box), whose id is the node's pseudonym when all its pairs
+used one box and `<pseudonym>.<n>` otherwise, n counting its boxes from 1 in
+the capture's pair order (`site_row_ids`). A row is placed at the midpoint of
+its box's edges.
 
-A node straddles the tile when it has more than one box and its boxes lie on
-both sides of the tile edge. The rule for it (Casey, issue #44,
-engine_inputs Q1 (a), 2026-11-17): it is treated like a node that fails the
-DEM edge check, and only its own pair is dropped, after the check that the
-tile still matches the 2026-11-08 counts, with a straddling node counted as
-touching the tile. So the counts run first, over every pair, with a
-straddling node counted as in the tile. Then a pair is dropped when either of
-its nodes straddles, or a node of it that the run places fails the DEM edge
-check. A node shared with another pair stays in that pair unless it fails
-there too. Dropping the both-ends pair or a gateway-only pair stops the run
-for Casey (`Selection.layers`). A node with more than one box that does not
-straddle, two boxes inside the tile for example, gets a row per box.
+Each pair is judged at the tile edge by its own rows (Casey, issue #55
+comment 6985802330, item 6): a row is `in` when its box lies inside the
+tile, `out` when it lies outside and `split` when it crosses the tile edge,
+the box being its four corners in EPSG:26915 (`row_state`). A pair whose
+row straddles the tile edge, or whose placed row fails the DEM edge check,
+is dropped, and only that pair: the node's other pairs, whose rows lie
+inside, stay (Casey, issue #44, engine_inputs Q1 (a), as item 6 reads it
+for rows). A pair whose kept hours used more than one box at an end
+(`link_pairs.MovedPair`) has no row and is dropped the same way, with the
+reason MORE_THAN_ONE_BOX (item 3).
+
+The 2026-11-08 counts check runs first, over every pair, those with two boxes
+included (item 3): there a node counts as touching the tile when any of its
+boxes is `in` or `split`, and every pair it is in counts with that end in
+the tile (item 6; `counted_states`). The kinds of the pairs, both-ends or
+gateway-only, then follow each pair's own rows, a straddling row counted as
+in; a pair with two boxes takes its kind from the counted states. Dropping
+the both-ends pair or a gateway-only pair stops the run for Casey
+(`Selection.layers`).
 
 With the count check as it is, three touching pairs and all three selected,
 an unselected pair can only be dropped if it touches the tile, and a fourth
 touching pair fails the count check first. A drop that reaches the drop step
 is therefore always of a selected pair, and stops the run. `straddle_drops`
-finds the straddle drops before those checks run, so the command can print
-them first (Casey, PR #51, (a)).
+finds the straddle and two-box drops before those checks run, so the command
+can print them first (Casey, PR #51, (a)).
 
 `select_sites` is the x72y429 run with no real receiver (Casey, 2026-11-17,
-engine_inputs (c)): the same candidates and roles, counted with a straddling
-node in the tile, but no count check, no stop on a dropped pair and no
-receiver. A gateway row is kept only when its node does not straddle and
-the row passes the DEM edge check; the others are returned with their reason.
+engine_inputs (c)): the same candidates and roles, but no stop on the count
+check or a dropped pair, and no receiver. A gateway row is kept only when it
+does not straddle the tile edge and passes the DEM edge check; the others are
+returned with their reason.
 `count_differences` lists every count that differs from 2026-11-08, so that
 run can report them; `select_nodes` refuses on the first.
 `site_straddle_drops` gives that run's straddle drops with their kinds.
@@ -70,7 +74,7 @@ puts a coordinate in an error message.
 """
 
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,10 +86,10 @@ from engine.errors import ConfigError
 from engine.grid import run_grid
 from engine.points import Endpoint
 from engine.snapshots import resolve_snapshots
-from ingester.link_cells import Edges, LinkBox
+from ingester.link_cells import UNIT_DEG, Edges, LinkBox
 from ingester.link_pairs import (
     CaptureLinks,
-    NodePositions,
+    MovedPair,
     PairActivity,
     SelectionError,
 )
@@ -107,6 +111,9 @@ SITE_RULE = (
 KIND_NOT_DETERMINED = "pair (kind not determined)"
 STRADDLES = "straddles the tile edge"
 FAILS_DEM = "fails the DEM edge check"
+# Casey, issue #55 comment 6985802330, item 3: two-box pairs are dropped after
+# the counts check, as for straddles.
+MORE_THAN_ONE_BOX = "used more than one box in its kept hours"
 IN, OUT, SPLIT = "in", "out", "split"
 ENDS = ("relayer", "gateway")
 TILE_SIZE_M = 10_000.0
@@ -122,6 +129,8 @@ _TO_METRES = Transformer.from_crs(4326, LAYER_EPSG, always_xy=True)
 
 Extent = tuple[float, float, float, float]
 """West, south, east, north in EPSG:26915 metres."""
+AnyPair = PairActivity | MovedPair
+"""A pair with one box per end, or one to drop for an end with more than one."""
 PairState = tuple[str, str]
 """Where a pair's relayer and gateway lie against the tile: `in`, `out` or `split` each."""
 
@@ -179,10 +188,11 @@ class DroppedPair:
         pair: The pair.
         kind: BOTH_ENDS_PAIR or GATEWAY_ONLY_PAIR when the run selected it, else OTHER_PAIR.
         reasons: (end, reason) for each end that drops it, relayer first; the
-            end is `relayer` or `gateway`, the reason STRADDLES or FAILS_DEM.
+            end is `relayer` or `gateway`, the reason STRADDLES, FAILS_DEM or
+            MORE_THAN_ONE_BOX.
     """
 
-    pair: PairActivity
+    pair: AnyPair
     kind: str
     reasons: tuple[tuple[str, str], ...]
 
@@ -329,42 +339,94 @@ def _project(box: LinkBox) -> tuple[float, float]:
     return float(easting_m), float(northing_m)
 
 
-def _node_state(nodes: dict[str, NodePositions], pseudonym: str, tile: Tile) -> str:
-    """`in`, `out` or `split` for a node against the tile, by the centres of all its boxes."""
-    found = nodes.get(pseudonym)
-    if found is None:
-        raise SelectionError("a node of a pair has no box")
-    inside = {tile.contains(*_project(box)) for box in found.boxes}
-    if len(inside) == 2:
-        return SPLIT
-    return IN if inside == {True} else OUT
+def box_extent_m(box: LinkBox) -> Extent:
+    """West, south, east and north of a box's four corners in EPSG:26915 metres."""
+    eastings, northings = [], []
+    for latitude_i in (box.south_i, box.north_i):
+        for longitude_i in (box.west_i, box.east_i):
+            easting_m, northing_m = _TO_METRES.transform(
+                longitude_i * UNIT_DEG, latitude_i * UNIT_DEG
+            )
+            eastings.append(float(easting_m))
+            northings.append(float(northing_m))
+    return min(eastings), min(northings), max(eastings), max(northings)
+
+
+def row_state(box: LinkBox, tile: Tile) -> str:
+    """`in`, `out` or `split` for a row's box against the tile (Casey, item 6).
+
+    `in` when the box lies inside the tile, `out` when it lies outside, and
+    `split` when it crosses the tile edge, the box being its four corners in
+    EPSG:26915 and the tile half-open as in `Tile.contains`.
+    """
+    west, south, east, north = box_extent_m(box)
+    if tile.contains(west, south) and tile.contains(east, north):
+        return IN
+    beside = east < tile.west_m or west >= tile.east_m
+    if beside or north < tile.south_m or south >= tile.north_m:
+        return OUT
+    return SPLIT
 
 
 def pair_states(links: CaptureLinks, tile: Tile) -> dict[PairActivity, PairState]:
-    """Where each pair's relayer and gateway lie against the tile, `split` for a straddling node.
+    """Where each pair's relayer row and gateway row lie against the tile (`row_state`).
 
     Raises:
         SelectionError: if a node has no box.
     """
     return {
         pair: (
-            _node_state(links.nodes, pair.relayer, tile),
-            _node_state(links.nodes, pair.gateway, tile),
+            row_state(end_box(links, pair, "relayer"), tile),
+            row_state(end_box(links, pair, "gateway"), tile),
         )
         for pair in links.pairs
     }
 
 
+def capture_order(links: CaptureLinks) -> list[AnyPair]:
+    """Every pair of the capture in its order (relayer, then gateway), two-box pairs last."""
+    return [*links.pairs, *links.moved_pairs]
+
+
+def _touching(links: CaptureLinks, tile: Tile) -> set[str]:
+    """The nodes with any box in or across the tile: their rows and their two-box pairs' boxes."""
+    boxes: dict[str, set[LinkBox]] = {node: set(found.boxes) for node, found in links.nodes.items()}
+    for pair in links.pairs:
+        for end, node in zip(ENDS, (pair.relayer, pair.gateway), strict=True):
+            boxes.setdefault(node, set()).add(end_box(links, pair, end))
+    for moved in links.moved_pairs:
+        boxes.setdefault(moved.relayer, set()).update(moved.relayer_boxes)
+        boxes.setdefault(moved.gateway, set()).update(moved.gateway_boxes)
+    return {node for node, found in boxes.items() if any(row_state(b, tile) != OUT for b in found)}
+
+
+def counted_states(links: CaptureLinks, tile: Tile) -> dict[AnyPair, PairState]:
+    """The states the 2026-11-08 counts check reads, over every pair, two-box pairs included.
+
+    Each end is `in` when its node has any box in or across the tile (Casey,
+    issue #55 comment 6985802330, items 3 and 6), else `out`.
+
+    Raises:
+        SelectionError: if a node has no box.
+    """
+    touching = _touching(links, tile)
+
+    def end(node: str) -> str:
+        return IN if node in touching else OUT
+
+    return {pair: (end(pair.relayer), end(pair.gateway)) for pair in capture_order(links)}
+
+
 def _counted(state: PairState) -> PairState:
-    """The state the tile check counts: a straddling node counts as in the tile (Q1 (a))."""
+    """The state a pair's kind reads: a straddling row counts as in the tile."""
     relayer, gateway = (IN if end == SPLIT else end for end in state)
     return relayer, gateway
 
 
-def tile_counts(states: dict[PairActivity, PairState]) -> dict[str, int]:
+def tile_counts(states: Mapping[AnyPair, PairState]) -> dict[str, int]:
     """Pairs with both ends, only the gateway end, only the relayer end in the tile, and touched.
 
-    A straddling node counts as in the tile (Casey, issue #44, engine_inputs Q1 (a), 2026-11-17).
+    A `split` end counts as in the tile (Casey, issue #44, engine_inputs Q1 (a), 2026-11-17).
     """
     values = [_counted(state) for state in states.values()]
     return {
@@ -389,7 +451,7 @@ RowOf = Callable[[PairActivity, str], str]
 
 def dropped_pairs(
     states: dict[PairActivity, PairState],
-    kinds: dict[PairActivity, str],
+    kinds: Mapping[AnyPair, str],
     dem_check: dict[str, bool],
     other_kind: str = OTHER_PAIR,
     row_of: RowOf | None = None,
@@ -404,9 +466,9 @@ def dropped_pairs(
         row_of: The row id of a pair end; the end's pseudonym when None.
 
     Returns:
-        A pair is dropped when either end straddles the tile edge, or the row
-        the run places for an end fails the DEM edge check; the other pairs
-        are not listed.
+        A pair is dropped when either end's row straddles the tile edge, or
+        the row the run places for an end fails the DEM edge check; the other
+        pairs are not listed. Two-box pairs are `moved_drops`.
     """
     dropped = []
     for pair, state in states.items():
@@ -425,31 +487,59 @@ def dropped_pairs(
     return tuple(dropped)
 
 
+def moved_drops(
+    links: CaptureLinks, kinds: Mapping[AnyPair, str], other_kind: str = OTHER_PAIR
+) -> tuple[DroppedPair, ...]:
+    """The two-box pairs, each dropped with MORE_THAN_ONE_BOX at the ends that used two."""
+    return tuple(
+        DroppedPair(
+            moved, kinds.get(moved, other_kind), tuple((e, MORE_THAN_ONE_BOX) for e in moved.ends)
+        )
+        for moved in links.moved_pairs
+    )
+
+
+def _all_drops(
+    links: CaptureLinks,
+    states: dict[PairActivity, PairState],
+    kinds: Mapping[AnyPair, str],
+    dem_check: dict[str, bool],
+    other_kind: str = OTHER_PAIR,
+    row_of: RowOf | None = None,
+) -> tuple[DroppedPair, ...]:
+    """Straddle and DEM drops in the capture's pair order, then the two-box drops."""
+    return (
+        *dropped_pairs(states, kinds, dem_check, other_kind, row_of),
+        *moved_drops(links, kinds, other_kind),
+    )
+
+
 def straddle_drops(links: CaptureLinks, tile: Tile, expect_pairs: int) -> tuple[DroppedPair, ...]:
-    """The pairs a straddling node drops, found before the tile check can refuse.
+    """The pairs a straddling row or two boxes drop, found before the tile check can refuse.
 
     Casey, PR #51, (a): the drop lines print before the count checks, so a
     refusal shows which pair and which end caused it. The DEM edge check needs
-    a placed box, so its drops come later, from `select_nodes`.
+    a placed row, so its drops come later, from `select_nodes`.
 
     Args:
         links: The capture's pairs and node positions.
         tile: The engine run's tile.
-        expect_pairs: The union of pairs the tile check counted, 8 on 2026-11-08.
+        expect_pairs: The pairs the contract's rules give on the snapshot.
 
     Returns:
-        Each pair with a straddling end, with its kind when every check of
-        `select_nodes` before placement would pass (the pair count and the
-        2026-11-08 tile counts), else KIND_NOT_DETERMINED.
+        Each pair with a straddling row or an end with two boxes, with its
+        kind when every check of `select_nodes` before placement would pass
+        (the pair count and the 2026-11-08 tile counts), else
+        KIND_NOT_DETERMINED.
 
     Raises:
         SelectionError: if a node has no box.
     """
     states = pair_states(links, tile)
-    kinds = _tile_check(links, states, tile, expect_pairs)
+    kinds = _tile_check(links, tile, expect_pairs)
     if isinstance(kinds, str):
-        return dropped_pairs(states, {}, {}, other_kind=KIND_NOT_DETERMINED)
-    return dropped_pairs(states, kinds, {})
+        return _all_drops(links, states, {}, {}, other_kind=KIND_NOT_DETERMINED)
+    return _all_drops(links, states, kinds, {})
 
 
 def end_box(links: CaptureLinks, pair: PairActivity, end: str) -> LinkBox:
@@ -528,13 +618,13 @@ def _place(links: CaptureLinks, row: SiteRow) -> PlacedNode:
 
 
 def count_differences(
-    links: CaptureLinks, states: dict[PairActivity, PairState], tile: Tile, expect_pairs: int
+    links: CaptureLinks, states: Mapping[AnyPair, PairState], tile: Tile, expect_pairs: int
 ) -> list[str]:
     """Each way the tile differs from the 2026-11-08 counts, in the order the checks run.
 
     Args:
         links: The capture's pairs.
-        states: Every pair's state from `pair_states`.
+        states: Every pair's state from `counted_states`.
         tile: The engine run's tile.
         expect_pairs: The union of pairs the tile check counted, 8 on 2026-11-08.
 
@@ -558,12 +648,11 @@ def count_differences(
     return [message for passed, message in checks if not passed]
 
 
-def _gateway_pairs(states: dict[PairActivity, PairState]) -> dict[PairActivity, str]:
+def _gateway_pairs(states: Mapping[AnyPair, PairState]) -> dict[AnyPair, str]:
     """Every pair whose gateway counts as in the tile, by kind.
 
     The pairs with both ends in the tile come first, then those with only the
-    gateway end, each in the capture's pair order; a straddling node counts as
-    in the tile (Q1 (a)).
+    gateway end, each in the order of states; a `split` end counts as in.
     """
     counted = {pair: _counted(state) for pair, state in states.items()}
     both = [pair for pair, state in counted.items() if state == (IN, IN)]
@@ -571,34 +660,33 @@ def _gateway_pairs(states: dict[PairActivity, PairState]) -> dict[PairActivity, 
     return {**dict.fromkeys(both, BOTH_ENDS_PAIR), **dict.fromkeys(gateway_only, GATEWAY_ONLY_PAIR)}
 
 
-def _tile_check(
-    links: CaptureLinks, states: dict[PairActivity, PairState], tile: Tile, expect_pairs: int
-) -> dict[PairActivity, str] | str:
+def _kinds(links: CaptureLinks, tile: Tile) -> dict[AnyPair, str]:
+    """Each pair's kind by its own rows; a two-box pair's by the counted states (item 3)."""
+    rows = pair_states(links, tile)
+    counted = counted_states(links, tile)
+    by_rows: dict[AnyPair, PairState] = {
+        pair: rows[pair] if isinstance(pair, PairActivity) else state
+        for pair, state in counted.items()
+    }
+    return _gateway_pairs(by_rows)
+
+
+def _tile_check(links: CaptureLinks, tile: Tile, expect_pairs: int) -> dict[AnyPair, str] | str:
     """The pairs touching the tile by kind, or the reason the 2026-11-08 counts refuse.
 
-    The both-ends pair comes first, then the gateway-only pairs in the
-    capture's pair order. The reason, the first count that differs, is
-    returned, not raised, so `straddle_drops` can ask without catching
-    anything; `select_nodes` raises it.
+    The counts read `counted_states`, every pair included; the kinds read
+    each pair's own rows (`_kinds`). The reason, the first count that
+    differs, is returned, not raised, so `straddle_drops` can ask without
+    catching anything; `select_nodes` raises it.
     """
-    differences = count_differences(links, states, tile, expect_pairs)
+    differences = count_differences(links, counted_states(links, tile), tile, expect_pairs)
     if differences:
         return differences[0]
-    return _gateway_pairs(states)
-
-
-def _straddling(states: dict[PairActivity, PairState]) -> set[str]:
-    """The nodes with more than one box whose boxes lie on both sides of the edge."""
-    return {
-        node
-        for pair, state in states.items()
-        for node, end_state in zip((pair.relayer, pair.gateway), state, strict=True)
-        if end_state == SPLIT
-    }
+    return _kinds(links, tile)
 
 
 def _site_rows(
-    links: CaptureLinks, kinds: dict[PairActivity, str], ids: dict[tuple[str, Edges], str]
+    links: CaptureLinks, kinds: Mapping[AnyPair, str], ids: dict[tuple[str, Edges], str]
 ) -> list[SiteRow]:
     """One row per gateway box the selected pairs used, in the order of kinds, both-ends first.
 
@@ -607,6 +695,8 @@ def _site_rows(
     """
     rows: dict[str, SiteRow] = {}
     for pair, kind in kinds.items():
+        if not isinstance(pair, PairActivity):
+            continue
         box = end_box(links, pair, "gateway")
         row_id = ids[(pair.gateway, box.edges)]
         role = BOTH_ENDS_GATEWAY if kind == BOTH_ENDS_PAIR else GATEWAY_ONLY_GATEWAY
@@ -615,13 +705,20 @@ def _site_rows(
 
 
 def _rows(
-    links: CaptureLinks, kinds: dict[PairActivity, str], ids: dict[tuple[str, Edges], str]
+    links: CaptureLinks, kinds: Mapping[AnyPair, str], ids: dict[tuple[str, Edges], str]
 ) -> list[SiteRow]:
-    """The site rows, then the receiver: the both-ends pair's relayer at the box that pair used."""
-    pair = next(pair for pair, kind in kinds.items() if kind == BOTH_ENDS_PAIR)
+    """The site rows, then the receiver: the both-ends pair's relayer at the box that pair used.
+
+    A both-ends pair with two boxes gives no receiver row; it is dropped, and
+    `Selection.layers` refuses.
+    """
+    sites = _site_rows(links, kinds, ids)
+    both = [p for p, kind in kinds.items() if kind == BOTH_ENDS_PAIR]
+    if not both or not isinstance(both[0], PairActivity):
+        return sites
+    pair = both[0]
     box = end_box(links, pair, "relayer")
-    receiver = (ids[(pair.relayer, box.edges)], pair.relayer, BOTH_ENDS_RELAYER, box)
-    return [*_site_rows(links, kinds, ids), receiver]
+    return [*sites, (ids[(pair.relayer, box.edges)], pair.relayer, BOTH_ENDS_RELAYER, box)]
 
 
 def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Extent) -> Selection:
@@ -637,7 +734,7 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
         The placed rows (the both-ends pair's gateway, then the gateway-only
         pairs' gateways in the capture's pair order, a row per gateway box
         the selected pairs used, the both-ends role first, then the
-        both-ends pair's relayer at that pair's box), less any whose node
+        both-ends pair's relayer at that pair's box), less any row that
         straddles the tile edge, with their DEM edge check and the dropped
         pairs. No busiest-pair ranking enters the choice (SITE_RULE).
         `Selection.layers` refuses when a selected pair was dropped.
@@ -652,15 +749,14 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
     if links.pair_count != expect_pairs:
         raise SelectionError(f"{links.pair_count} pairs, not the {expect_pairs} expected")
     states = pair_states(links, tile)
-    kinds = _tile_check(links, states, tile, expect_pairs)
+    kinds = _tile_check(links, tile, expect_pairs)
     if isinstance(kinds, str):
         raise SelectionError(kinds)
-    straddling = _straddling(states)
     ids = site_row_ids(links)
     rows = _rows(links, kinds, ids)
-    placed = tuple(_place(links, row) for row in rows if row[1] not in straddling)
+    placed = tuple(_place(links, row) for row in rows if row_state(row[3], tile) != SPLIT)
     dem_check = _dem_check(placed, extent)
-    dropped = dropped_pairs(states, kinds, dem_check, row_of=_row_of(links, ids))
+    dropped = _all_drops(links, states, kinds, dem_check, row_of=_row_of(links, ids))
     return Selection(placed, dem_check, dropped)
 
 
@@ -722,26 +818,27 @@ class SiteSelection:
 
 
 def site_straddle_drops(links: CaptureLinks, tile: Tile) -> tuple[DroppedPair, ...]:
-    """The pairs a straddling node drops in a sites-only run, each with its kind.
+    """The pairs a straddling row or two boxes drop in a sites-only run, each with its kind.
 
     A sites-only run never refuses on the 2026-11-08 counts, so the kind is
     known before they are checked: `both-ends pair` or `gateway-only pair`
-    by the counted states `select_sites` uses, `other pair` otherwise.
+    by the pair's own rows, as `select_sites` reads them, `other pair`
+    otherwise.
 
     Raises:
         SelectionError: if a node has no box.
     """
-    states = pair_states(links, tile)
-    return dropped_pairs(states, _gateway_pairs(states), {})
+    return _all_drops(links, pair_states(links, tile), _kinds(links, tile), {})
 
 
 def _place_sites(
-    links: CaptureLinks, rows: list[SiteRow], straddling: set[str], extent: Extent
+    links: CaptureLinks, rows: list[SiteRow], tile: Tile, extent: Extent
 ) -> tuple[tuple[PlacedNode, ...], dict[str, bool], tuple[LeftOutSite, ...]]:
-    """Place each gateway row whose node does not straddle; the rest, and DEM failures, left out."""
-    placed = tuple(_place(links, row) for row in rows if row[1] not in straddling)
+    """Place each gateway row that does not straddle; the rest, and DEM failures, left out."""
+    straddling = {row[0] for row in rows if row_state(row[3], tile) == SPLIT}
+    placed = tuple(_place(links, row) for row in rows if row[0] not in straddling)
     dem_check = _dem_check(placed, extent)
-    reasons = {row[0]: STRADDLES for row in rows if row[1] in straddling}
+    reasons = dict.fromkeys(straddling, STRADDLES)
     reasons.update({row_id: FAILS_DEM for row_id, inside in dem_check.items() if not inside})
     left_out = tuple(
         LeftOutSite(node, role, reasons[row_id], None if row_id == node else row_id)
@@ -756,12 +853,12 @@ def select_sites(links: CaptureLinks, tile: Tile, extent: Extent) -> SiteSelecti
 
     Casey, 2026-11-17, engine_inputs (c): the site rule of `select_nodes`
     without its count check, its stop on a dropped pair or its receiver. The
-    candidates are the in-tile gateway of every pair touching the tile, a
-    straddling node counted as in the tile, a row per gateway box those pairs
-    used, the both-ends role first; roles follow those counted states. A row
-    is written only when its node does not straddle the tile edge and the
-    row passes the DEM edge check. The relayers are not placed, so
-    only a gateway's DEM check can drop a pair.
+    candidates are a row per gateway box that a pair whose gateway row is in
+    or across the tile used, the both-ends role first; roles follow each
+    pair's own rows, a straddling row counted as in. A row is written only
+    when it does not straddle the tile edge and passes the DEM edge check.
+    The relayers are not placed, so only a gateway's row can drop a pair at
+    the DEM edge check.
 
     Args:
         links: The capture's pairs and node positions.
@@ -777,9 +874,9 @@ def select_sites(links: CaptureLinks, tile: Tile, extent: Extent) -> SiteSelecti
         SelectionError: if a node of a pair has no box.
     """
     states = pair_states(links, tile)
-    kinds = _gateway_pairs(states)
+    kinds = _kinds(links, tile)
     ids = site_row_ids(links)
     rows = _site_rows(links, kinds, ids)
-    placed, dem_check, left_out = _place_sites(links, rows, _straddling(states), extent)
-    dropped = dropped_pairs(states, kinds, dem_check, row_of=_row_of(links, ids))
+    placed, dem_check, left_out = _place_sites(links, rows, tile, extent)
+    dropped = _all_drops(links, states, kinds, dem_check, row_of=_row_of(links, ids))
     return SiteSelection(Selection(placed, dem_check, dropped), left_out)
