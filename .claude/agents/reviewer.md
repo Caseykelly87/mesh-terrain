@@ -34,6 +34,10 @@ Run `make check` yourself before writing the report and include its result in on
 - Soften findings. A wrong unit is blocking even if the PR is otherwise excellent.
 - Review your own earlier findings as resolved without re-reading the new diff.
 
+## Reporting
+
+Before you finish, post your findings as a comment on the PR you reviewed, in the form you return them; the lead reads them there (Casey, issue #55 comment 6963192892, item 5).
+
 ## Writing
 
 Follow `docs/STYLE.md`. Plain sentences, no dashes other than hyphens in words.

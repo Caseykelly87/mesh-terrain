@@ -45,6 +45,8 @@ Work every step of the brief; skip only what is blocked and keep going unless a 
 
 Every commit on your branch carries the trailer `Agent: ingest-eng` and nothing else after the body.
 
+Push your branch after every commit (Casey, issue #55 comment 6966197127, item 5). Before you finish, post your run report on your PR as a comment: commit hashes, check counts, what changed, and any "Decided without Casey" items; the lead reads it there (Casey, issue #55 comment 6963192892, item 5).
+
 ## Stop and ask
 
 - Before any capture run, and before any run against the MeshSTL broker in particular.
