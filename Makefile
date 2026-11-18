@@ -38,7 +38,8 @@ DBT_ARGS := --project-dir dbt --profiles-dir dbt
 # for Track A (make check DBT_DEV_TARGET=dev_ta). Any other value, prod
 # included, stops make before any recipe runs, since the real build is
 # make dbt-build-real alone. The guard is unexported because the bare export
-# would expand it, and so raise the error, for every recipe's environment.
+# would expand it, and so raise the error, for every recipe's environment; the
+# allowlist and the refusal text are unexported because no recipe reads them.
 DBT_DEV_TARGET ?= dev_wh
 DBT_DEV_TARGETS := dev_wh dev_ta
 DBT_DEV_TARGET_REFUSAL = make check and make dbt-build take DBT_DEV_TARGET=dev_wh or \
@@ -46,7 +47,7 @@ DBT_DEV_TARGET_REFUSAL = make check and make dbt-build take DBT_DEV_TARGET=dev_w
     dbt-build-real, the lead's target
 DBT_DEV_TARGET_GUARD = $(if $(filter-out 1,$(words $(DBT_DEV_TARGET)))$(filter-out \
     $(DBT_DEV_TARGETS),$(DBT_DEV_TARGET)),$(error $(DBT_DEV_TARGET_REFUSAL)))
-unexport DBT_DEV_TARGET_GUARD
+unexport DBT_DEV_TARGET_GUARD DBT_DEV_TARGETS DBT_DEV_TARGET_REFUSAL
 $(if $(filter check dbt-build,$(MAKECMDGOALS)),$(DBT_DEV_TARGET_GUARD))
 
 .PHONY: help env up down nuke check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test
