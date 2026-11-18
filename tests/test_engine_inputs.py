@@ -14,6 +14,7 @@ import pytest
 from engine_fixture import no_logger_caching
 from engine_inputs_fixture import (
     DEM_SNAPSHOT_ID,
+    G3_MOVED_SHIFT_M,
     NODES,
     PARTNERS,
     SNAPSHOT_ID,
@@ -27,6 +28,7 @@ from structlog.testing import capture_logs
 
 from engine import positions_marker
 from engine.points import read_points
+from engine.prepare import command as prepare_command
 from ingester import engine_inputs
 from ingester.link_cells import cell_of
 from ingester.link_pairs import CaptureLinks, MovedPair, PairActivity, SelectionError
@@ -525,7 +527,7 @@ DATA_QUALITY = (
     "gateway's NeighborInfo contradicts, dropped; Casey, PR #66, Q4 (a)); one_box_dropped_hours "
     "0 (lnk_02)"
 )
-GATEWAY_LINE = re.compile(r"[0-9a-f]{64} (both_ends|gateway_only)_gateway: ")
+GATEWAY_LINE = re.compile(r"[0-9a-f]{64}(\.\d+)? (both_ends|gateway_only)_gateway: ")
 
 
 def recorded(lines: list[str]) -> list[str]:
@@ -648,30 +650,25 @@ def test_sites_only_writes_the_gateway_of_a_both_ends_pair_its_relayer_drops(
     [
         (
             {"straddler": "G2"},
-            "left out {G2} gateway_only_gateway: straddles the tile edge",
+            [
+                "left out {G2}.1 gateway_only_gateway: straddles the tile edge",
+                "left out {G2}.2 gateway_only_gateway: straddles the tile edge",
+            ],
             ("G1", "G3"),
             [
                 "dropped gateway-only pair {PG2} to {G2}: gateway straddles the tile edge",
                 "dropped gateway-only pair {B} to {G2}: gateway straddles the tile edge",
             ],
             "nodes selected 2; extent pass 2, fail 0; pairs dropped 2 (straddles the tile "
-            "edge 2, fails the DEM edge check 0); sites written 2, left out 1",
+            "edge 2, fails the DEM edge check 0); sites written 2, left out 2",
         ),
         (
             {"g3_at_edge": True},
-            "left out {G3} gateway_only_gateway: fails the DEM edge check",
+            ["left out {G3} gateway_only_gateway: fails the DEM edge check"],
             ("G1", "G2"),
             ["dropped gateway-only pair {C} to {G3}: gateway fails the DEM edge check"],
             "nodes selected 3; extent pass 2, fail 1; pairs dropped 1 (straddles the tile "
             "edge 0, fails the DEM edge check 1); sites written 2, left out 1",
-        ),
-        (
-            {"moved_g3": True},
-            "left out {G3} gateway_only_gateway: used more than one box across its pairs (lnk_02)",
-            ("G1", "G2"),
-            [],
-            "nodes selected 2; extent pass 2, fail 0; pairs dropped 0 (straddles the tile "
-            "edge 0, fails the DEM edge check 0); sites written 2, left out 1",
         ),
     ],
 )
@@ -679,7 +676,7 @@ def test_sites_only_leaves_out_a_gateway_with_its_reason(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     options: dict[str, Any],
-    left_out: str,
+    left_out: list[str],
     kept: tuple[str, ...],
     dropped: list[str],
     counts: str,
@@ -691,13 +688,48 @@ def test_sites_only_leaves_out_a_gateway_with_its_reason(
     assert_sites(tmp_path, kept)
     printed = capsys.readouterr().out
     lines = printed.splitlines()
-    assert [text for text in lines if text.startswith("left out")] == [names(left_out)]
+    assert [text for text in lines if text.startswith("left out")] == [names(t) for t in left_out]
     assert [text for text in lines if text.startswith("dropped")] == [names(t) for t in dropped]
     line = counts_for_issue(lines)
     assert line.endswith(f"{counts}; {NO_RECEIVER}")
     assert not any(node.pseudonym in line for node in NODES.values())
     assert_report(tmp_path, printed)
-    assert names(left_out) in report_lines(tmp_path)
+    assert all(names(text) in report_lines(tmp_path) for text in left_out)
+    assert coordinates_in(printed + repr(events)) == []
+
+
+def test_sites_only_places_a_gateway_at_two_places_once_per_pair(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Casey, issue #44, 2026-11-17: "a moving node is placed per pair".
+
+    G3 used its own box with C and a box 2 km west with its partner, both
+    inside the tile: two rows, `<G3>.1` and `<G3>.2`, numbered in the capture's
+    pair order, each at the box its pair used.
+    """
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", moved_g3=True)
+    with capture_logs() as events:
+        assert run_sites_only(tmp_path, expect_pairs="6") == 0
+    layer = tmp_path / "configs" / "x72y429" / "tx_sites_real.parquet"
+    sites = gpd.read_parquet(layer)
+    g3 = pseudonym("G3")
+    # engine.prepare's own reader takes the rows: distinct ids that can name a coverage file.
+    endpoints, roles = prepare_command._read_sites(layer)
+    assert [endpoint.endpoint_id for endpoint in endpoints] == list(sites["site_id"])
+    assert set(roles.values()) == {"both_ends_gateway", "gateway_only_gateway"}
+    assert list(sites["site_id"]) == [pseudonym("G1"), f"{g3}.1", pseudonym("G2"), f"{g3}.2"]
+    assert list(sites["role"]) == ["both_ends_gateway", *["gateway_only_gateway"] * 3]
+    places = {
+        f"{g3}.1": box_centre_m(NODES["G3"].box()),
+        f"{g3}.2": box_centre_m(NODES["G3"].box(G3_MOVED_SHIFT_M)),
+    }
+    for site_id, point in zip(sites["site_id"], sites.geometry, strict=True):
+        if site_id in places:
+            assert (point.x, point.y) == pytest.approx(places[site_id], abs=1e-3)
+    printed = capsys.readouterr().out
+    assert not any(text.startswith(("left out", "dropped")) for text in printed.splitlines())
+    assert_report(tmp_path, printed)
     assert coordinates_in(printed + repr(events)) == []
 
 
@@ -870,11 +902,7 @@ def test_a_failed_sites_only_move_leaves_neither_the_layer_nor_the_report(
 def test_without_sites_only_a_moved_gateway_still_refuses(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The strict path refuses where sites-only leaves G3 out: here on the counts first.
-
-    G3's second place comes with a third gateway-only pair; the refusal for a
-    selected node with two boxes is covered in `test_tile_selection`.
-    """
+    """G3's second place comes with a third gateway-only pair, so the strict run refuses."""
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", moved_g3=True)
     assert run(tmp_path, expect_pairs="6") == 2

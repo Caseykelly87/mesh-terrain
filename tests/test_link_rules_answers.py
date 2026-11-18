@@ -18,12 +18,23 @@ Nodes and positions are invented: the gateway's 16-bit cell and the relayer's
 20-bit cell are the fixture's g16 and r20, 2745.603 m apart inside the MSA.
 """
 
+import math
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
-from ingester.link_cells import Cell, cell_of, cells_overlap, same_place
+from ingester import link_cells
+from ingester.link_cells import (
+    STATIONARY_FLOOR_M,
+    Cell,
+    all_same_place,
+    box_around,
+    cell_of,
+    cells_overlap,
+    same_place,
+)
 from ingester.link_rules import LinkRulesResult, apply_link_rules
 from ingester.msa import msa_contains
 
@@ -263,8 +274,50 @@ def test_cells_that_only_touch_do_not_overlap() -> None:
     assert cells_overlap(west, west)
 
 
-def test_the_floor_is_inclusive_and_pairwise() -> None:
-    here = Cell(386000000, -903650000, 32)
-    near = Cell(386000000, -903650100, 32)
-    assert same_place(here, near)
-    assert not same_place(here, Cell(386010000, -903650000, 32))
+@pytest.fixture
+def geodesic_at(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[float], None]]:
+    """Make every geodesic the given number of metres, clearing the cached place tests."""
+
+    def clear() -> None:
+        link_cells.same_place.cache_clear()
+        link_cells.all_same_place.cache_clear()
+
+    def set_metres(metres: float) -> None:
+        clear()
+        monkeypatch.setattr(link_cells, "geodesic_m", lambda _a, _b: metres)
+
+    yield set_metres
+    clear()
+
+
+def test_two_fixes_exactly_the_floor_apart_are_the_same_place(
+    geodesic_at: Callable[[float], None],
+) -> None:
+    """Casey, issue #55, D4: 40 m, inclusive. The two 32-bit cells do not overlap."""
+    here, there = Cell(386000000, -903650000, 32), Cell(386000000, -903650460, 32)
+    geodesic_at(STATIONARY_FLOOR_M)
+    assert same_place(here, there)
+    geodesic_at(math.nextafter(STATIONARY_FLOOR_M, math.inf))
+    assert not same_place(here, there)
+
+
+def test_the_floor_is_pairwise_and_never_chained() -> None:
+    """A, B and C on one meridian, about 30, 30 and 60 m apart: moved (lnk_02, c19's rule)."""
+    a, b, c = (Cell(386000000 + step, -903650000, 32) for step in (0, 2_700, 5_400))
+    assert all_same_place(frozenset({a, b}))
+    assert all_same_place(frozenset({b, c}))
+    assert not all_same_place(frozenset({a, b, c}))
+
+
+def test_a_fix_on_a_cells_upper_edge_is_not_held_so_the_box_covers_both() -> None:
+    """The 20-bit cell does not hold a 32-bit fix on its east edge; the floor merges them."""
+    latitude_i, longitude_i, bits = RELAYER_CELL
+    coarse = Cell(latitude_i, longitude_i, bits)
+    south, north, west, east = coarse.edges
+    fix = Cell(latitude_i, east, 32)
+    assert not coarse.holds(fix)
+    box, covered = box_around(frozenset({coarse, fix}))
+    assert covered == {coarse, fix}
+    assert box.merged
+    assert box.edges == (south, north, west, east + 1)
+    assert box.half_width_ew_m == pytest.approx(17.845, abs=1e-3)
