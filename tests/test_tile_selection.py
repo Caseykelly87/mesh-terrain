@@ -484,13 +484,17 @@ def test_a_straddling_gateway_only_relayer_fails_the_one_both_ends_pair_check() 
         select(found, 3)
 
 
-def test_reproduction_a_a_both_ends_pair_by_the_counts_and_not_by_its_rows_refuses() -> None:
-    """Reviewer, PR #70 comment 6989619559, Blocking 1 (a); interim guard until Casey answers.
+def test_reproduction_a_kinds_by_rows_leave_no_receiver_and_the_run_ends_cleanly() -> None:
+    """Reviewer, PR #70 comment 6989619559, Blocking 1 (a), under Casey's (b).
 
-    B's row with G1 lies outside the tile and its row with C inside. The
-    counts read B to G1 as the both-ends pair and pass; by its own rows it is
-    a gateway-only pair, so no receiver row exists. The strict run refuses
-    with a SelectionError, not an IndexError, and names no node.
+    Casey's answer: issue #55 comment 6990646633, item 3.
+
+    B moves: its row with G1 lies outside the tile and its row with C inside.
+    The counts read B to G1 as the both-ends pair and pass; by its own rows,
+    which decide its kind, it is a gateway-only pair. The disagreement is
+    listed, the selection runs to the end, and with no both-ends pair by rows
+    there is no receiver row, so `layers` refuses with a SelectionError (exit
+    2 in the command), not an IndexError, and names no node.
     """
     b_inside = (-10_000.0, 0.0)
     pairs = (boxed("B", "G1", 2), boxed("C", "B", 4, gateway_shift=b_inside), boxed("D", "G2", 1))
@@ -504,25 +508,36 @@ def test_reproduction_a_a_both_ends_pair_by_the_counts_and_not_by_its_rows_refus
     assert kind_conflicts(found, TILE) == (
         KindConflict(pairs[0], GATEWAY_ONLY_PAIR, BOTH_ENDS_PAIR),
     )
-    with pytest.raises(SelectionError, match="kind by their own rows") as refused:
-        select(found, 3)
+    selection = select(found, 3)
+    assert selection.dropped == ()
+    assert {node.role for node in selection.placed} == {"gateway_only_gateway"}
+    with pytest.raises(SelectionError, match="no receiver row") as refused:
+        selection.layers()
     assert not any(node.pseudonym in str(refused.value) for node in NODES.values())
 
 
-def test_reproduction_b_a_counted_gateway_only_pair_is_not_lost_silently() -> None:
-    """Reviewer, PR #70 comment 6989619559, Blocking 1 (b); interim guard until Casey answers.
+def test_reproduction_b_a_pair_whose_row_lies_outside_is_listed_and_not_selected() -> None:
+    """Reviewer, PR #70 comment 6989619559, Blocking 1 (b), under Casey's (b).
 
-    G2's row with B lies inside the tile and its row with C 15 km east. The
-    counts read C to G2 as the second gateway-only pair and pass; by its own
-    rows it is no selected pair. The strict run refuses, and the conflict is
-    there for a sites-only run to report.
+    Casey's answer: issue #55 comment 6990646633, item 3.
+
+    G2 moves: its row with B lies inside the tile and its row with C 15 km
+    east. The counts read C to G2 as the second gateway-only pair; by its own
+    rows it is no selected pair. The run writes G1, G2's row with B and the
+    receiver, and lists the disagreement; nothing is dropped.
     """
     g2_east = (15_000.0, 0.0)
     pairs = (boxed("A", "G1", 2), boxed("B", "G2", 5), boxed("C", "G2", 4, gateway_shift=g2_east))
     found = links(*pairs, nodes=two_boxes("G2", *g2_east))
     assert kind_conflicts(found, TILE) == (KindConflict(pairs[2], OTHER_PAIR, GATEWAY_ONLY_PAIR),)
-    with pytest.raises(SelectionError, match="kind by their own rows"):
-        select(found, 3)
+    selection = select(found, 3)
+    sites, receiver = selection.layers()
+    assert [(site.layer_id, site.role) for site in sites] == [
+        (pseudonym("G1"), "both_ends_gateway"),
+        (f"{pseudonym('G2')}.1", "gateway_only_gateway"),
+    ]
+    assert receiver.layer_id == pseudonym("A")
+    assert selection.dropped == ()
 
 
 def test_pairs_whose_kinds_agree_have_no_conflict() -> None:
