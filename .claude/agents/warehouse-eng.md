@@ -47,6 +47,8 @@ Every commit on your branch carries the trailer `Agent: warehouse-eng` and nothi
 
 Push your branch after every commit (Casey, issue #55 comment 6966197127, item 5). Before you finish, post your run report on your PR as a comment: hashes, check counts, what changed, and any "Decided without Casey" items; the lead reads it there (Casey, issue #55 comment 6963192892, item 5).
 
+Add only your own lines to the shared sections of `docs/STATUS.md` and never edit another agent's lines; a run report or findings posted on a PR follow the counts-only rule for real data and never include ids, positions or outcomes (Casey, PR #64 comment 6968763718, item 5).
+
 ## Stop and ask
 
 - Before changing the link-hour grain or any contract rule.
