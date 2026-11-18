@@ -1,0 +1,28 @@
+{
+  "case_id": "c03_two_candidates_share_the_byte",
+  "title": "Two candidates share the relay byte and nothing else resolves it",
+  "rules": ["lnk_01"],
+  "reasoning": [
+    "c03-r1 and c03-r2 both have low byte 0x33 and were both heard by c03-g by radio within 24 hours before every receipt, so relay_node 0x33 matches two candidates (lnk_01, step 1).",
+    "c03-g sent no NeighborInfo, so nothing else resolves the byte: every receipt is dropped by lnk_01.",
+    "Both relayers and the gateway have usable positions, so an implementation that picked either candidate would count the receipts; the positions are there to make that mistake visible.",
+    "No receipt is counted, so there is no link-hour."
+  ],
+  "messages": [
+    {"delivery_key": "c03-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c03-g", "origin_low_byte": 10, "gateway_pseudonym": "c03-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c03-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c03-r1", "origin_low_byte": 51, "gateway_pseudonym": "c03-r1", "gateway_low_byte": 51, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c03-m003", "received_at": "2026-10-22T09:10:00Z", "origin_pseudonym": "c03-r2", "origin_low_byte": 51, "gateway_pseudonym": "c03-r2", "gateway_low_byte": 51, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386181120, "longitude_i": -904001536, "precision_bits": 20},
+    {"delivery_key": "c03-m004", "received_at": "2026-10-23T08:00:00Z", "origin_pseudonym": "c03-r1", "origin_low_byte": 51, "gateway_pseudonym": "c03-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3004, "relay_node": null, "portnum": 67},
+    {"delivery_key": "c03-m005", "received_at": "2026-10-23T09:00:00Z", "origin_pseudonym": "c03-r2", "origin_low_byte": 51, "gateway_pseudonym": "c03-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3005, "relay_node": null, "portnum": 67},
+    {"delivery_key": "c03-m006", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c03-s", "origin_low_byte": 17, "gateway_pseudonym": "c03-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3006, "relay_node": 51, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c03-m007", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c03-s", "origin_low_byte": 17, "gateway_pseudonym": "c03-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3007, "relay_node": 51, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c03-m008", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c03-s", "origin_low_byte": 17, "gateway_pseudonym": "c03-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3008, "relay_node": 51, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {},
+  "expected_receipts": [
+    {"delivery_key": "c03-m006", "outcome": "dropped", "rule": "lnk_01"},
+    {"delivery_key": "c03-m007", "outcome": "dropped", "rule": "lnk_01"},
+    {"delivery_key": "c03-m008", "outcome": "dropped", "rule": "lnk_01"}
+  ],
+  "expected_link_hours": []
+}

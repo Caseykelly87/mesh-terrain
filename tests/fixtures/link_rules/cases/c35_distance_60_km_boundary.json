@@ -1,0 +1,39 @@
+{
+  "case_id": "c35_distance_60_km_boundary",
+  "title": "The nearest grid pairs on each side of 60 000 m",
+  "rules": ["lnk_05", "lnk_02", "lnk_04"],
+  "reasoning": [
+    "All three nodes are single 32-bit fixes on latitude 38.6 N, inside the MSA; centres are the fixes plus half a unit on each axis.",
+    "c35-r3 is 6 887 698 units east of c35-g: 59999.991856 m, at most 60 000 m (inclusive): each receipt passes lnk_05; kept with 3 packets.",
+    "c35-r4 is 6 887 699 units east: 60000.000567 m, over 60 000 m: each receipt fails lnk_05.",
+    "Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont).",
+    "position_uncertainty_m is the larger half-width of each end's box, r3_32 0.005550 m plus g32 0.005550 m, = 0.011101 m (lnk_05)."
+  ],
+  "messages": [
+    {"delivery_key": "c35-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c35-g", "origin_low_byte": 10, "gateway_pseudonym": "c35-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 35001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000000, "longitude_i": -907000000, "precision_bits": 32},
+    {"delivery_key": "c35-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c35-r3", "origin_low_byte": 21, "gateway_pseudonym": "c35-r3", "gateway_low_byte": 21, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 35002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000000, "longitude_i": -900112302, "precision_bits": 32},
+    {"delivery_key": "c35-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c35-r4", "origin_low_byte": 22, "gateway_pseudonym": "c35-r4", "gateway_low_byte": 22, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 35003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000000, "longitude_i": -900112301, "precision_bits": 32},
+    {"delivery_key": "c35-m004", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c35-r3", "origin_low_byte": 21, "gateway_pseudonym": "c35-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 35004, "relay_node": 21, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c35-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c35-r3", "origin_low_byte": 21, "gateway_pseudonym": "c35-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 35005, "relay_node": 21, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c35-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c35-r3", "origin_low_byte": 21, "gateway_pseudonym": "c35-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 35006, "relay_node": 21, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100},
+    {"delivery_key": "c35-m007", "received_at": "2026-10-23T10:15:00Z", "origin_pseudonym": "c35-r4", "origin_low_byte": 22, "gateway_pseudonym": "c35-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 35007, "relay_node": 22, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c35-m008", "received_at": "2026-10-23T10:25:00Z", "origin_pseudonym": "c35-r4", "origin_low_byte": 22, "gateway_pseudonym": "c35-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 35008, "relay_node": 22, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c35-m009", "received_at": "2026-10-23T10:35:00Z", "origin_pseudonym": "c35-r4", "origin_low_byte": 22, "gateway_pseudonym": "c35-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 35009, "relay_node": 22, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g32": {"south_i": 386000000, "north_i": 386000001, "west_i": -907000000, "east_i": -906999999, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356},
+    "r3_32": {"south_i": 386000000, "north_i": 386000001, "west_i": -900112302, "east_i": -900112301, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356},
+    "r4_32": {"south_i": 386000000, "north_i": 386000001, "west_i": -900112301, "east_i": -900112300, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c35-m004", "outcome": "counted", "relayer": "c35-r3", "link_source": "relay_node", "relayer_box": "r3_32", "gateway_box": "g32", "distance_m": 59999.991856},
+    {"delivery_key": "c35-m005", "outcome": "counted", "relayer": "c35-r3", "link_source": "relay_node", "relayer_box": "r3_32", "gateway_box": "g32", "distance_m": 59999.991856},
+    {"delivery_key": "c35-m006", "outcome": "counted", "relayer": "c35-r3", "link_source": "relay_node", "relayer_box": "r3_32", "gateway_box": "g32", "distance_m": 59999.991856},
+    {"delivery_key": "c35-m007", "outcome": "dropped", "rule": "lnk_05", "relayer": "c35-r4", "link_source": "relay_node", "relayer_box": "r4_32", "gateway_box": "g32", "distance_m": 60000.000567},
+    {"delivery_key": "c35-m008", "outcome": "dropped", "rule": "lnk_05", "relayer": "c35-r4", "link_source": "relay_node", "relayer_box": "r4_32", "gateway_box": "g32", "distance_m": 60000.000567},
+    {"delivery_key": "c35-m009", "outcome": "dropped", "rule": "lnk_05", "relayer": "c35-r4", "link_source": "relay_node", "relayer_box": "r4_32", "gateway_box": "g32", "distance_m": 60000.000567}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c35-r3", "gateway": "c35-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c35-m004", "c35-m005", "c35-m006"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 59999.991856, "relayer_box": "r3_32", "relayer_precise_source": false, "gateway_box": "g32", "gateway_precise_source": false, "position_uncertainty_m": 0.011101}
+  ]
+}

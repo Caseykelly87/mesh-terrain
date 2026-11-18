@@ -1,0 +1,39 @@
+{
+  "case_id": "c41_precise_flag_from_positions_read_in_the_hour",
+  "title": "The precise flag reads only the positions lnk_02 read for the end in that hour",
+  "rules": ["pos_04", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "c41-r sent its 20-bit cell on the public broker only at 22 09:05, and the same cell on MeshSTL only at 23 10:45. c41-g sent its 16-bit cell on MeshSTL.",
+    "10:00 hour: c41-r is stationary at all three receipts and its hour box comes from the positions read from 7 days before 10:10 to 10:30, which hold only the public delivery. The 10:45 delivery is after the last receipt and is not read. relayer_precise_source is false (PLAN data model; Casey, issue #55, D7).",
+    "11:00 hour: the positions read, from 7 days before 11:10 to 11:30, hold both deliveries of the cell; the MeshSTL one has 20 bits and seen_meshstl true, so it qualifies under pos_04: relayer_precise_source is true.",
+    "gateway_precise_source is false in both hours: c41-g's only cell has 16 bits, under pos_04's 20, though MeshSTL carried it.",
+    "Both hours pass lnk_05 at 2745.603 m and are kept with 3 packets. Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont)."
+  ],
+  "messages": [
+    {"delivery_key": "c41-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c41-g", "origin_low_byte": 10, "gateway_pseudonym": "c41-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 41001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c41-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c41-r", "origin_low_byte": 20, "gateway_pseudonym": "c41-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 41002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c41-m003", "received_at": "2026-10-23T10:45:00Z", "origin_pseudonym": "c41-r", "origin_low_byte": 20, "gateway_pseudonym": "c41-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 41003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c41-m004", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c41-r", "origin_low_byte": 20, "gateway_pseudonym": "c41-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 41004, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c41-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c41-r", "origin_low_byte": 20, "gateway_pseudonym": "c41-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 41005, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c41-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c41-r", "origin_low_byte": 20, "gateway_pseudonym": "c41-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 41006, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100},
+    {"delivery_key": "c41-m007", "received_at": "2026-10-23T11:10:00Z", "origin_pseudonym": "c41-r", "origin_low_byte": 20, "gateway_pseudonym": "c41-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 41007, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c41-m008", "received_at": "2026-10-23T11:20:00Z", "origin_pseudonym": "c41-r", "origin_low_byte": 20, "gateway_pseudonym": "c41-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 41008, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c41-m009", "received_at": "2026-10-23T11:30:00Z", "origin_pseudonym": "c41-r", "origin_low_byte": 20, "gateway_pseudonym": "c41-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 41009, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "r20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c41-m004", "outcome": "counted", "relayer": "c41-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c41-m005", "outcome": "counted", "relayer": "c41-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c41-m006", "outcome": "counted", "relayer": "c41-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c41-m007", "outcome": "counted", "relayer": "c41-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c41-m008", "outcome": "counted", "relayer": "c41-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c41-m009", "outcome": "counted", "relayer": "c41-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c41-r", "gateway": "c41-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c41-m004", "c41-m005", "c41-m006"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 2745.603337, "relayer_box": "r20", "relayer_precise_source": false, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 386.484807},
+    {"relayer": "c41-r", "gateway": "c41-g", "hour": "2026-10-23T11:00:00Z", "receipts": ["c41-m007", "c41-m008", "c41-m009"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 2745.603337, "relayer_box": "r20", "relayer_precise_source": true, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 386.484807}
+  ]
+}

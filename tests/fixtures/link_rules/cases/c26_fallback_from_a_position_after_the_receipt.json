@@ -1,0 +1,28 @@
+{
+  "case_id": "c26_fallback_from_a_position_after_the_receipt",
+  "title": "No position before the receipt: one 20 minutes after is used, one 2 hours after is not",
+  "rules": ["lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "Stationary needs at least one position in the 7 days before the receipt. Neither c26-ra nor c26-rb has one, so neither is stationary and both take the 30-minute fallback, which looks before and after (lnk_02).",
+    "c26-ra's only fix was sent at 10:50, 20 minutes after its receipt at 10:30: it is used. The receipt is 2760.580 m from g16 and passes lnk_05; its hour has 1 packet: dropped by lnk_04.",
+    "c26-rb's only fix was sent at 12:30, 2 hours after its receipt: no position, dropped by lnk_02."
+  ],
+  "messages": [
+    {"delivery_key": "c26-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c26-g", "origin_low_byte": 10, "gateway_pseudonym": "c26-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 26001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c26-m002", "received_at": "2026-10-23T10:50:00Z", "origin_pseudonym": "c26-ra", "origin_low_byte": 23, "gateway_pseudonym": "c26-ra", "gateway_low_byte": 23, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 26002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385999949, "longitude_i": -903655616, "precision_bits": 32},
+    {"delivery_key": "c26-m003", "received_at": "2026-10-23T12:30:00Z", "origin_pseudonym": "c26-rb", "origin_low_byte": 24, "gateway_pseudonym": "c26-rb", "gateway_low_byte": 24, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 26003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386090033, "longitude_i": -903655573, "precision_bits": 32},
+    {"delivery_key": "c26-m004", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c26-ra", "origin_low_byte": 23, "gateway_pseudonym": "c26-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 26004, "relay_node": 23, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c26-m005", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c26-rb", "origin_low_byte": 24, "gateway_pseudonym": "c26-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 26005, "relay_node": 24, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "ra_32": {"south_i": 385999949, "north_i": 385999950, "west_i": -903655616, "east_i": -903655615, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004356}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c26-m004", "outcome": "counted", "relayer": "c26-ra", "link_source": "relay_node", "relayer_box": "ra_32", "gateway_box": "g16", "distance_m": 2760.579683},
+    {"delivery_key": "c26-m005", "outcome": "dropped", "rule": "lnk_02", "relayer": "c26-rb", "link_source": "relay_node"}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c26-ra", "gateway": "c26-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c26-m004"], "packets": 1, "outcome": "dropped", "rule": "lnk_04"}
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "case_id": "c08_candidates_via_mqtt_or_header_only",
+  "title": "A node heard only via MQTT is not a candidate; one heard only in a header-only radio delivery is",
+  "rules": ["lnk_01", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "Candidates are the senders of radio deliveries the gateway heard (lnk_01). c08-r7 (0x61) reached c08-g only via MQTT (via_mqtt true), so it is not a candidate. The receipt with relay_node 0x61 has no candidate and there is no NeighborInfo: dropped by lnk_01.",
+    "c08-r8 (0x62) reached c08-g only in a header-only radio delivery (decode_status stripped, via_mqtt false). The rule reads every radio delivery and says nothing of decode status, so c08-r8 is a candidate: the receipt with relay_node 0x62 resolves to c08-r8, link_source relay_node.",
+    "c08-r8 and c08-g are stationary (lnk_02), 2745.603 m apart (lnk_05): counted. Its link-hour has 1 packet: dropped by lnk_04."
+  ],
+  "messages": [
+    {"delivery_key": "c08-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c08-g", "origin_low_byte": 10, "gateway_pseudonym": "c08-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c08-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c08-r7", "origin_low_byte": 97, "gateway_pseudonym": "c08-r7", "gateway_low_byte": 97, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386181120, "longitude_i": -904001536, "precision_bits": 20},
+    {"delivery_key": "c08-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c08-r8", "origin_low_byte": 98, "gateway_pseudonym": "c08-r8", "gateway_low_byte": 98, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c08-m004", "received_at": "2026-10-23T08:00:00Z", "origin_pseudonym": "c08-r7", "origin_low_byte": 97, "gateway_pseudonym": "c08-g", "gateway_low_byte": 10, "via_mqtt": true, "seen_public": true, "seen_meshstl": false, "packet_id": 8004, "relay_node": null, "portnum": 67},
+    {"delivery_key": "c08-m005", "received_at": "2026-10-23T08:30:00Z", "origin_pseudonym": "c08-r8", "origin_low_byte": 98, "gateway_pseudonym": "c08-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8005, "relay_node": null, "portnum": null, "decode_status": "stripped"},
+    {"delivery_key": "c08-m006", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c08-s", "origin_low_byte": 96, "gateway_pseudonym": "c08-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8006, "relay_node": 97, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c08-m007", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c08-s", "origin_low_byte": 96, "gateway_pseudonym": "c08-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 8007, "relay_node": 98, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "r7_20": {"south_i": 386179072, "north_i": 386183168, "west_i": -904003584, "east_i": -903999488, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73448, "half_width_ew_m": 17.836058},
+    "r8_20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c08-m006", "outcome": "dropped", "rule": "lnk_01"},
+    {"delivery_key": "c08-m007", "outcome": "counted", "relayer": "c08-r8", "link_source": "relay_node", "relayer_box": "r8_20", "gateway_box": "g16", "distance_m": 2745.603337}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c08-r8", "gateway": "c08-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c08-m007"], "packets": 1, "outcome": "dropped", "rule": "lnk_04"}
+  ]
+}

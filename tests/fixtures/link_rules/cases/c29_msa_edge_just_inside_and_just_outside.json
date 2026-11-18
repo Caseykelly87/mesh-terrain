@@ -1,0 +1,37 @@
+{
+  "case_id": "c29_msa_edge_just_inside_and_just_outside",
+  "title": "32-bit fixes about 29 m inside and 29 m outside the MSA boundary",
+  "rules": ["pos_02", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "The MSA boundary crosses longitude -90.55 at about 38.011393 N, on the edge between the vertices (-90.550518, 38.01127) and (-90.545413, 38.01248) of the seed polygon. c29-ra's fix lies 30 m north of the crossing and about 28.9 m inside the polygon; c29-rb's lies 30 m south of it and about 28.9 m outside (distances to the boundary measured with pyproj's WGS84 geodesic to the nearest boundary point).",
+    "c29-ra is stationary on its fix (lnk_02, pos_02); c29-rb has no position inside the MSA, so its receipts are dropped by lnk_02. c29-g's 16-bit cell centre is about 3.7 km inside.",
+    "c29-ra's receipts pass lnk_05 at 3918.639 m: kept with 3 packets. Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont).",
+    "position_uncertainty_m is the larger half-width of each end's box, ra_32 0.005550 m plus g16 363.716165 m, = 363.721715 m (lnk_05)."
+  ],
+  "messages": [
+    {"delivery_key": "c29-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c29-g", "origin_low_byte": 10, "gateway_pseudonym": "c29-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 29001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 380469248, "longitude_i": -905478144, "precision_bits": 16},
+    {"delivery_key": "c29-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c29-ra", "origin_low_byte": 23, "gateway_pseudonym": "c29-ra", "gateway_low_byte": 23, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 29002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 380116631, "longitude_i": -905500000, "precision_bits": 32},
+    {"delivery_key": "c29-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c29-rb", "origin_low_byte": 24, "gateway_pseudonym": "c29-rb", "gateway_low_byte": 24, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 29003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 380111225, "longitude_i": -905500000, "precision_bits": 32},
+    {"delivery_key": "c29-m004", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c29-ra", "origin_low_byte": 23, "gateway_pseudonym": "c29-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 29004, "relay_node": 23, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c29-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c29-ra", "origin_low_byte": 23, "gateway_pseudonym": "c29-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 29005, "relay_node": 23, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c29-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c29-ra", "origin_low_byte": 23, "gateway_pseudonym": "c29-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 29006, "relay_node": 23, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100},
+    {"delivery_key": "c29-m007", "received_at": "2026-10-23T10:15:00Z", "origin_pseudonym": "c29-rb", "origin_low_byte": 24, "gateway_pseudonym": "c29-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 29007, "relay_node": 24, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c29-m008", "received_at": "2026-10-23T10:25:00Z", "origin_pseudonym": "c29-rb", "origin_low_byte": 24, "gateway_pseudonym": "c29-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 29008, "relay_node": 24, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c29-m009", "received_at": "2026-10-23T10:35:00Z", "origin_pseudonym": "c29-rb", "origin_low_byte": 24, "gateway_pseudonym": "c29-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 29009, "relay_node": 24, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g16": {"south_i": 380436480, "north_i": 380502016, "west_i": -905510912, "east_i": -905445376, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.716165, "half_width_ew_m": 287.625919},
+    "ra_32": {"south_i": 380116631, "north_i": 380116632, "west_i": -905500000, "east_i": -905499999, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004391}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c29-m004", "outcome": "counted", "relayer": "c29-ra", "link_source": "relay_node", "relayer_box": "ra_32", "gateway_box": "g16", "distance_m": 3918.639362},
+    {"delivery_key": "c29-m005", "outcome": "counted", "relayer": "c29-ra", "link_source": "relay_node", "relayer_box": "ra_32", "gateway_box": "g16", "distance_m": 3918.639362},
+    {"delivery_key": "c29-m006", "outcome": "counted", "relayer": "c29-ra", "link_source": "relay_node", "relayer_box": "ra_32", "gateway_box": "g16", "distance_m": 3918.639362},
+    {"delivery_key": "c29-m007", "outcome": "dropped", "rule": "lnk_02", "relayer": "c29-rb", "link_source": "relay_node"},
+    {"delivery_key": "c29-m008", "outcome": "dropped", "rule": "lnk_02", "relayer": "c29-rb", "link_source": "relay_node"},
+    {"delivery_key": "c29-m009", "outcome": "dropped", "rule": "lnk_02", "relayer": "c29-rb", "link_source": "relay_node"}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c29-ra", "gateway": "c29-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c29-m004", "c29-m005", "c29-m006"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 3918.639362, "relayer_box": "ra_32", "relayer_precise_source": false, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 363.721715}
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "case_id": "c22_hour_box_moves_a_receipt_under_500_m",
+  "title": "A receipt 510 m away on its own 16-bit box is 490 m away on the hour's 20-bit box and fails",
+  "rules": ["lnk_02", "lnk_05"],
+  "reasoning": [
+    "c22-r sends a 16-bit cell the day before and, at 10:25, the 20-bit cell north-east of that cell's centre, nested inside it. c22-g is one 32-bit fix, stationary. As in c21, c22-r is stationary at all three receipts and the hour's box is r20, which every receipt uses (lnk_02).",
+    "The 16-bit centre is the 20-bit cell's south-west corner, so the 20-bit cell holds the 16-bit position's stored value; that position is coarser, not finer, so it sets nothing aside. The 16-bit cell holds the finer 20-bit position and is set aside: the box is r20.",
+    "Distance from r20's centre to g32's centre (the fix plus half a unit on each axis): 489.985 m, under 500 m, so every receipt fails lnk_05's per-receipt test with the box it uses (Casey, issue #55, D9).",
+    "On their own boxes the receipts at 10:10 and 10:20 would use r16, 510.009 m from g32, and r16 does not reach g32 (r16's east edge is about 285 m east of its centre, g32 about 500 m east), so they would pass. The expected result is that they fail.",
+    "No receipt is counted, so there is no link-hour."
+  ],
+  "messages": [
+    {"delivery_key": "c22-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c22-g", "origin_low_byte": 10, "gateway_pseudonym": "c22-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 22001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385717646, "longitude_i": -903847181, "precision_bits": 32},
+    {"delivery_key": "c22-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c22-r", "origin_low_byte": 20, "gateway_pseudonym": "c22-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 22002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385712128, "longitude_i": -903905280, "precision_bits": 16},
+    {"delivery_key": "c22-m003", "received_at": "2026-10-23T10:25:00Z", "origin_pseudonym": "c22-r", "origin_low_byte": 20, "gateway_pseudonym": "c22-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 22003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385714176, "longitude_i": -903903232, "precision_bits": 20},
+    {"delivery_key": "c22-m004", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c22-r", "origin_low_byte": 20, "gateway_pseudonym": "c22-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 22004, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c22-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c22-r", "origin_low_byte": 20, "gateway_pseudonym": "c22-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 22005, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c22-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c22-r", "origin_low_byte": 20, "gateway_pseudonym": "c22-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 22006, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g32": {"south_i": 385717646, "north_i": 385717647, "west_i": -903847181, "east_i": -903847180, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004357},
+    "r16": {"south_i": 385679360, "north_i": 385744896, "west_i": -903938048, "east_i": -903872512, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.748763, "half_width_ew_m": 285.56267},
+    "r20": {"south_i": 385712128, "north_i": 385716224, "west_i": -903905280, "east_i": -903901184, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.734298, "half_width_ew_m": 17.847616}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c22-m004", "outcome": "dropped", "rule": "lnk_05", "relayer": "c22-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g32", "distance_m": 489.985251},
+    {"delivery_key": "c22-m005", "outcome": "dropped", "rule": "lnk_05", "relayer": "c22-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g32", "distance_m": 489.985251},
+    {"delivery_key": "c22-m006", "outcome": "dropped", "rule": "lnk_05", "relayer": "c22-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g32", "distance_m": 489.985251}
+  ],
+  "expected_link_hours": []
+}

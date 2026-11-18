@@ -1,0 +1,29 @@
+{
+  "case_id": "c04_candidate_heard_25_hours_before",
+  "title": "The only candidate was heard 25 hours before the receipt",
+  "rules": ["lnk_01", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "c04-r (low byte 0x44) was heard by c04-g by radio once, at 22 09:00, and never again; its own positions were heard by itself, not by c04-g.",
+    "The receipt at 23 08:00 is 23 hours after that, so c04-r is the one candidate with byte 0x44: relayer c04-r, link_source relay_node (lnk_01). Both ends are stationary on r20 and g16 (lnk_02), distance 2745.603 m (lnk_05): counted.",
+    "The receipt at 23 10:00 is 25 hours after c04-r was heard. The only sender heard in its 24 hours is c04-s (0x11, from the 08:00 receipt), so no candidate has 0x44 and no NeighborInfo exists: dropped by lnk_01.",
+    "The 08:00 link-hour has 1 counted packet, fewer than 3: dropped by lnk_04. The 10:00 hour has no counted receipt and is not listed."
+  ],
+  "messages": [
+    {"delivery_key": "c04-m001", "received_at": "2026-10-22T06:00:00Z", "origin_pseudonym": "c04-g", "origin_low_byte": 10, "gateway_pseudonym": "c04-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 4001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c04-m002", "received_at": "2026-10-22T06:05:00Z", "origin_pseudonym": "c04-r", "origin_low_byte": 68, "gateway_pseudonym": "c04-r", "gateway_low_byte": 68, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 4002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c04-m003", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c04-r", "origin_low_byte": 68, "gateway_pseudonym": "c04-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 4003, "relay_node": null, "portnum": 67},
+    {"delivery_key": "c04-m004", "received_at": "2026-10-23T08:00:00Z", "origin_pseudonym": "c04-s", "origin_low_byte": 17, "gateway_pseudonym": "c04-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 4004, "relay_node": 68, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c04-m005", "received_at": "2026-10-23T10:00:00Z", "origin_pseudonym": "c04-s", "origin_low_byte": 17, "gateway_pseudonym": "c04-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 4005, "relay_node": 68, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "r20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c04-m004", "outcome": "counted", "relayer": "c04-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337},
+    {"delivery_key": "c04-m005", "outcome": "dropped", "rule": "lnk_01"}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c04-r", "gateway": "c04-g", "hour": "2026-10-23T08:00:00Z", "receipts": ["c04-m004"], "packets": 1, "outcome": "dropped", "rule": "lnk_04"}
+  ]
+}

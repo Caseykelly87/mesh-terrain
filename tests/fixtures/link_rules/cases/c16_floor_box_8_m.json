@@ -1,0 +1,35 @@
+{
+  "case_id": "c16_floor_box_8_m",
+  "title": "Two 32-bit fixes 8 m apart inside a 16-bit cell: the box is the rectangle around the two fixes",
+  "rules": ["lnk_02", "lnk_05", "pos_04", "lnk_04"],
+  "reasoning": [
+    "c16-r sent a 16-bit cell and two 32-bit fixes inside it, 7.997 m apart on the same latitude_i.",
+    "The 16-bit cell holds both fixes, so it overlaps each of them. The two 32-bit cells [value, value + 1) do not overlap each other, but their stored coordinates are within 40 m, so they are the same place by the floor. Every two positions are the same place: stationary (lnk_02).",
+    "The 16-bit cell holds a finer position and adds nothing. The box is the smallest rectangle covering the two 32-bit cells: south_i 385999949, north_i 385999950 (the shared latitude plus 1), west_i -903655616 (fix 1), east_i -903654697 (fix 2 plus 1). It covers two cells, so merged is true; precision_bits is 32.",
+    "Half-widths of a merged rectangle use (north_i - south_i) / 2 and (east_i - west_i) / 2 in pos_01's formula at the box midpoint's latitude: 0.005550 m north-south and 4.002798 m east-west, so position_uncertainty_m covers the 8 m spread, not the 32-bit cell's width (lnk_05).",
+    "position_uncertainty_m is the larger half-width of each end's box, r_floor 4.002798 m plus g16 363.750397 m, = 367.753194 m (lnk_05).",
+    "relayer_precise_source is false: fix 1 was sent on MeshSTL, but fix 2 only on the public broker, and every cell the box covers must have a qualifying delivery (PLAN data model, precise_source; pos_04).",
+    "Distance from the rectangle's midpoint to g16's centre: 2764.557 m. Kept with 3 packets. Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont)."
+  ],
+  "messages": [
+    {"delivery_key": "c16-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c16-g", "origin_low_byte": 10, "gateway_pseudonym": "c16-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 16001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c16-m002", "received_at": "2026-10-20T09:05:00Z", "origin_pseudonym": "c16-r", "origin_low_byte": 20, "gateway_pseudonym": "c16-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 16002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903643136, "precision_bits": 16},
+    {"delivery_key": "c16-m003", "received_at": "2026-10-21T09:05:00Z", "origin_pseudonym": "c16-r", "origin_low_byte": 20, "gateway_pseudonym": "c16-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 16003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385999949, "longitude_i": -903655616, "precision_bits": 32},
+    {"delivery_key": "c16-m004", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c16-r", "origin_low_byte": 20, "gateway_pseudonym": "c16-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 16004, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385999949, "longitude_i": -903654698, "precision_bits": 32},
+    {"delivery_key": "c16-m005", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c16-r", "origin_low_byte": 20, "gateway_pseudonym": "c16-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 16005, "relay_node": 20, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c16-m006", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c16-r", "origin_low_byte": 20, "gateway_pseudonym": "c16-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 16006, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c16-m007", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c16-r", "origin_low_byte": 20, "gateway_pseudonym": "c16-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 16007, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
+    "r_floor": {"south_i": 385999949, "north_i": 385999950, "west_i": -903655616, "east_i": -903654697, "merged": true, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 4.002798}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c16-m005", "outcome": "counted", "relayer": "c16-r", "link_source": "relay_node", "relayer_box": "r_floor", "gateway_box": "g16", "distance_m": 2764.556856},
+    {"delivery_key": "c16-m006", "outcome": "counted", "relayer": "c16-r", "link_source": "relay_node", "relayer_box": "r_floor", "gateway_box": "g16", "distance_m": 2764.556856},
+    {"delivery_key": "c16-m007", "outcome": "counted", "relayer": "c16-r", "link_source": "relay_node", "relayer_box": "r_floor", "gateway_box": "g16", "distance_m": 2764.556856}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c16-r", "gateway": "c16-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c16-m005", "c16-m006", "c16-m007"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 2764.556856, "relayer_box": "r_floor", "relayer_precise_source": false, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 367.753194}
+  ]
+}
