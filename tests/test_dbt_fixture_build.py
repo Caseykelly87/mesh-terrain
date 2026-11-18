@@ -62,9 +62,13 @@ CORE_TABLES = {
 # Every singular test in dbt/tests runs in the fixture build, so a config
 # change that disabled one fails the build test instead of passing quietly.
 SINGULAR_TESTS = tuple(sorted(path.stem for path in (DBT_DIR / "tests").glob("*.sql")))
-# The tests that report a count on every run, Casey's lnk_06 count
-# (2026-11-14), warn by design; each must warn with the fixture's count.
-REPORTING_TESTS = {"assert_lnk_06_excluded_count": 7}
+# The tests that report a count on every run warn by design: Casey's lnk_06
+# count (2026-11-14) and the Q4 count lnk_01_direct_hop_contradicted (Casey,
+# PR #72, Q1). Each must warn with the fixture's count.
+REPORTING_TESTS = {
+    "assert_lnk_06_excluded_count": 7,
+    "assert_lnk_01_direct_hop_contradicted_count": 3,
+}
 
 
 def drop_fixture_schema(conn: psycopg.Connection, schema: str) -> None:

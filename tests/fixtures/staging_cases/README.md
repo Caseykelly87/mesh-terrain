@@ -16,6 +16,7 @@ warehouse-eng's synthetic cases for what the link-rules fixture (`tests/fixtures
 | `s10_hour_box_needs_every_receipt_stationary` | no hour box when the end is not stationary at one receipt | lnk_02 |
 | `s11_hour_box_union_starts_7_days_before_the_first_receipt` | the hour box reads from 7 days before the first receipt | lnk_02 |
 | `s12_one_broadcast_at_two_gateways_is_one_position` | one broadcast's copies at two gateways are one position, timed by the first copy, precise when any copy qualifies | lnk_02, pos_04 |
+| `s13_readings_outside_the_chips_range` | readings outside the range the radio chips can report land as missing in staging, both edges kept (Casey, PR #72, Q2) | lnk_06 |
 
 The files use the link-rules case format (`case_id`, `title`, `rules`, `reasoning`, `messages`) with two additions: an `expected_positions` list, and every message names its own `snapshot_id`, `staging-fixture-a` or `staging-fixture-b`. s05 to s12 test link-rule clauses the shared link-rules fixture does not reach (reviewer, PR #72), so they also carry that fixture's `boxes`, `expected_receipts` and `expected_link_hours`, written by hand in the same way and compared by the same dbt tests; each is in `staging-fixture-a`, and the link-rules README's counts across that fixture do not include them. A message absent from a column is null, and raw's other not-null columns take the link-rules README's defaults. Pseudonyms start with the case number (`s01-r`), so they never meet a link-rules node.
 
