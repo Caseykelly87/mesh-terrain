@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from engine_fixture import no_logger_caching
-from engine_inputs_fixture import NODES, build_capture
+from engine_inputs_fixture import G3_MOVED_SHIFT_M, NODES, build_capture
 
 from ingester.link_cells import LinkBox, cell_of
 from ingester.link_pairs import (
@@ -113,6 +113,51 @@ def test_a_pair_whose_end_used_two_boxes_is_dropped_and_reported(tmp_path: Path)
         ("gateway",),
     )
     assert pseudonym("G3") not in links.nodes
+    assert moved.gateway_boxes == {own_box("G3"), cell_of(*NODES["G3"].box(G3_MOVED_SHIFT_M))}
+    assert moved.relayer_boxes == {own_box("C")}
+
+
+def test_only_receipts_in_kept_hours_set_a_pairs_box_and_another_box_is_reported(
+    tmp_path: Path,
+) -> None:
+    """Casey, issue #55 comment 6985802330, item 2: reading (b), with (a) told apart.
+
+    Worked by hand on the synthetic capture with `moved_short_hour`:
+
+    - C to G3 is heard at 11:00, 12:00 and 13:00 on 23 October, three direct
+      hops each hour. G3's only position in the 7 days before is its own
+      18-bit cell (10:00), so it is stationary there; C likewise on its own
+      16-bit cell. Each hour passes lnk_05 (about 8.3 km) with 3 packets:
+      three kept hours, every counted receipt on G3's own cell.
+    - G3 sends a cell 2 km west at 13:50. At 14:00 and 14:10 C is heard again.
+      G3's 7-day look-back now holds its own cell and the west cell, about
+      2 km apart: not the same place, so G3 is not stationary and takes the
+      position nearest in time within 30 minutes, the west cell (10 and 20
+      minutes before). Both receipts pass lnk_05 on the west cell (about
+      10.3 km) and are counted, but the hour has 2 packets: not kept (lnk_04).
+    - Reading (b), only receipts in kept hours: G3's box for the pair is its
+      own cell, one box per end, so the pair is kept and placed there, and it
+      is listed for Casey because its 14:00 hour, not kept, used the west cell.
+    - Reading (a), every counted receipt in any hour: the pair's receipts used
+      two G3 cells, so the pair would be dropped for more than one box.
+    """
+    links = links_of(tmp_path, moved_short_hour=True)
+    pairs = by_names(links)
+    assert pairs[("C", "G3")].gateway_box == own_box("G3")
+    assert pairs[("C", "G3")].link_hours == 3
+    assert links.moved_pairs == ()
+    assert links.pair_counts == {"pairs": 5, "placed": 5, "more than one box": 0}
+    (other,) = links.other_box_pairs
+    assert (other.relayer, other.gateway, other.ends) == (
+        pseudonym("C"),
+        pseudonym("G3"),
+        ("gateway",),
+    )
+    assert links.nodes[pseudonym("G3")].boxes == frozenset({own_box("G3")})
+
+
+def test_a_pair_with_every_hour_kept_is_not_reported(links: CaptureLinks) -> None:
+    assert links.other_box_pairs == ()
 
 
 def test_a_node_with_a_different_box_in_two_pairs_has_both(tmp_path: Path) -> None:
