@@ -4,7 +4,7 @@
   "rules": ["lnk_01", "lnk_02", "lnk_04", "lnk_05"],
   "reasoning": [
     "The receipts come from c02-s (low byte 0x11) with relay_node 0x22, so they are not direct hops (lnk_01, step 1).",
-    "Candidates are the senders of radio deliveries c02-g heard in the 24 hours before each receipt. c02-r was heard at 08:00 by radio (relay_node null, so that row is not itself a receipt). c02-s joins from 10:10 for the later receipts. c02-g's own position at 22 09:00 is more than 24 hours before 10:10 and has low byte 0x0A in any case.",
+    "Candidates are the senders of radio deliveries c02-g heard in the 24 hours before each receipt. c02-r was heard at 08:00 by radio (relay_node null, so that row is not itself a receipt). c02-s is a candidate for every receipt, the 10:10 one included: lnk_01, as PR #67 words Casey's Q2 answer (PR #66 comment 6968763406, item 2), says \"a delivery exactly 24 hours before the receipt, and one at the receipt's own instant, are in the window\", and each receipt is itself a radio delivery c02-g heard at its own instant. c02-s's byte 0x11 is not 0x22, so no outcome changes. c02-g's own position at 22 09:00 is more than 24 hours before 10:10 and has low byte 0x0A in any case.",
     "Exactly one candidate, c02-r, has low byte 0x22, and c02-g sent no NeighborInfo, so the relayer is c02-r with link_source relay_node.",
     "Each of c02-r (r20) and c02-g (g16) has one usable position inside the MSA in the 7 days before every receipt, so it is stationary with that position's cell as its box, and the hour's box is the same cell (lnk_02, steps 4 to 6).",
     "Distance 2745.603 m, boxes far apart: each receipt passes lnk_05; one box per end, 3 packets: kept.",
