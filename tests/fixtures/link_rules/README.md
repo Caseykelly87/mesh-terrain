@@ -60,7 +60,7 @@ Both sides fill raw's other not-null columns the same way: `snapshot_id` `link-r
 - SQL: insert every message into `raw_dev_wh.mqtt_message` on the `dev_wh` target, run `dbt build`, and compare `core.fct_rx_observation` and `core.int_link_window` (through views or singular tests) with the expected rows.
 - Python: read the case files, build the same rows, run the rules, and compare.
 
-Comparison: the counted set and each dropped receipt's rule exactly; relayer and `link_source` exactly; boxes by all four edges, `merged` and `precision_bits` exactly; distances within 1e-4 m (the boundary cases in c34 and c35 are 0.25 mm to 11 mm from their limit, and both libraries compute the same geodesic); half-widths and `position_uncertainty_m` within 1e-6 m; medians exactly; the precise flags exactly. Across the fixture one hour is dropped by step 8 (c24), so `mart_data_quality` counts 1.
+Comparison: the counted set and each dropped receipt's rule exactly; relayer and `link_source` exactly; boxes by all four edges, `merged` and `precision_bits` exactly; distances within 1e-4 m (the boundary cases in c34 and c35 are 0.25 mm to 11 mm from their limit, and both libraries compute the same geodesic); half-widths and `position_uncertainty_m` within 1e-6 m; medians exactly; the precise flags exactly. Across the fixture two hours are dropped by step 8 (c24 on the relayer side, c42 on the gateway side), so `mart_data_quality` counts 2.
 
 ## Cases
 
@@ -107,6 +107,8 @@ Comparison: the counted set and each dropped receipt's rule exactly; relayer and
 | `c39_one_row_per_relayer_gateway_hour` | three rows | lnk_08 |
 | `c40_both_brokers_and_two_copies` | a delivery both brokers carried; the first copy kept | ing_01, ing_06 |
 | `c41_precise_flag_from_positions_read_in_the_hour` | D7: the flag reads the hour's positions only | pos_04, lnk_02 |
+| `c42_gateway_two_fallback_boxes_drop_the_hour` | c24 on the gateway side: moved gateway, two boxes | lnk_02 |
+| `c43_neighbour_low_byte_zero` | NeighborInfo neighbour byte 0 read as 0xFF | lnk_01 |
 
 The Rules column lists the main rules; each file's `rules` also names the rules its other expected rows cite.
 
@@ -122,3 +124,4 @@ The case list in issue #55's body (section 2, 1 to 35) maps as follows: 1 c01; 2
 - The thresholds for impossible readings (`lnk_06`): they wait on warehouse-eng's staging proposal. Every impossible value is outside the ranges anyway, so the outcome is the same.
 - Times exactly 24 hours before a receipt, or equal to it, for the candidate window and the 7-day window, and a 32-bit position within half a unit of the MSA boundary: see the questions in PR #66. No case sits on those instants or that line.
 - Validation's 3 km filter (`lnk_05`, marts) and `link_source` in `int_link_window`.
+- On the gateway side, an end with no position and an end on an hour box chosen over a finer cell: c15, c26 and c21 test those steps on the relayer side, and c42 tests a moved gateway on the fallback and the one-box test for the gateway.
