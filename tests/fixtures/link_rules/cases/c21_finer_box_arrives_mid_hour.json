@@ -3,9 +3,9 @@
   "title": "A 20-bit cell arrives between the second and third receipts: the whole hour uses it",
   "rules": ["lnk_02", "lnk_04", "lnk_05"],
   "reasoning": [
-    "At 10:10 and 10:20 c21-r's only position in the 7 days before is its 16-bit cell: stationary there, so each receipt's own box would be r16. At 10:30 the window also holds the nested 20-bit cell sent at 10:25; the two overlap: stationary, own box r20 (lnk_02).",
+    "At 10:10 and 10:20 c21-r's only position in the 7 days before is its 16-bit cell: stationary there, so each receipt's own box would be that 16-bit cell (c21-m002). At 10:30 the window also holds the nested 20-bit cell sent at 10:25; the two overlap: stationary, own box r20 (lnk_02).",
     "c21-r is stationary at every one of the hour's receipts, and the positions those receipts read, from 7 days before 10:10 to 10:30, are the 16-bit and 20-bit cells, which overlap. So the hour's box is chosen over that union: the 20-bit cell, and every receipt uses it, the first two included (lnk_02, one box per end for the hour).",
-    "Each receipt is 2745.603 m from g16 on r20 and passes lnk_05; one box per end, 3 packets: kept. Without the hour box the receipts would use r16, r16 and r20 and the hour would be dropped under Q9.",
+    "Each receipt is 2745.603 m from g16 on r20 and passes lnk_05; one box per end, 3 packets: kept. Without the hour box the receipts would use the 16-bit cell twice and then r20 and the hour would be dropped under Q9.",
     "Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont).",
     "position_uncertainty_m is the larger half-width of each end's box, r20 22.734410 m plus g16 363.750397 m, = 386.484807 m (lnk_05)."
   ],
@@ -19,7 +19,6 @@
   ],
   "boxes": {
     "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
-    "r16": {"south_i": 385941504, "north_i": 386007040, "west_i": -903675904, "east_i": -903610368, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
     "r20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521}
   },
   "expected_receipts": [

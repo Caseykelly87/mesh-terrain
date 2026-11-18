@@ -18,7 +18,6 @@
   ],
   "boxes": {
     "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876},
-    "r7_20": {"south_i": 386179072, "north_i": 386183168, "west_i": -904003584, "east_i": -903999488, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73448, "half_width_ew_m": 17.836058},
     "r8_20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521}
   },
   "expected_receipts": [

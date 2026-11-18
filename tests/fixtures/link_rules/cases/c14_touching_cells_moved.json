@@ -15,9 +15,7 @@
     {"delivery_key": "c14-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c14-r", "origin_low_byte": 20, "gateway_pseudonym": "c14-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 14005, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
     {"delivery_key": "c14-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c14-r", "origin_low_byte": 20, "gateway_pseudonym": "c14-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 14006, "relay_node": 20, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
   ],
-  "boxes": {
-    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876}
-  },
+  "boxes": {},
   "expected_receipts": [
     {"delivery_key": "c14-m004", "outcome": "dropped", "rule": "lnk_02", "relayer": "c14-r", "link_source": "relay_node"},
     {"delivery_key": "c14-m005", "outcome": "dropped", "rule": "lnk_02", "relayer": "c14-r", "link_source": "relay_node"},
