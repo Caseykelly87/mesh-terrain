@@ -2,35 +2,69 @@
 
 -- The positions lnk_02 reads: a node's usable positions inside the MSA, from
 -- either broker and either source (fct_node_position holds only positions
--- inside the MSA). Each carries its cell's half-open edges and
--- next_conflict_at, the earliest received_at at or after its own of another
--- position of the node that is not the same place: the cells do not overlap
--- and the stored values lie more than STATIONARY_FLOOR_M apart. A set of
--- positions received from t0 to t1 is pairwise the same place exactly when
--- none of them has next_conflict_at at or before t1, so the pairwise test,
--- never chained, is read once per window instead of once per pair. Likewise
--- finer_received_at lists when the node sent each finer position this cell
--- holds, so a box built over any window can set the cell aside (lnk_02, D3')
--- without comparing the window's cells with each other.
+-- inside the MSA). One broadcast heard by several gateways is several
+-- deliveries in core; here it is one position, at the received_at of its
+-- first copy, as ADR 0005 times a delivery by its first sighting, and
+-- precise when any copy qualifies under pos_04. A position without a
+-- packet_id stays one row per delivery.
+--
+-- Each carries its cell's half-open edges and next_conflict_at, the earliest
+-- received_at at or after its own of another position of the node that is
+-- not the same place: the cells do not overlap and the stored values lie more
+-- than STATIONARY_FLOOR_M apart. A set of positions received from t0 to t1 is
+-- pairwise the same place exactly when none of them has next_conflict_at at
+-- or before t1, so the pairwise test, never chained, is read once per window
+-- instead of once per pair. Likewise finer_received_at lists when the node
+-- sent each finer position this cell holds, so a box built over any window
+-- can set the cell aside (lnk_02, D3') without comparing the window's cells
+-- with each other.
 
-with positions as (
+with deliveries as (
     select
-        delivery_key,
+        core_positions.delivery_key,
+        core_positions.node_pseudonym,
+        coalesce(staged.packet_id::text, core_positions.delivery_key) as broadcast_key,
+        core_positions.received_at,
+        core_positions.latitude_i,
+        core_positions.longitude_i,
+        core_positions.precision_bits,
+        core_positions.cell_width_i,
+        core_positions.half_width_ns_m,
+        core_positions.half_width_ew_m,
+        core_positions.precise_source
+    from {{ ref('fct_node_position') }} as core_positions
+    left join {{ ref('stg_position') }} as staged
+        on
+            staged.snapshot_id = core_positions.snapshot_id
+            and staged.delivery_key = core_positions.delivery_key
+    where core_positions.position_quality = 'usable'
+),
+
+broadcasts as (
+    select
+        min(delivery_key) as delivery_key,
         node_pseudonym,
-        received_at,
+        min(received_at) as received_at,
         latitude_i,
         longitude_i,
         precision_bits,
+        cell_width_i,
+        min(half_width_ns_m) as half_width_ns_m,
+        min(half_width_ew_m) as half_width_ew_m,
+        bool_or(precise_source) as precise_source
+    from deliveries
+    group by node_pseudonym, broadcast_key, latitude_i, longitude_i, precision_bits, cell_width_i
+),
+
+positions as (
+    select
+        *,
         {{ cell_low_i('latitude_i', 'precision_bits', 'cell_width_i') }} as south_i,
         {{ cell_low_i('latitude_i', 'precision_bits', 'cell_width_i') }} + cell_width_i as north_i,
         {{ cell_low_i('longitude_i', 'precision_bits', 'cell_width_i') }} as west_i,
         {{ cell_low_i('longitude_i', 'precision_bits', 'cell_width_i') }} + cell_width_i as east_i,
-        half_width_ns_m,
-        half_width_ew_m,
-        precise_source,
         {{ stored_point('latitude_i', 'longitude_i') }}::geography as stored_point
-    from {{ ref('fct_node_position') }}
-    where position_quality = 'usable'
+    from broadcasts
 ),
 
 conflicts as (

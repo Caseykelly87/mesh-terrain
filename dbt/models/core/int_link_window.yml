@@ -26,7 +26,7 @@ models:
               config:
                 meta: {contract: lnk_08}
       - name: hour
-        description: The clock hour in UTC, half-open, that holds every counted receipt (lnk_04, lnk_08).
+        description: The clock hour in UTC, half-open, that holds every counted receipt (lnk_04, lnk_08); the incremental watermark.
         tests:
           - not_null:
               config:
@@ -81,7 +81,10 @@ models:
               config:
                 meta: {contract: lnk_05}
       - name: bearing_deg
-        description: The geodesic azimuth from the relayer box centre to the gateway box centre, in degrees clockwise from north.
+        description: >
+          The grid bearing from the relayer box centre to the gateway box
+          centre in EPSG:26915, degrees clockwise from grid north, as the
+          engine's bearing_deg (docs/INTERFACE.md).
         tests:
           - dbt_utils.accepted_range:
               arguments:

@@ -29,6 +29,11 @@ models:
         description: The pseudonym of the node the position belongs to, the packet's origin.
         tests:
           - not_null
+      - name: packet_id
+        description: >
+          The packet's id from its sender, null where raw landed 0. Copies of
+          one broadcast at several gateways share it; the link rules read them
+          as one position (int_usable_position).
       - name: position_source
         description: position for a Position packet, mapreport for a MapReport (pos_04).
         tests:
