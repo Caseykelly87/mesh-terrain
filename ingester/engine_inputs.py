@@ -18,28 +18,31 @@ with both ends in it (Casey, issue #44, busiest pair, 2026-11-17). The
 command still prints each pair's link-hours and receipts for the local
 record; no busiest-pair ranking selects anything.
 
-Each pair carries the box its counted receipts used at each end (Casey,
-issue #44, 2026-11-17), under `lnk_02` with the floor, the box around merged
-fixes, one box per end for the hour and the half-open cell. A pair whose end
-used more than one box over its kept hours is dropped before the tile is
-looked at, and the command prints one local line for it. A node is placed
-once per pair at the box that pair used (Casey: "a moving node is placed per
-pair"), one row per distinct box: a node with one box keeps its pseudonym as
-`site_id` or `rx_id`, and a node at two or more places gets `<pseudonym>.<n>`
-(`ingester.tile_selection.site_row_ids`). A node is in or out of the tile by
-the centres of its boxes.
-The command also prints the data-quality counts the rules give: receipts
-dropped as a direct hop that the gateway's NeighborInfo contradicts (Casey,
-PR #66, Q4 (a): "count these drops as a data-quality count in the run
-report"), and link-hours dropped for more than one box (`lnk_02`).
+Each pair carries the box its counted receipts in kept hours used at each
+end (Casey, issue #44, 2026-11-17; issue #55 comment 6985802330, item 2,
+(b)), under `lnk_02` with the floor, the box around merged fixes, one box per
+end for the hour and the half-open cell. A node is placed once per pair at
+the box that pair used (Casey: "a moving node is placed per pair"), one row
+per distinct box: a node with one box keeps its pseudonym as `site_id` or
+`rx_id`, and a node at two or more places gets `<pseudonym>.<n>`
+(`ingester.tile_selection.site_row_ids`). The command also prints the
+data-quality counts the rules give: receipts dropped as a direct hop that
+the gateway's NeighborInfo contradicts (Casey, PR #66, Q4 (a): "count these
+drops as a data-quality count in the run report"), and link-hours dropped for
+more than one box (`lnk_02`); and, for Casey in the session, the count of
+kept pairs whose hours not kept show another box, with one local line per
+pair (item 2).
 
-A node that used a different box in two pairs, with boxes on both sides of the
-tile edge, counts as in the tile for the tile check, then drops its own pair,
-as a node the run places that fails the DEM edge check does (Casey, issue
-#44, engine_inputs Q1 (a), 2026-11-17; the rule in full is in
+Each pair is judged at the tile edge by its own rows (item 6). The
+2026-11-08 counts check runs first over every pair, those whose kept hours
+used two boxes included, a node counting as touching when any of its boxes
+is in or across the tile (items 3 and 6). Then a pair is dropped when its
+row straddles the tile edge, when its placed row fails the DEM edge check,
+or when it used more than one box at an end (Casey, issue #44, engine_inputs
+Q1 (a), as item 6 reads it; the rule in full is in
 `ingester.tile_selection`). The command prints one line per end that drops a
-pair, naming both ends' pseudonyms, the end and the reason. Straddle lines
-print before the tile check's count checks can refuse (Casey, PR #51, (a)),
+pair, naming both ends' pseudonyms, the end and the reason. Straddle and
+two-box lines print before the tile check's count checks can refuse (Casey, PR #51, (a)),
 so a refusal shows which pair and end caused it; edge-check lines print after
 the nodes are placed. When the both-ends pair or a gateway-only pair is
 dropped it refuses (exit 2) after those lines, before anything is written.
@@ -54,12 +57,11 @@ prints one line, pass or every count that differs, and never refuses. The
 drop lines print at the same points as without the flag, the straddle lines
 naming their pair's kind since no count check can refuse first, and no
 dropped pair stops the run. The candidates are the in-tile gateways of the
-site rule above. Their roles follow the counted states, a straddling node
-counted as in the tile, so a straddling relayer can make a second pair a
-both-ends pair and give its gateway the `both_ends_gateway` role. A candidate
+site rule above, a row per gateway box. Their roles follow each pair's own
+rows (item 6). A candidate
 is written once per box its pairs used, with the row ids of
-`ingester.tile_selection.site_row_ids`, unless it straddles the tile edge or
-the row fails the DEM edge check
+`ingester.tile_selection.site_row_ids`, unless that row straddles the tile
+edge or fails the DEM edge check
 (`ingester.tile_selection.select_sites`). Each gateway left out gets a local
 `left out` line with its reason. A run with no site left refuses, with its
 own message when no pair touching the tile has its gateway in it. No relayer
