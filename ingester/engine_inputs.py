@@ -124,6 +124,7 @@ from ingester.tile_selection import (
     AnyPair,
     DroppedPair,
     Extent,
+    KindConflict,
     PlacedNode,
     Selection,
     SiteSelection,
@@ -131,6 +132,7 @@ from ingester.tile_selection import (
     count_differences,
     counted_states,
     dem_extent,
+    kind_conflicts,
     parse_tile,
     select_nodes,
     select_sites,
@@ -212,6 +214,15 @@ def other_box_lines(links: CaptureLinks) -> list[str]:
             f"kept pair {pair.relayer} to {pair.gateway}: {ends} used another box in hours not kept"
         )
     return lines
+
+
+def kind_conflict_line(conflict: KindConflict) -> str:
+    """The local line for a pair whose kind by its own rows differs from the counts check."""
+    pair = conflict.pair
+    return (
+        f"kind differs, pair {pair.relayer} to {pair.gateway}: {conflict.by_rows} by its own "
+        f"rows, {conflict.counted} by the counts check; reported for Casey (PR #70, interim)"
+    )
 
 
 def _print_pairs(links: CaptureLinks) -> list[str]:
@@ -596,6 +607,10 @@ def _run(args: argparse.Namespace) -> None:
         straddles = _print_drops(site_straddle_drops(links, tile), printed)
     else:
         straddles = _print_drops(straddle_drops(links, tile, args.expect_pairs), printed)
+    # Interim guard (PR #70): a pair whose kind by its own rows differs from the
+    # counts check is reported here; a strict run then refuses in select_nodes.
+    for conflict in kind_conflicts(links, tile):
+        _say(kind_conflict_line(conflict), straddles)
     source = f"Snapshot {args.snapshot}, DEM snapshot {args.dem_snapshot}."
     run = _Run(
         args.out, args.expect_pairs, links, tile, extent, counts, printed, straddles, source,
