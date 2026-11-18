@@ -2,10 +2,13 @@
 
 This checks the shape of `tests/fixtures/link_rules/` only: every case names
 rules the contract has, every expected row refers to inputs and boxes that
-exist, every position at 1 to 31 bits sits on the firmware grid, and ids are
-unique. It implements no link rule and never checks an expected outcome; the
-SQL models and the ingester's Python are compared against the fixture in their
-own units.
+exist and has only the README's keys, every box is named by an expected row,
+a single-cell box is one grid cell and the cell of a position in its case, a
+merged box's edges are edges of its case's cells, a kept hour names the box
+each of its receipts uses, every position at 1 to 31 bits sits on the firmware
+grid, and ids are unique. It implements no link rule and never checks an
+expected outcome; the SQL models and the ingester's Python are compared
+against the fixture in their own units.
 """
 
 import copy
@@ -92,6 +95,10 @@ KEPT_HOUR_KEYS = (
     "gateway_precise_source",
     "position_uncertainty_m",
 )
+RECEIPT_KEYS = frozenset(
+    {"delivery_key", "outcome", "rule", "relayer", "link_source", *REACHES_LNK_05}
+)
+HOUR_KEYS = frozenset({"relayer", "gateway", "hour", "receipts", "packets", "outcome", "rule"})
 
 
 def unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -239,7 +246,51 @@ def test_positions_at_1_to_31_bits_are_on_the_firmware_grid() -> None:
             assert on_firmware_grid(longitude, bits), message["delivery_key"]
 
 
+Edges = tuple[int, int, int, int]
+
+
+def cell_edges(message: dict[str, Any]) -> Edges | None:
+    """South, north, west and east of a stored position's cell, half-open, as `lnk_02` reads it."""
+    bits = message.get("precision_bits")
+    latitude, longitude = message.get("latitude_i"), message.get("longitude_i")
+    if bits is None or latitude is None or longitude is None or not 1 <= bits <= 32:
+        return None
+    width = 1 << (32 - bits)
+    centre_offset = 0 if bits == 32 else width // 2
+    south, west = latitude - centre_offset, longitude - centre_offset
+    return (south, south + width, west, west + width)
+
+
+def box_edges(box: dict[str, Any]) -> Edges:
+    return (box["south_i"], box["north_i"], box["west_i"], box["east_i"])
+
+
+def is_one_grid_cell(box: dict[str, Any]) -> bool:
+    width = 1 << (32 - box["precision_bits"])
+    spans = (box["north_i"] - box["south_i"], box["east_i"] - box["west_i"])
+    return spans == (width, width) and box["south_i"] % width == 0 == box["west_i"] % width
+
+
+def check_box_against_positions(label: str, box: dict[str, Any], cells: list[Edges]) -> None:
+    """A single cell is the cell of a position in its case; a merged box's edges are cell edges."""
+    if box["merged"]:
+        assert not is_one_grid_cell(box), f"{label}: merged is true on one grid cell"
+        for side, edge in enumerate(box_edges(box)):
+            assert edge in {cell[side] for cell in cells}, f"{label}: an edge no cell has"
+        return
+    assert is_one_grid_cell(box), f"{label}: not one grid cell at its precision_bits"
+    assert box_edges(box) in cells, f"{label}: not the cell of any position in the case"
+
+
+def referenced_boxes(case: dict[str, Any]) -> set[str]:
+    rows = case["expected_receipts"] + case["expected_link_hours"]
+    return {row[end] for row in rows for end in ("relayer_box", "gateway_box") if end in row}
+
+
 def check_boxes(case: dict[str, Any]) -> None:
+    cells = [edges for m in case["messages"] if (edges := cell_edges(m)) is not None]
+    unused = sorted(set(case["boxes"]) - referenced_boxes(case))
+    assert unused == [], f"{case['case_id']}: no expected row names {unused}"
     for name, box in case["boxes"].items():
         label = f"{case['case_id']} {name}"
         assert set(box) == BOX_KEYS, label
@@ -247,6 +298,7 @@ def check_boxes(case: dict[str, Any]) -> None:
         assert isinstance(box["merged"], bool), label
         assert 1 <= box["precision_bits"] <= 32, label
         assert box["half_width_ns_m"] > 0 and box["half_width_ew_m"] > 0, label
+        check_box_against_positions(label, box, cells)
 
 
 def test_boxes_are_well_formed() -> None:
@@ -256,6 +308,7 @@ def test_boxes_are_well_formed() -> None:
 
 def check_receipt(row: dict[str, Any], case: dict[str, Any]) -> None:
     label = f"{case['case_id']} {row['delivery_key']}"
+    assert set(row) <= RECEIPT_KEYS, f"{label}: unknown keys {sorted(set(row) - RECEIPT_KEYS)}"
     assert row["outcome"] in {"counted", "dropped"}, label
     assert (row["outcome"] == "dropped") == ("rule" in row), label
     if row["outcome"] == "counted":
@@ -290,16 +343,22 @@ def hour_of(text: str) -> datetime:
     return utc(text).replace(minute=0, second=0, microsecond=0)
 
 
-def check_hour(hour: dict[str, Any], case: dict[str, Any]) -> None:
+def check_hour(hour: dict[str, Any], case: dict[str, Any], counted: dict[str, Any]) -> None:
+    """A kept hour names the one box per end that each of its counted receipts uses."""
     label = f"{case['case_id']} {hour['relayer']} {hour['hour']}"
+    allowed = HOUR_KEYS | set(KEPT_HOUR_KEYS) if hour["outcome"] == "kept" else HOUR_KEYS
+    assert set(hour) <= allowed, f"{label}: unknown keys {sorted(set(hour) - allowed)}"
     assert utc(hour["hour"]) == hour_of(hour["hour"]), label
     assert hour["outcome"] in {"kept", "dropped"}, label
     assert (hour["outcome"] == "dropped") == ("rule" in hour), label
     assert hour["packets"] == len(hour["receipts"]) > 0, label
-    if hour["outcome"] == "kept":
-        assert all(key in hour for key in KEPT_HOUR_KEYS), label
-        assert hour["relayer_box"] in case["boxes"], label
-        assert hour["gateway_box"] in case["boxes"], label
+    if hour["outcome"] != "kept":
+        return
+    assert all(key in hour for key in KEPT_HOUR_KEYS), label
+    for end in ("relayer_box", "gateway_box"):
+        assert hour[end] in case["boxes"], label
+        used = sorted({counted[key][end] for key in hour["receipts"]})
+        assert used == [hour[end]], f"{label}: {end} {hour[end]}, its receipts use {used}"
 
 
 def check_link_hours(case: dict[str, Any]) -> None:
@@ -314,7 +373,7 @@ def check_link_hours(case: dict[str, Any]) -> None:
     grains = Counter((hour["relayer"], hour["gateway"], hour["hour"]) for hour in hours)
     assert max(grains.values(), default=1) == 1, case["case_id"]
     for hour in case["expected_link_hours"]:
-        check_hour(hour, case)
+        check_hour(hour, case, counted)
         for key in hour["receipts"]:
             assert counted[key]["relayer"] == hour["relayer"], key
             assert messages[key]["gateway_pseudonym"] == hour["gateway"], key
@@ -371,7 +430,7 @@ def box_nothing_refers_to(case: dict[str, Any]) -> None:
     [
         ("c01", wrong_width, "not one grid cell"),
         ("c01", merged_single_cell, "merged is true on one grid cell"),
-        ("c01", hour_names_a_box_its_receipts_do_not_use, "does not use"),
+        ("c01", hour_names_a_box_its_receipts_do_not_use, "its receipts use"),
         ("c01", unknown_key_in_a_receipt, "unknown keys"),
         ("c01", unknown_key_in_an_hour, "unknown keys"),
         ("c24", kept_hour_key_in_a_dropped_hour, "unknown keys"),
