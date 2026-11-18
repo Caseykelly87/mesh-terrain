@@ -1,0 +1,39 @@
+{
+  "case_id": "c50_32_bit_stored_value_at_the_msa_edge",
+  "title": "pos_02 tests a 32-bit fix's stored value: inside with its cell centre outside, and the reverse",
+  "rules": ["pos_02", "lnk_01", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "Casey's Q3 answer (PR #66 comment 6968763406, item 2), as PR #67 words it in pos_02: \"A position is tested at its stored coordinates; for a 32-bit position that is the stored value, not its cell's centre\". At 32 bits the cell is [stored, stored + 1) on each axis, so its centre lies half a unit (5e-8 degrees) north and east of the stored value, 0.00555 m north and about 0.0044 m east here (the cell's half-widths).",
+    "c50-ra's fix (381230875, -902546618) lies about 4.1 mm inside the MSA polygon, beside the seed edge from (-90.255195, 38.124151) to (-90.253773, 38.121315), and its cell centre about 2.1 mm outside. c50-rb's fix (381076574, -906865564) lies about 3.5 mm outside, beside the edge from (-90.684366, 38.10549) to (-90.687611, 38.108701), and its cell centre about 3.5 mm inside. Each point's nearest boundary point is on its named edge, 0.375 and 0.675 of the way along it, far from a vertex.",
+    "Each side was decided twice: by the sign of the cross product of the edge and the point in exact rational arithmetic on the seed's decimal vertices, and by shapely contains on the joined polygon, which agree. The millimetre figures are the distance to the foot of the perpendicular in degrees, measured with pyproj; only the side matters to the outcome.",
+    "c50-ra's position is read (pos_02 on the stored value), so c50-ra is stationary on ra_32 (lnk_02). Its box centre, which lnk_05 and lnk_07 use, is the cell centre outside the MSA; no rule asks a box centre to lie inside. Its direct-hop receipts pass lnk_05 at 3720.154 m from c50-g's g16, whose centre is about 4 km inside: 3 packets, kept.",
+    "c50-rb's position is not read: its stored value is outside the MSA, though its cell centre is inside. c50-rb has no other position, so its direct-hop receipts are dropped by lnk_02.",
+    "Medians: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0. position_uncertainty_m is ra_32 0.005550 m plus g16 363.721859 m, = 363.727409 m. Neither end is precise."
+  ],
+  "messages": [
+    {"delivery_key": "c50-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c50-g", "origin_low_byte": 10, "gateway_pseudonym": "c50-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 50001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 381386752, "longitude_i": -902922240, "precision_bits": 16},
+    {"delivery_key": "c50-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c50-ra", "origin_low_byte": 23, "gateway_pseudonym": "c50-ra", "gateway_low_byte": 23, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 50002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 381230875, "longitude_i": -902546618, "precision_bits": 32},
+    {"delivery_key": "c50-m003", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c50-rb", "origin_low_byte": 24, "gateway_pseudonym": "c50-rb", "gateway_low_byte": 24, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 50003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 381076574, "longitude_i": -906865564, "precision_bits": 32},
+    {"delivery_key": "c50-m004", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c50-ra", "origin_low_byte": 23, "gateway_pseudonym": "c50-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 50004, "relay_node": 23, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c50-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c50-ra", "origin_low_byte": 23, "gateway_pseudonym": "c50-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 50005, "relay_node": 23, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c50-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "c50-ra", "origin_low_byte": 23, "gateway_pseudonym": "c50-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 50006, "relay_node": 23, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100},
+    {"delivery_key": "c50-m007", "received_at": "2026-10-23T10:15:00Z", "origin_pseudonym": "c50-rb", "origin_low_byte": 24, "gateway_pseudonym": "c50-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 50007, "relay_node": 24, "portnum": 1, "rx_snr": 5.0, "rx_rssi": -90},
+    {"delivery_key": "c50-m008", "received_at": "2026-10-23T10:25:00Z", "origin_pseudonym": "c50-rb", "origin_low_byte": 24, "gateway_pseudonym": "c50-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 50008, "relay_node": 24, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c50-m009", "received_at": "2026-10-23T10:35:00Z", "origin_pseudonym": "c50-rb", "origin_low_byte": 24, "gateway_pseudonym": "c50-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 50009, "relay_node": 24, "portnum": 1, "rx_snr": 7.0, "rx_rssi": -100}
+  ],
+  "boxes": {
+    "g16": {"south_i": 381353984, "north_i": 381419520, "west_i": -902955008, "east_i": -902889472, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.721859, "half_width_ew_m": 287.26659},
+    "ra_32": {"south_i": 381230875, "north_i": 381230876, "west_i": -902546618, "east_i": -902546617, "merged": false, "precision_bits": 32, "half_width_ns_m": 0.00555, "half_width_ew_m": 0.004384}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c50-m004", "outcome": "counted", "relayer": "c50-ra", "link_source": "relay_node", "relayer_box": "ra_32", "gateway_box": "g16", "distance_m": 3720.15387},
+    {"delivery_key": "c50-m005", "outcome": "counted", "relayer": "c50-ra", "link_source": "relay_node", "relayer_box": "ra_32", "gateway_box": "g16", "distance_m": 3720.15387},
+    {"delivery_key": "c50-m006", "outcome": "counted", "relayer": "c50-ra", "link_source": "relay_node", "relayer_box": "ra_32", "gateway_box": "g16", "distance_m": 3720.15387},
+    {"delivery_key": "c50-m007", "outcome": "dropped", "rule": "lnk_02", "relayer": "c50-rb", "link_source": "relay_node"},
+    {"delivery_key": "c50-m008", "outcome": "dropped", "rule": "lnk_02", "relayer": "c50-rb", "link_source": "relay_node"},
+    {"delivery_key": "c50-m009", "outcome": "dropped", "rule": "lnk_02", "relayer": "c50-rb", "link_source": "relay_node"}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c50-ra", "gateway": "c50-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c50-m004", "c50-m005", "c50-m006"], "packets": 3, "outcome": "kept", "median_snr_db": 6.0, "median_rssi_dbm": -95.0, "distance_m": 3720.15387, "relayer_box": "ra_32", "relayer_precise_source": false, "gateway_box": "g16", "gateway_precise_source": false, "position_uncertainty_m": 363.727409}
+  ]
+}
