@@ -62,9 +62,19 @@ models:
       - name: rx_time
         description: The gateway's own receive time in Unix seconds, as sent; stored and never used to order anything (ing_06).
       - name: rx_snr
-        description: The gateway's signal-to-noise ratio for the packet in dB, as raw holds it, except that a value that is not a number (NaN) lands as null (lnk_06).
+        description: >
+          The gateway's signal-to-noise ratio for the packet in dB, as raw holds
+          it, except that a value the radio chips cannot report lands as null:
+          NaN, or outside -32 to 31.75 dB inclusive (lnk_06; Casey, PR #72,
+          Q2). The datasheet sections behind the limits are not cited yet
+          (docs/STATUS.md, Known issues).
       - name: rx_rssi
-        description: The gateway's received signal strength in dBm, as raw holds it, null where it was 0.
+        description: >
+          The gateway's received signal strength in dBm, as raw holds it (raw
+          lands 0 as null), except that a value outside -189 to +98 dBm
+          inclusive, the range the radio chips can report, lands as null
+          (lnk_06; Casey, PR #72, Q2). The datasheet sections behind the
+          limits are not cited yet (docs/STATUS.md, Known issues).
       - name: channel
         description: The packet's channel hash.
       - name: portnum
