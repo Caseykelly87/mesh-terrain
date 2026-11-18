@@ -78,6 +78,7 @@ Columns: `snapshot_id`, `delivery_key`, `neighbour_position`, `received_at`, `re
 | --- | --- | --- |
 | `snapshot_id`, `delivery_key`, `received_at` | text, text, timestamptz | The raw row. |
 | `node_pseudonym` | text | The node the position belongs to, the packet's origin. |
+| `packet_id` | bigint | The packet's id from its sender, null where raw landed 0; copies of one broadcast at several gateways share it. |
 | `position_source` | text | `position` or `mapreport`. |
 | `seen_public`, `seen_meshstl` | boolean | Which brokers carried the delivery. |
 | `position_zero_mapped` | boolean | True for a Position sent at 0, 0. |
@@ -109,7 +110,7 @@ A cell's edges are not stored; the link models compute them with the macro `cell
 
 Columns: `delivery_key`, `snapshot_id`, `received_at`, `hour` (the clock hour in UTC that holds `received_at`, half-open), `tx_node_hash`, `gateway_node_hash`, `link_source` (`relay_node` or `neighbor_info`), `origin_pseudonym` (the sender), `packet_id`, `relay_node`, `rx_snr` (dB), `rx_rssi` (dBm), `modem_preset`, `seen_public`, `seen_meshstl`. Each is described in `dbt/models/core/fct_rx_observation.yml`.
 
-Incremental: a run adds the receipts received after the latest `received_at` already in the table, and every receipt of a snapshot not yet in it. Resolution reads only the 24 hours before a receipt, so later data never changes a receipt already there; a new snapshot that adds deliveries before a receipt already in the table needs `--full-refresh`.
+Incremental: `received_at` is the watermark. A run adds the receipts received after the latest `received_at` already in the table, every receipt of a snapshot not yet in it, and every receipt when it is empty. Resolution reads only the 24 hours before a receipt, so later data never changes a receipt already there; a new snapshot that adds deliveries before a receipt already in the table needs `--full-refresh`.
 
 Worked example (link-rules case c06): `c06-g` heard `c06-r1` and `c06-r2` by radio, both with byte 0x51, and its own NeighborInfo report lists `c06-r1` alone with 0x51. A receipt with `relay_node` 0x51 has two candidates, so `relay_node` does not resolve it, and NeighborInfo does: `tx_node_hash` is `c06-r1` and `link_source` is `neighbor_info`.
 
@@ -127,11 +128,11 @@ Columns:
 | --- | --- | --- |
 | `tx_node_hash`, `gateway_node_hash`, `hour` | text, text, timestamptz | The key (`lnk_08`). |
 | `packet_count` | bigint | Counted receipts, at least 3. |
-| `first_received_at`, `last_received_at` | timestamptz | The first and last counted receipt; `last_received_at` is the incremental watermark. |
+| `first_received_at`, `last_received_at` | timestamptz | The first and last counted receipt. |
 | `median_snr_db`, `median_rssi_dbm` | double precision | Medians over the counted receipts. |
 | `modem_preset` | text | The preset when every counted receipt names the same one, else null. |
 | `distance_m` | double precision | Median WGS84 geodesic between the box centres, 500 to 60 000 m (`lnk_05`). |
-| `bearing_deg` | double precision | Geodesic azimuth from the relayer centre to the gateway centre, degrees clockwise from north. |
+| `bearing_deg` | double precision | Grid bearing from the relayer centre to the gateway centre in EPSG:26915, degrees clockwise from grid north, as the engine's `bearing_deg` (`docs/INTERFACE.md`). Only `distance_m` is geodesic (`lnk_05`). |
 | `position_uncertainty_m` | double precision | The larger half-width of each end's box, summed over the two ends (`lnk_05`). |
 | `relayer_south_i`, `relayer_north_i`, `relayer_west_i`, `relayer_east_i` | bigint | The relayer box's half-open edges in 1e-7 degrees. |
 | `relayer_merged` | boolean | True when the box is the rectangle around two or more cells the floor made one place. |
@@ -141,7 +142,7 @@ Columns:
 | `gateway_*` | as above | The same nine columns for the gateway box. |
 | `geom` | geometry(LineString, 4326) | From the relayer box centre to the gateway box centre, in that order (`lnk_07`). |
 
-Incremental: a run adds the link-hours after the latest `hour` already in the table. Data that changes that hour or an earlier one needs `--full-refresh`.
+Incremental: `hour` is the watermark. A run adds the link-hours after the latest `hour` already in the table, and every kept hour when it is empty. Data that changes that hour or an earlier one needs `--full-refresh`.
 
 Worked example (link-rules case c21): `c21-r` sent a 16-bit cell on 22 October and, at 10:25 on 23 October, the 20-bit cell inside it. Its receipts at 10:10 and 10:20 alone would use the 16-bit cell and the 10:30 receipt the 20-bit one, two boxes, and the hour would be dropped. But `c21-r` is stationary at all three and the two cells overlap, so the hour's box is chosen over both: the 20-bit cell, which every receipt uses. The hour is kept with `relayer_precision_bits` 20 and `position_uncertainty_m` 22.734 m + 363.750 m = 386.485 m.
 
@@ -150,7 +151,7 @@ Worked example (link-rules case c21): `c21-r` sent a 16-bit cell on 22 October a
 These are compiled into `fct_rx_observation`, `int_link_window` and their tests as common table expressions; none exists in the warehouse.
 
 - `int_rx_resolution`: every packet a gateway uplinked, with `lnk_01`'s two methods, `direct_hop_contradicted` (Casey's Q4 drops, the count `lnk_01_direct_hop_contradicted`) and `drop_rule` (`lnk_01`, `lnk_03`, `lnk_06` or null).
-- `int_usable_position`: the usable positions inside the MSA with their cell edges, `next_conflict_at` (the first later position of the node that is not the same place) and `finer_received_at` (when the node sent the finer positions the cell holds).
+- `int_usable_position`: the usable positions inside the MSA, one row per broadcast (the copies one position packet reached several gateways in are one position, timed by the first copy and precise when any copy qualifies under `pos_04`; `stg_position` carries `packet_id` for this), with their cell edges, `next_conflict_at` (the first later position of the node that is not the same place) and `finer_received_at` (when the node sent the finer positions the cell holds).
 - `int_receipt_end_cell`, `int_receipt_end`: each end of each receipt, the cells it read and its own box.
 - `int_link_hour_box`: each end's box for the hour, where it has one.
 - `int_link_receipt`: each receipt with the boxes it uses, its distance and `drop_rule` (`lnk_02`, `lnk_05` or null).
