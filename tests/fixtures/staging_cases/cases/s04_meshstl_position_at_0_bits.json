@@ -1,0 +1,24 @@
+{
+  "case_id": "s04_meshstl_position_at_0_bits",
+  "title": "A MeshSTL Position at 0 bits is precise; a MeshSTL MapReport at 0 bits is not",
+  "rules": ["pos_01", "pos_04"],
+  "reasoning": [
+    "Casey, issue #55 comment 6985802330, item 8 (verbatim): \"MeshSTL Position with 0 precision bits: (a), precise_source true when seen_meshstl is true. pos_04 change with its ADR note, in the next contract PR, which comes to me for merge approval.\" Firmware older than the precision field sends 0 bits with full-precision coordinates.",
+    "s04-m001 is a Position at 0 bits carried by the MeshSTL broker only, near 38.60 N, 90.34 W, inside the MSA. It stays unusable with null cell_width_i and half-widths (pos_01 is unchanged) and is precise_source true (item 8). Its only copy is in core, precise.",
+    "s04-m002 is a MapReport at 0 bits carried by the MeshSTL broker only, near 38.60 N, 90.33 W. Item 8 names a Position, so it is not flagged: precise_source false, in core, not precise. The contract PR's wording settles whether a MapReport is meant too.",
+    "s04-m003 is a Position at 0 bits from s04-c in both snapshots: at 09:20:00 in a, public only, and at 09:20:05 in b, MeshSTL only. In stg_position a's copy is not precise and b's is. Core keeps a's copy, the first, and reads seen_meshstl on any copy (item 7), so core's flag is true; the incremental build after snapshot b loads must set it on the row it already keeps.",
+    "Expected positions, by hand: all three are inside the MSA and unusable at 0 bits; none is at 0, 0."
+  ],
+  "messages": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s04-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s04-a", "origin_low_byte": 50, "gateway_pseudonym": "s04-a", "gateway_low_byte": 50, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 4001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000000, "longitude_i": -903400000, "precision_bits": 0},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s04-m002", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s04-b", "origin_low_byte": 51, "gateway_pseudonym": "s04-b", "gateway_low_byte": 51, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 4002, "relay_node": null, "portnum": 73, "topic": "msh/US/2/map/", "position_source": "mapreport", "latitude_i": 386000000, "longitude_i": -903300000, "precision_bits": 0},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s04-m003", "received_at": "2026-10-22T09:20:00Z", "origin_pseudonym": "s04-c", "origin_low_byte": 52, "gateway_pseudonym": "s04-c", "gateway_low_byte": 52, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 4003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386100000, "longitude_i": -903400000, "precision_bits": 0},
+    {"snapshot_id": "staging-fixture-b", "delivery_key": "s04-m003", "received_at": "2026-10-22T09:20:05Z", "origin_pseudonym": "s04-c", "origin_low_byte": 52, "gateway_pseudonym": "s04-c", "gateway_low_byte": 52, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 4003, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386100000, "longitude_i": -903400000, "precision_bits": 0}
+  ],
+  "expected_positions": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s04-m001", "position_quality": "unusable", "position_zero_mapped": false, "precise_source": true, "inside_msa": true, "in_core": true, "core_precise_source": true},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s04-m002", "position_quality": "unusable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s04-m003", "position_quality": "unusable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": true},
+    {"snapshot_id": "staging-fixture-b", "delivery_key": "s04-m003", "position_quality": "unusable", "position_zero_mapped": false, "precise_source": true, "inside_msa": true, "in_core": false, "core_precise_source": null}
+  ]
+}

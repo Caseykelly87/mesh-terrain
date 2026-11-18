@@ -67,3 +67,22 @@
         * cos(radians({{ latitude_i }} * 1e-7::double precision))
     )
 {%- endmacro %}
+
+{#
+  pos_04's precise flag for one position: carried by the MeshSTL broker, and
+  either 20 bits or more, or a Position sent at 0 bits, which firmware older
+  than the precision field sends with full-precision coordinates (Casey, issue #55 comment 6985802330, item 8;
+  the pos_04 wording follows in the next contract PR). A MapReport at 0 bits
+  is not flagged: item 8 names a Position. False, never null, for a position
+  without precision_bits.
+#}
+{% macro precise_flag(precision_bits, position_source, seen_meshstl) -%}
+    coalesce(
+        {{ seen_meshstl }}
+        and (
+            {{ precision_bits }} >= 20
+            or ({{ position_source }} = 'position' and {{ precision_bits }} = 0)
+        ),
+        false
+    )
+{%- endmacro %}

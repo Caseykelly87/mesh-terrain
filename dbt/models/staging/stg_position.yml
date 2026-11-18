@@ -94,6 +94,7 @@ models:
         description: Half the cell's east-west extent in metres on the WGS84 ellipsoid at the stored latitude (pos_01).
       - name: precise_source
         description: >
-          True when precision_bits is 20 or more and the MeshSTL broker carried
-          this copy of the delivery (pos_04); null when the row has no position.
-          Core reads every copy.
+          True when the MeshSTL broker carried this copy of the delivery and
+          precision_bits is 20 or more, or the row is a Position at 0 bits
+          (pos_04; Casey, issue #55 comment 6985802330, item 8); null when the row
+          has no position. Core reads every copy.
