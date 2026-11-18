@@ -73,7 +73,7 @@ the layer, through the same staging folder, it writes the local run report
 check, rule, per-gateway and left-out lines and the counts line, in the order
 they printed (Casey, issue #55, 7). The report names pseudonyms, so it is
 local only, like the layer; a refusal writes neither, and an existing report
-is refused. A run without the flag writes no report.
+is refused. A strict run writes the same report beside its two layers.
 
 The layers are written into a staging folder inside the output folder and
 moved to their names only when all are complete. A refusal exits 2 and any
@@ -175,6 +175,8 @@ SITES_ONLY_RULE = (
 # count in the run report". The name is the one B2b gave it (PR #68).
 DIRECT_HOP_CONTRADICTED = "lnk_01_direct_hop_contradicted"
 ONE_BOX_DROPPED_HOURS = "one_box_dropped_hours"
+# Casey's answer that each pair's own row decides its kind and role.
+KIND_SOURCE = "issue #55 comment 6990646633, item 3"
 OTHER_BOX_COUNT = "pairs kept with another box in hours not kept:"
 COUNTS_CHECK = "counts check against 2026-11-08"
 # Casey, issue #55, 7: "write the counts line and every left-out gateway line
@@ -221,7 +223,7 @@ def kind_conflict_line(conflict: KindConflict) -> str:
     pair = conflict.pair
     return (
         f"kind differs, pair {pair.relayer} to {pair.gateway}: {conflict.by_rows} by its own "
-        f"rows, {conflict.counted} by the counts check; reported for Casey (PR #70, interim)"
+        f"rows, {conflict.counted} by the counts check; for Casey in the session ({KIND_SOURCE})"
     )
 
 
@@ -353,9 +355,8 @@ def _inside_checkout(folder: Path) -> bool:
 def _check_targets(out: Path, report: bool = False) -> list[Path]:
     """The two layer paths in out, refusing a checkout or any file the run could overwrite.
 
-    The files are both layers, the staging folder and, with report, the
-    sites-only run report REPORT_FILE; a strict run writes no report, so it
-    does not look for one. A checkout is refused because the layers hold real
+    The files are both layers, the staging folder and, with report, the run
+    report REPORT_FILE. A checkout is refused because the layers hold real
     positions and the report names pseudonyms.
     """
     if _inside_checkout(out):
@@ -549,15 +550,26 @@ class _Run:
 
 
 def _write_both(run: _Run) -> None:
-    """The strict run: the counts check, the stop on a dropped selected pair, both layers."""
+    """The strict run: the counts check, the stop on a dropped selected pair, both layers.
+
+    Beside the layers it writes the local run report, so the lines for Casey
+    in the session (the kind disagreements, the other-box and two-box pairs)
+    are kept with the layers they belong to; a refusal writes neither.
+    """
     selection = select_nodes(run.links, run.tile, run.expect_pairs, run.extent)
-    _print_selection(selection, run.printed)
+    record = [*run.capture_lines, *run.straddle_lines]
+    record += _print_selection(selection, run.printed)
     # Casey's stop for a dropped selected pair comes here, after the drop lines
     # and before anything with real positions is written.
     sites, receiver = selection.layers()
-    write_layers(run.out, sites, receiver)
-    print(f"wrote {SITES_FILE} ({len(sites)} sites) and {RECEIVERS_FILE} (1 receiver)")
-    print(counts_line(run.links, run.tile_counts, selection))
+    counts = counts_line(run.links, run.tile_counts, selection)
+    heading = f"engine_inputs, {run.tile.name}"
+    write_layers(run.out, sites, receiver, report_text(heading, run.source, [*record, counts]))
+    print(
+        f"wrote {SITES_FILE} ({len(sites)} sites), {RECEIVERS_FILE} (1 receiver) and "
+        f"{REPORT_FILE} (local only)"
+    )
+    print(counts)
 
 
 def _write_sites(run: _Run) -> None:
@@ -591,7 +603,7 @@ def _write_sites(run: _Run) -> None:
 def _run(args: argparse.Namespace) -> None:
     _check_sites_only(args)
     tile = parse_tile(args.tile)
-    _check_targets(args.out, report=args.sites_only)
+    _check_targets(args.out, report=True)
     root = args.snapshots_dir or get_ingester_settings().snapshots_dir
     extent = dem_extent(root, args.dem_snapshot)
     rows = read_capture_rows(snapshot_folder(root, args.snapshot))
@@ -607,8 +619,8 @@ def _run(args: argparse.Namespace) -> None:
         straddles = _print_drops(site_straddle_drops(links, tile), printed)
     else:
         straddles = _print_drops(straddle_drops(links, tile, args.expect_pairs), printed)
-    # Interim guard (PR #70): a pair whose kind by its own rows differs from the
-    # counts check is reported here; a strict run then refuses in select_nodes.
+    # Casey (issue #55 comment 6990646633, item 3): a pair whose kind by its own
+    # rows differs from the counts check is listed for him and does not stop the run.
     for conflict in kind_conflicts(links, tile):
         _say(kind_conflict_line(conflict), straddles)
     source = f"Snapshot {args.snapshot}, DEM snapshot {args.dem_snapshot}."
