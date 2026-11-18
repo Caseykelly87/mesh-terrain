@@ -1,18 +1,24 @@
 """Which schemas each dbt target reads and writes (issue #55, B1).
 
-The development target `dev_wh` is the profile's default and the one
-`make check` and `make dbt-build` name: every relation it builds sits in a
-schema suffixed `_dev_wh`, and every source reads `raw_dev_wh`, which holds
-synthetic fixture tables only. The real `raw`, `staging`, `core` and
-`analytics` schemas belong to the target `prod`. dbt also takes the target
-from the `DBT_TARGET` environment variable, so the target alone does not keep
-a build off the real schemas: a run on `prod` refuses to start unless
+There are two development targets, one per track, so two `make check` runs
+at once never build into the same schemas (Casey, issue #55 comment
+6966197127, item 3). `dev_wh` is the profile's default and Track B's: every
+relation it builds sits in a schema suffixed `_dev_wh`, and every source reads
+`raw_dev_wh`. `dev_ta` is Track A's, through `make check DBT_DEV_TARGET=dev_ta`:
+suffix `_dev_ta`, sources in `raw_dev_ta`. Both raw schemas hold synthetic
+fixture tables only. The real `raw`, `staging`, `core` and `analytics` schemas
+belong to the target `prod`. dbt also takes the target from the `DBT_TARGET`
+environment variable, so the target alone does not keep a build off the real
+schemas: a run on `prod` refuses to start unless
 `--vars '{real_build: true}'` is passed, which only the lead's
-`make dbt-build-real` does.
+`make dbt-build-real` does, and `make check` and `make dbt-build` refuse
+`DBT_DEV_TARGET=prod`.
 """
 
 import os
 import re
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -32,6 +38,11 @@ from dbt_listing import (
 from pipeline.common.settings import get_settings
 
 SUFFIX = f"_{DEVELOPMENT_TARGET}"
+# Track A's development target; DEVELOPMENT_TARGET (dev_wh) is Track B's.
+TRACK_A_TARGET = "dev_ta"
+DEVELOPMENT_TARGETS = (DEVELOPMENT_TARGET, TRACK_A_TARGET)
+BUILT_SCHEMAS = ("staging", "core", "analytics")
+CREATED_SCHEMA = re.compile(r'create schema if not exists "([^"]+)"', re.IGNORECASE)
 REAL_SCHEMAS = {"raw", "staging", "core", "analytics"}
 REAL_BUILD_FLAG = "{real_build: true}"
 SQL_FOLDERS = ("models", "tests", "snapshots", "macros", "analyses")
@@ -93,6 +104,56 @@ def schema_hook(target: str, *extra: str, environment: dict[str, str] | None = N
             environment,
         )
     return "" if result.returncode == 0 else result.stdout + result.stderr
+
+
+def hook_schemas(target: str) -> set[str]:
+    """The schemas the on-run-start macro would create on the target.
+
+    `dbt compile --inline` renders the macro and prints its SQL without running
+    it; dbt only lists the target's relations, so this writes nothing.
+    """
+    with tempfile.TemporaryDirectory() as work:
+        result = dbt_result(
+            [
+                "compile",
+                "--inline",
+                "{{ create_target_schemas() }}",
+                "--target",
+                target,
+                "--target-path",
+                str(Path(work) / "target"),
+            ],
+            Path(work),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return set(CREATED_SCHEMA.findall(result.stdout))
+
+
+def make_dry_run(
+    *arguments: str, dbt_dev_target: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    """`make -n` in the checkout, printing the recipes it would run and running none.
+
+    The environment loses what a calling make passes down (MAKEFLAGS carries
+    its command-line variables) and any DBT_DEV_TARGET, so `make check
+    DBT_DEV_TARGET=dev_ta` running this test does not change what it sees;
+    dbt_dev_target, when given, puts one back in the environment.
+    """
+    make = shutil.which("make")
+    if make is None:
+        pytest.skip("make is not installed")
+    passed_down = {"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "DBT_DEV_TARGET"}
+    environment = {name: value for name, value in os.environ.items() if name not in passed_down}
+    if dbt_dev_target is not None:
+        environment["DBT_DEV_TARGET"] = dbt_dev_target
+    return subprocess.run(
+        [make, "--no-print-directory", "-n", *arguments],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=environment,
+    )
 
 
 def variable_assignments(makefile: str) -> list[tuple[str, str]]:
@@ -160,22 +221,37 @@ def test_the_default_target_is_the_development_target() -> None:
     profiles = yaml.safe_load((DBT_DIR / "profiles.yml").read_text(encoding="utf-8"))
     profile = profiles["mesh_terrain"]
     assert profile["target"] == DEVELOPMENT_TARGET
-    assert set(profile["outputs"]) == {DEVELOPMENT_TARGET, REAL_TARGET}
+    assert set(profile["outputs"]) == {*DEVELOPMENT_TARGETS, REAL_TARGET}
 
 
-def test_every_relation_on_the_development_target_is_in_a_suffixed_schema() -> None:
-    nodes = in_target_schemas(dbt_nodes(DEVELOPMENT_TARGET))
+def test_every_development_target_connects_as_the_real_target_does() -> None:
+    """Only the target's name differs, and the name alone picks the schemas."""
+    outputs = yaml.safe_load((DBT_DIR / "profiles.yml").read_text(encoding="utf-8"))[
+        "mesh_terrain"
+    ]["outputs"]
+    assert all(outputs[target] == outputs[REAL_TARGET] for target in DEVELOPMENT_TARGETS)
+
+
+@pytest.mark.parametrize("target", DEVELOPMENT_TARGETS)
+def test_every_relation_on_the_development_target_is_in_a_suffixed_schema(target: str) -> None:
+    nodes = in_target_schemas(dbt_nodes(target))
     assert {node["resource_type"] for node in nodes} >= {"model", "seed", "test"}
     outside = [
-        (node["unique_id"], node["schema"]) for node in nodes if not node["schema"].endswith(SUFFIX)
+        (node["unique_id"], node["schema"])
+        for node in nodes
+        if not node["schema"].endswith(f"_{target}")
     ]
     assert outside == []
 
 
-def test_every_source_on_the_development_target_reads_the_synthetic_raw_schema() -> None:
-    found = sources(dbt_nodes(DEVELOPMENT_TARGET))
+@pytest.mark.parametrize("target", DEVELOPMENT_TARGETS)
+def test_every_source_on_the_development_target_reads_the_synthetic_raw_schema(
+    target: str,
+) -> None:
+    suffix = f"_{target}"
+    found = sources(dbt_nodes(target))
     assert found, "no dbt source is declared, so the source check would pass on nothing"
-    assert {node["schema"] for node in found} == {f"raw{SUFFIX}"}
+    assert {node["schema"] for node in found} == {f"raw{suffix}"}
 
 
 def test_the_real_target_builds_the_real_schemas_and_reads_the_real_raw() -> None:
@@ -203,8 +279,51 @@ def test_the_real_target_runs_with_the_real_build_flag() -> None:
 
 
 @pytest.mark.usefixtures("warehouse")
-def test_the_development_target_runs_without_the_flag() -> None:
-    assert schema_hook(DEVELOPMENT_TARGET) == ""
+@pytest.mark.parametrize("target", DEVELOPMENT_TARGETS)
+def test_the_development_target_runs_without_the_flag(target: str) -> None:
+    assert schema_hook(target) == ""
+
+
+@pytest.mark.usefixtures("warehouse")
+@pytest.mark.parametrize("target", DEVELOPMENT_TARGETS)
+def test_the_hook_creates_every_schema_the_development_target_reads_or_builds(
+    target: str,
+) -> None:
+    read = {node["schema"] for node in sources(dbt_nodes(target))}
+    built = {f"{base}_{target}" for base in BUILT_SCHEMAS}
+    assert len(read) == 1
+    assert hook_schemas(target) == read | built
+
+
+def test_make_dbt_build_uses_the_track_b_target_by_default() -> None:
+    result = make_dry_run("dbt-build")
+    assert result.returncode == 0, result.stderr
+    assert f"--target {DEVELOPMENT_TARGET}" in result.stdout
+
+
+def test_make_dbt_build_and_check_pass_the_development_target_they_are_given() -> None:
+    for goal in ("dbt-build", "check"):
+        result = make_dry_run(goal, f"DBT_DEV_TARGET={TRACK_A_TARGET}")
+        assert result.returncode == 0, result.stderr
+        assert f"--target {TRACK_A_TARGET}" in result.stdout
+        assert f"--target {DEVELOPMENT_TARGET}" not in result.stdout
+
+
+@pytest.mark.parametrize("goal", ["check", "dbt-build"])
+@pytest.mark.parametrize("value", [REAL_TARGET, "", "dev_wh dev_ta", "dev"])
+def test_make_refuses_any_value_but_a_development_target(goal: str, value: str) -> None:
+    """Refused before make prints or runs any recipe, so `make check` lints nothing first."""
+    result = make_dry_run(goal, f"DBT_DEV_TARGET={value}")
+    assert result.returncode != 0
+    assert "make dbt-build-real" in result.stderr
+    assert result.stdout == ""
+
+
+def test_make_refuses_the_real_target_from_the_environment() -> None:
+    result = make_dry_run("check", dbt_dev_target=REAL_TARGET)
+    assert result.returncode != 0
+    assert "make dbt-build-real" in result.stderr
+    assert result.stdout == ""
 
 
 @pytest.mark.usefixtures("warehouse")
