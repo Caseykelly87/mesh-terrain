@@ -97,4 +97,4 @@ models:
           True when the MeshSTL broker carried this copy of the delivery and
           precision_bits is 20 or more, or 0, Position or MapReport alike
           (pos_04; Casey, issue #55 comment 6989099568, item 2); null when the row
-          has no position. Core reads every copy.
+          has no position, so a Position at 0, 0 is never flagged (Casey, PR #71 comment 6989275630, item 1). Core reads every copy.
