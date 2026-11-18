@@ -484,7 +484,7 @@ def test_a_straddling_gateway_only_relayer_fails_the_one_both_ends_pair_check() 
         select(found, 3)
 
 
-def test_reproduction_a_kinds_by_rows_leave_no_receiver_and_the_run_ends_cleanly() -> None:
+def test_reproduction_a_kinds_by_rows_leave_no_receiver_and_the_run_goes_on() -> None:
     """Reviewer, PR #70 comment 6989619559, Blocking 1 (a), under Casey's (b).
 
     Casey's answer: issue #55 comment 6990646633, item 3.
@@ -493,8 +493,8 @@ def test_reproduction_a_kinds_by_rows_leave_no_receiver_and_the_run_ends_cleanly
     The counts read B to G1 as the both-ends pair and pass; by its own rows,
     which decide its kind, it is a gateway-only pair. The disagreement is
     listed, the selection runs to the end, and with no both-ends pair by rows
-    there is no receiver row, so `layers` refuses with a SelectionError (exit
-    2 in the command), not an IndexError, and names no node.
+    there is no receiver row. Casey (PR #70 comment 6992903491), (b): do not stop; `layers`
+    gives the sites and no receiver.
     """
     b_inside = (-10_000.0, 0.0)
     pairs = (boxed("B", "G1", 2), boxed("C", "B", 4, gateway_shift=b_inside), boxed("D", "G2", 1))
@@ -511,9 +511,9 @@ def test_reproduction_a_kinds_by_rows_leave_no_receiver_and_the_run_ends_cleanly
     selection = select(found, 3)
     assert selection.dropped == ()
     assert {node.role for node in selection.placed} == {"gateway_only_gateway"}
-    with pytest.raises(SelectionError, match="no receiver row") as refused:
-        selection.layers()
-    assert not any(node.pseudonym in str(refused.value) for node in NODES.values())
+    sites, receiver = selection.layers()
+    assert receiver is None
+    assert {site.role for site in sites} == {"gateway_only_gateway"}
 
 
 def test_reproduction_b_a_pair_whose_row_lies_outside_is_listed_and_not_selected() -> None:
@@ -544,10 +544,18 @@ def test_pairs_whose_kinds_agree_have_no_conflict() -> None:
     assert kind_conflicts(links(*BOXED), TILE) == ()
 
 
-def test_layers_without_a_receiver_row_refuse_rather_than_fail() -> None:
+def test_layers_without_a_receiver_row_give_the_sites_and_no_receiver() -> None:
+    """Casey (PR #70 comment 6992903491), (b): the sites are written with no receiver layer."""
     site = PlacedNode(pseudonym("G1"), "both_ends_gateway", 724_000.0, 4_285_000.0, 17.8, False)
     selection = Selection(placed=(site,), dem_check={pseudonym("G1"): True}, dropped=())
-    with pytest.raises(SelectionError, match="no receiver row"):
+    assert selection.layers() == ([site], None)
+
+
+def test_a_dropped_both_ends_pair_still_stops_when_no_receiver_row_exists() -> None:
+    """Casey's stop on a dropped selected pair (issue #44, Q1 (a)) is unchanged."""
+    dropped = DroppedPair(BOXED[0], BOTH_ENDS_PAIR, (("relayer", STRADDLES),))
+    selection = Selection(placed=(), dem_check={}, dropped=(dropped,))
+    with pytest.raises(SelectionError, match="selected pairs dropped: both-ends pair"):
         selection.layers()
 
 

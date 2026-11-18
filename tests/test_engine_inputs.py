@@ -436,30 +436,61 @@ def kind_line(relayer: str, gateway: str, by_rows: str, counted: str) -> str:
     return names(KIND_LINE.format(r=relayer, g=gateway, by_rows=by_rows, counted=counted))
 
 
-def test_a_disagreement_with_no_receiver_row_ends_with_exit_2_not_a_traceback(
+NO_RECEIVER_LINE = (
+    "no real receiver: this strict run produced no real receiver and wrote no rx_real.parquet, "
+    "because no pair has both ends in the tile by its own rows; engine.prepare refuses this "
+    "folder unless --no-real-receivers is passed (Casey, PR #70 comment 6992903491)"
+)
+
+
+def test_a_disagreement_with_no_receiver_row_writes_the_sites_and_no_receiver(
     tmp_path: Path,
     capture: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reproduction (a): kinds by rows leave no both-ends pair, so no receiver row.
+    """Reproduction (a), Casey (PR #70 comment 6992903491), (b): do not stop.
 
-    The disagreement is listed and does not stop the run; the run then ends
-    with exit 2 because a strict run's layers need the both-ends pair's
-    relayer as receiver (Casey, issue #44, busiest pair, 2026-11-17), and
-    nothing is written.
+    Kinds by rows leave no both-ends pair, so there is no receiver row. The
+    strict run writes the sites and the local report and no rx_real.parquet
+    at all; the disagreement and a plain no-receiver line are in the report
+    and on the terminal, and neither is on the counts line.
     """
     monkeypatch.setattr(engine_inputs, "capture_links", lambda _rows: capture_with(*REPRODUCTION_A))
     with capture_logs() as events:
-        assert run(tmp_path, expect_pairs="3") == 2
-    assert not (tmp_path / "configs").exists()
+        assert run(tmp_path, expect_pairs="3") == 0
+    out = tmp_path / "configs" / "x72y429"
+    assert sorted(path.name for path in out.iterdir()) == [
+        "engine_inputs_report.md",
+        "tx_sites_real.parquet",
+    ]
+    sites = gpd.read_parquet(out / "tx_sites_real.parquet")
+    assert set(sites["role"]) == {"gateway_only_gateway"}
     printed = capsys.readouterr().out
     lines = printed.splitlines()
     conflict = kind_line("B", "G1", "gateway-only pair", "both-ends pair")
-    assert conflict in lines
-    refusal = "refused, nothing written: no receiver row: no both-ends pair has a row of its own"
-    assert lines.index(conflict) < lines.index(refusal)
+    for line in (conflict, NO_RECEIVER_LINE):
+        assert line in lines
+        assert line in report_lines(tmp_path)
+    assert "no real receiver" not in counts_for_issue(lines)
+    assert_report(tmp_path, printed, heading="engine_inputs")
     assert coordinates_in(printed + repr(events)) == []
+
+
+def test_engine_prepare_refuses_the_folder_without_no_real_receivers(
+    tmp_path: Path, capture: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """engine.prepare's own main refuses a folder with no rx_real.parquet unless told otherwise."""
+    monkeypatch.setattr(engine_inputs, "capture_links", lambda _rows: capture_with(*REPRODUCTION_A))
+    assert run(tmp_path, expect_pairs="3") == 0
+    folder = tmp_path / "configs" / "x72y429"
+    assert not (folder / "rx_real.parquet").exists()
+    monkeypatch.setenv("SNAPSHOTS_DIR", str(tmp_path / "snapshots"))
+    monkeypatch.setattr(prepare_command, "configure_logging", lambda log_format: None)
+    with capture_logs() as logs:
+        assert prepare_command.main(["x72y429", "--folder", str(folder)]) == 2
+    (refused,) = [entry for entry in logs if entry["log_level"] == "error"]
+    assert "rx_real.parquet" in str(refused["reason"])
 
 
 def test_a_disagreement_is_listed_in_a_strict_runs_report_and_the_run_goes_on(
@@ -494,6 +525,7 @@ def test_a_strict_run_writes_its_local_report(
     """The strict run keeps its lines in engine_inputs_report.md, as a sites-only run does."""
     assert run(tmp_path) == 0
     printed = capsys.readouterr().out
+    assert NO_RECEIVER_LINE not in printed
     assert_report(tmp_path, printed, heading="engine_inputs")
     assert report_lines(tmp_path)[-1] == counts_for_issue(printed.splitlines())
 
