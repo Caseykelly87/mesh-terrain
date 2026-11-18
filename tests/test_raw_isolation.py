@@ -6,14 +6,14 @@ every test module; the database tests need the local stack and skip without it.
 
 What the scan matches in every test module, outside docstrings, ignoring case:
 
-- text in a string, bytes or f-string literal where either name, as a whole
+- text in a string, bytes or f-string literal where a watched name, as a whole
   word and quoted or not, is followed by a dot, with or without spaces before
   it, including a dot at the end of the text (`"delete from raw." + table`);
 - text where `search_path` is followed, before the next semicolon or line end,
-  by either name as a whole word (`set search_path to public, raw`,
+  by a watched name as a whole word (`set search_path to public, raw`,
   `options="-c search_path=raw"`);
 - a string or bytes literal, or an f-string's literal part, that is, or ends
-  with, either name as a whole word not preceded by a dot (`"raw"`,
+  with, a watched name as a whole word not preceded by a dot (`"raw"`,
   `f"raw{SUFFIX}"`, `"select * from raw" + "." + table`), however it is then
   used;
 - any name, attribute or import called `RAW_SCHEMA` or `REAL_SCHEMAS`.
@@ -21,7 +21,7 @@ What the scan matches in every test module, outside docstrings, ignoring case:
 What it does not see, each with a probe in `NOT_SEEN` that passes unseen (the
 last has its own test, `test_an_allowed_match_used_as_sql_adds_no_match`). This
 list holds every gap found so far; it is not a proof that nothing else gets
-past the scan. The database role (platform-eng, next) is the guard.
+past the scan. The test role (`tests/test_db_role.py`) is the guard.
 
 - a name built from pieces at run time (`"r" + "aw"`, `"".join(["r", "aw"])`);
 - a name read from the environment, settings or a file;
@@ -46,10 +46,13 @@ past the scan. The database role (platform-eng, next) is the guard.
   counts matches, not uses.
 
 The scan is capped (Casey, issue #55, 2026-11-17, item 4): a gap found later
-goes into this list, not into new code. The database role with no INSERT,
-UPDATE, DELETE or TRUNCATE on `raw` or `raw_dev_wh`, next in platform-eng's
-queue (Casey, issue #55 comment 6961809084, item 10), is the guard for
-everything the scan cannot see.
+goes into this list, not into new code. The test role every test connects
+as, with no privilege on `raw`, `raw_dev_wh` or `raw_dev_ta` (Casey, issue #55
+comment 6961809084, item 10, and PR #64 comment 6968763718, item 5;
+`tests/test_db_role.py`), is the guard for everything the scan cannot see.
+
+The watched names are `tests/raw_schema.py` `REAL_SCHEMAS`: `raw`,
+`raw_dev_wh` and `raw_dev_ta` (Casey, issue #55 comment 6985802330, item 9).
 """
 
 import ast
@@ -73,7 +76,7 @@ from raw_schema import (
 )
 
 TESTS = Path(__file__).resolve().parent
-# The longer name first, so raw_dev_wh is not read as raw followed by text.
+# The longer names first, so raw_dev_wh is not read as raw followed by text.
 _WATCHED = "|".join(sorted(WATCHED, key=len, reverse=True))
 # A watched name as a whole word, quoted or not, then a dot, spaces allowed
 # before it; the dot may end the text ("delete from raw." + table).
@@ -92,15 +95,18 @@ SCANNER_TEST = "test_the_scanner_finds_schema_names_written_into_sql"
 # Matches that are not SQL, by (file, enclosing function or <module>), with
 # every match expected there; any other match, or a different set, fails.
 ALLOWED: dict[tuple[str, str], list[str]] = {
-    # The two names the scan and the lock check look for, and the lock check itself.
+    # The names the scan and the lock check look for, and the lock check itself.
     ("raw_schema.py", "<module>"): [
         "name REAL_SCHEMAS",
         "constant 'raw'",
         "constant 'raw_dev_wh'",
+        "constant 'raw_dev_ta'",
     ],
     ("raw_schema.py", "throwaway_raw_schema"): ["name REAL_SCHEMAS"],
-    # This file reads the two names under another name, to build its probes.
+    # This file reads the names under another name, to build its probes, and
+    # the test role's tests do the same to send each refused write to each.
     ("test_raw_isolation.py", "<module>"): ["import REAL_SCHEMAS"],
+    ("test_db_role.py", "<module>"): ["import REAL_SCHEMAS"],
     # A Dagster asset key and an S3 bucket name, not schemas.
     ("test_assets.py", "test_the_raw_snapshot_asset_and_its_checks_are_defined"): [
         "constant 'raw'"
@@ -220,7 +226,7 @@ class _Scan(ast.NodeVisitor):
 
 
 def real_schema_uses(source: str) -> list[tuple[str, str, int]]:
-    """Every (scope, kind, line) in the source that may name raw or raw_dev_wh."""
+    """Every (scope, kind, line) in the source that may name a watched schema."""
     tree = ast.parse(source)
     scan = _Scan(docstrings(tree))
     scan.visit(tree)
@@ -261,8 +267,8 @@ PROBES = {
     "REAL_SCHEMAS attribute": "names = raw_schema.REAL_SCHEMAS",
     "REAL_SCHEMAS import": "from raw_schema import REAL_SCHEMAS as watched",
 }
-# What the scan does not see; each probe shows it passes unseen. The database
-# role queued for platform-eng is the guard for these.
+# What the scan does not see; each probe shows it passes unseen. The test role
+# (tests/test_db_role.py) is the guard for these.
 NOT_SEEN = {
     "name built from pieces": 's = "r" + "aw"\nconn.execute(f"select 1 from {s}.snapshot")',
     "name joined at run time": 's = "".join(["r", "aw"])\nsql.Identifier(s, "snapshot")',
