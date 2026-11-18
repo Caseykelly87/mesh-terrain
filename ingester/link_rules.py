@@ -43,11 +43,14 @@ readings ingest-eng proposed on PR #68: a receipt counts once, after
 0xFF; and a receipt counts when `lnk_01` drops it, whatever later rules
 would have done.
 
-Two readings the fixture does not pin, each a choice of this module: the
-copies `ing_06` drops are left out as receipts only, so every position
-delivery, including a later copy of one packet, counts for the precise flag;
-and a NeighborInfo report is the gateway's own when the gateway sent it,
-whichever gateway uplinked it. Rows with a null or zero `packet_id` are never
+Two readings the fixture does not pin. The copies `ing_06` drops are left
+out as receipts only, so every position delivery, including a later copy of
+one packet, counts for the precise flag; the flag is then true at least as
+often, which keeps more positions from full-precision export and, under
+`lnk_05`, admits more link-hours under 3 km to the validation marts. And a
+NeighborInfo report is the gateway's own when the gateway sent it, whichever
+gateway uplinked it, which is warehouse-eng's reading too (PR #66, comment
+6967498778). Rows with a null or zero `packet_id` are never
 treated as copies of each other.
 """
 
