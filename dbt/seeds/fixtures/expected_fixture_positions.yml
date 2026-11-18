@@ -4,15 +4,18 @@ seeds:
   - name: expected_fixture_positions
     description: >
       The expected stg_position values for every position row in the synthetic
-      fixtures, and whether core keeps it, computed apart from the SQL by
-      tests/fixture_positions.py. Built only on a development target with the
-      var raw_schema set; never on prod.
+      fixtures, and whether core keeps it. Quality, the 0, 0 flag, the precise
+      flags, MSA membership and core membership are written by hand; cells and
+      half-widths are computed by tests/fixture_positions.py apart from the
+      SQL. Built only on a development target with the var raw_schema set.
     columns:
       - name: snapshot_id
         description: The fixture snapshot of the raw row.
       - name: delivery_key
         description: The raw row's delivery key.
       - name: in_core
-        description: True when core.fct_node_position keeps this copy (inside the MSA, first copy by received_at).
+        description: True when core.fct_node_position keeps this copy (inside the MSA, first copy by received_at), written by hand.
       - name: inside_msa
-        description: True when the stored value lies inside the MSA polygon, by shapely contains.
+        description: True when the stored value lies inside the MSA polygon, written by hand.
+      - name: core_precise_source
+        description: The precise flag core gives the delivery when this copy is the one it keeps, written by hand.

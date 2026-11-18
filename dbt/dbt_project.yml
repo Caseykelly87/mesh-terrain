@@ -73,3 +73,4 @@ seeds:
           precise_source: boolean
           inside_msa: boolean
           in_core: boolean
+          core_precise_source: boolean

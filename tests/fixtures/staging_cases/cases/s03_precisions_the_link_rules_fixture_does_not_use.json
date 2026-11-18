@@ -1,15 +1,24 @@
 {
   "case_id": "s03_precisions_the_link_rules_fixture_does_not_use",
-  "title": "A coarse 12-bit cell, a position at 0 bits and a MapReport, inside the MSA",
+  "title": "A coarse 12-bit cell, a position at 0 bits, a precise MapReport and a 33-bit MeshSTL Position, inside the MSA",
   "rules": ["pos_01", "pos_02", "pos_04"],
   "reasoning": [
     "12 bits is the lowest coarse precision (pos_01): width 2^20 = 1048576, and the firmware's cell centre for 38.6 N, 90.3655616 W is 386400256, -903348224 (low edges 385875968 and -903872512, rounded down to a multiple of the width as Python // does). position_quality coarse; the row enters core, and lnk_02 does not read it.",
     "A position at 0 bits keeps its coordinates as sent, is unusable and has null cell_width_i and half-widths (pos_01).",
-    "A 20-bit MapReport delivered on the MeshSTL broker is precise_source true (pos_04 names both sources)."
+    "A 20-bit MapReport delivered on the MeshSTL broker is precise_source true (pos_04 names both sources).",
+    "A 33-bit Position carried by MeshSTL (s03-m004) is unusable, with null cell_width_i and half-widths (pos_01). pos_04 says 20 or more, read as written, so it is precise_source true; flagging it errs on the privacy side. It enters core, which keeps every precision inside the MSA.",
+    "Expected positions, by hand: all four lie near 38.60 N, 90.30 to 90.37 W, inside the MSA, and each is its delivery's only copy, so all are in core. s03-m001 coarse (12 bits), s03-m002 unusable (0 bits), s03-m003 usable (20 bits), s03-m004 unusable (33 bits). Precise: s03-m001 and s03-m002 are public and below 20 bits, false; s03-m003 and s03-m004 are MeshSTL at 20 and 33 bits, true."
   ],
   "messages": [
     {"snapshot_id": "staging-fixture-a", "delivery_key": "s03-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s03-a", "origin_low_byte": 40, "gateway_pseudonym": "s03-a", "gateway_low_byte": 40, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386400256, "longitude_i": -903348224, "precision_bits": 12},
     {"snapshot_id": "staging-fixture-a", "delivery_key": "s03-m002", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s03-b", "origin_low_byte": 41, "gateway_pseudonym": "s03-b", "gateway_low_byte": 41, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 3002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000000, "longitude_i": -903655616, "precision_bits": 0},
-    {"snapshot_id": "staging-fixture-a", "delivery_key": "s03-m003", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s03-c", "origin_low_byte": 42, "gateway_pseudonym": "s03-c", "gateway_low_byte": 42, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 3003, "relay_node": null, "portnum": 73, "topic": "msh/US/2/map/", "position_source": "mapreport", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20}
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s03-m003", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s03-c", "origin_low_byte": 42, "gateway_pseudonym": "s03-c", "gateway_low_byte": 42, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 3003, "relay_node": null, "portnum": 73, "topic": "msh/US/2/map/", "position_source": "mapreport", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s03-m004", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s03-d", "origin_low_byte": 43, "gateway_pseudonym": "s03-d", "gateway_low_byte": 43, "via_mqtt": false, "seen_public": false, "seen_meshstl": true, "packet_id": 3004, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000000, "longitude_i": -903000000, "precision_bits": 33}
+  ],
+  "expected_positions": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s03-m001", "position_quality": "coarse", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s03-m002", "position_quality": "unusable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s03-m003", "position_quality": "usable", "position_zero_mapped": false, "precise_source": true, "inside_msa": true, "in_core": true, "core_precise_source": true},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s03-m004", "position_quality": "unusable", "position_zero_mapped": false, "precise_source": true, "inside_msa": true, "in_core": true, "core_precise_source": true}
   ]
 }

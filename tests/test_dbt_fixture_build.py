@@ -14,8 +14,8 @@ comparisons with the hand-worked values: `assert_pos_01_fixture_positions`,
 `assert_pos_02_fixture_positions_in_core`, `assert_ing_06_first_copy_kept`
 and the rest.
 
-The build runs three times. First `dbt run --full-refresh` without the second
-fixture snapshot; then that snapshot is loaded and `dbt build` runs
+The build runs three times, after `dbt seed --full-refresh`. First `dbt run
+--full-refresh` without the second fixture snapshot; then that snapshot is loaded and `dbt build` runs
 incrementally, so the core model's incremental path must pick up the new
 snapshot and replace a copy with an earlier one; then `dbt build
 --full-refresh`. Both builds must pass every test and leave the same core rows.
@@ -29,6 +29,7 @@ import json
 import re
 import secrets
 import tempfile
+import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -48,7 +49,8 @@ FIXTURE_PREFIX = "test_fixture_"
 FIXTURE_PATTERN = re.compile(rf"{FIXTURE_PREFIX}[0-9a-f]{{12}}")
 LATER_SNAPSHOT = "staging-fixture-b"
 CORE_ROWS = sql.SQL(
-    "select delivery_key, snapshot_id, received_at, precision_bits, precise_source "
+    "select delivery_key, snapshot_id, received_at, precision_bits, seen_public, seen_meshstl, "
+    "precise_source "
     "from {} order by delivery_key"
 )
 NAMED_TESTS = (
@@ -84,7 +86,13 @@ def fixture_schema() -> Iterator[tuple[psycopg.Connection, str]]:
             conn.commit()
             yield conn, schema
         finally:
-            if not (conn.closed or conn.broken):
+            if conn.closed or conn.broken:
+                warnings.warn(
+                    f"the connection was lost, so fixture schema {schema} was not dropped "
+                    "and is left in the warehouse",
+                    stacklevel=2,
+                )
+            else:
                 drop_fixture_schema(conn, schema)
 
 
@@ -122,6 +130,9 @@ def builds() -> Iterator[dict[str, Any]]:
             run_dbt(["deps"], work_dir)
         load_rows(conn, schema, [row for row in rows if row["snapshot_id"] != LATER_SNAPSHOT])
         conn.commit()
+        # The seed is rebuilt from its CSV first, so a column added to it since
+        # the last run cannot meet the old table.
+        dbt_on_fixture(["seed", "--full-refresh"], schema, work_dir)
         dbt_on_fixture(["run", "--full-refresh"], schema, work_dir)
         load_rows(conn, schema, [row for row in rows if row["snapshot_id"] == LATER_SNAPSHOT])
         conn.commit()

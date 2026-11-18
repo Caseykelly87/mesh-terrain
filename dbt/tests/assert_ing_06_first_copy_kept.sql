@@ -5,8 +5,9 @@
 -- across snapshots (issue #55 case 35). The expected rows are the hand-worked
 -- ones: link-rules case c40 (two copies under two broker roots, c40-m006
 -- dropped) and staging case s01 (one packet in two snapshots, where the later
--- snapshot's copy wins when it is earlier, and a packet with no packet_id
--- told apart by delivery_key). Returns each row missing from stg_packet or
+-- snapshot's copy wins when it is earlier, a packet heard at two gateways
+-- kept at each, and two deliveries without packet_id kept apart, each
+-- collapsing only with its own copy in the other snapshot). Returns each row missing from stg_packet or
 -- kept there unexpectedly, for the senders of those two cases.
 
 with expected (snapshot_id, delivery_key) as (
@@ -19,7 +20,11 @@ with expected (snapshot_id, delivery_key) as (
         ('staging-fixture-b', 's01-m001'),
         ('staging-fixture-a', 's01-m002'),
         ('staging-fixture-b', 's01-m004'),
-        ('staging-fixture-a', 's01-m005')
+        ('staging-fixture-a', 's01-m005'),
+        ('staging-fixture-a', 's01-m006'),
+        ('staging-fixture-a', 's01-m007'),
+        ('staging-fixture-a', 's01-m008'),
+        ('staging-fixture-a', 's01-m009')
 ),
 
 kept as (

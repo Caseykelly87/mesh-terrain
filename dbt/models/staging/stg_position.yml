@@ -48,8 +48,22 @@ models:
         description: >
           Latitude in 1e-7 degrees as sent: the cell centre for 1 to 31 bits and
           the raw value at 32 (pos_01). Null when missing or mapped from 0, 0.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -900000000
+                max_value: 900000000
+              config:
+                meta: {contract: pos_03}
       - name: longitude_i
         description: Longitude in 1e-7 degrees as sent, under the same rules as latitude_i.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -1800000000
+                max_value: 1800000000
+              config:
+                meta: {contract: pos_03}
       - name: precision_bits
         description: >
           The precision the sender gave, a 64-bit integer kept as sent; null
@@ -81,4 +95,5 @@ models:
       - name: precise_source
         description: >
           True when precision_bits is 20 or more and the MeshSTL broker carried
-          the delivery (pos_04); null when the row has no position.
+          this copy of the delivery (pos_04); null when the row has no position.
+          Core reads every copy.
