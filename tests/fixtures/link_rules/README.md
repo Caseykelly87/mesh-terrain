@@ -42,7 +42,7 @@ The hour is `received_at` truncated to the hour in UTC. The link is (relayer, ga
 
 - `case_id`, `title`, `rules` (the contract rules the case tests), `reasoning` (the hand-worked steps).
 - `messages`: rows shaped like `raw.mqtt_message`. Every row has `delivery_key`, `received_at`, `origin_pseudonym`, `origin_low_byte`, `gateway_pseudonym`, `gateway_low_byte`, `via_mqtt`, `seen_public`, `seen_meshstl`, `packet_id`, `relay_node` and `portnum`. A row may add `topic`, `decode_status`, `rx_time`, `rx_snr`, `rx_rssi`, `position_source`, `latitude_i`, `longitude_i`, `precision_bits`, `neighbour_pseudonyms` and `neighbour_low_bytes`; an absent column is null.
-- `boxes`: named boxes with `south_i`, `north_i`, `west_i`, `east_i` (bigint, 1e-7 degrees, half-open), `merged`, `precision_bits`, `half_width_ns_m`, `half_width_ew_m`, as PLAN's data model defines the `int_link_window` box columns.
+- `boxes`: named boxes with `south_i`, `north_i`, `west_i`, `east_i` (bigint, 1e-7 degrees, half-open), `merged`, `precision_bits`, `half_width_ns_m`, `half_width_ew_m`, as PLAN's data model defines the `int_link_window` box columns. A case holds only the boxes its expected rows name; the reasoning names any other position by its delivery key.
 - `expected_receipts`: one row per message with a non-null `relay_node`, plus any other message a case is about. `outcome` is `counted` (passes step 7) or `dropped` with the `rule` that decides it. `relayer` and `link_source` are present once `lnk_01` resolves the relayer. `relayer_box`, `gateway_box` and `distance_m` are present once the receipt reaches step 7, naming the box it uses. A message not listed is never counted.
 - `expected_link_hours`: every (relayer, gateway, hour) with at least one counted receipt. `receipts` and `packets` are the counted receipts. `outcome` is `kept` or `dropped` with its `rule`. A kept hour adds `median_snr_db`, `median_rssi_dbm`, `distance_m`, `relayer_box`, `relayer_precise_source`, `gateway_box`, `gateway_precise_source` and `position_uncertainty_m`.
 
@@ -51,7 +51,7 @@ Conventions:
 - Pseudonyms are readable (`c23-r`, `c23-g`) and start with their case number, so no two cases share a node and every case can be loaded at once into one table. Times are UTC with a `Z`.
 - Position rows are the node's own packets, uplinked by itself (`gateway_pseudonym` is the node), with `relay_node` null; they never make a node a candidate at another gateway. A node heard only to make it a candidate has a row with `relay_node` null (portnum 67).
 - `rx_snr` `"NaN"` is the IEEE value NaN.
-- Portnums: 1 text, 3 Position, 67 telemetry, 71 NeighborInfo, 73 MapReport.
+- Portnums: 1 text, 3 Position, 67 telemetry, 71 NeighborInfo, 73 MapReport. A MapReport row carries the `map` topic raw lands it on, `msh/US/2/map/` (`ingester/topics.py`).
 
 ## Loading and comparing
 
@@ -125,3 +125,4 @@ The case list in issue #55's body (section 2, 1 to 35) maps as follows: 1 c01; 2
 - Times exactly 24 hours before a receipt, or equal to it, for the candidate window and the 7-day window, and a 32-bit position within half a unit of the MSA boundary: see the questions in PR #66. No case sits on those instants or that line.
 - Validation's 3 km filter (`lnk_05`, marts) and `link_source` in `int_link_window`.
 - On the gateway side, an end with no position and an end on an hour box chosen over a finer cell: c15, c26 and c21 test those steps on the relayer side, and c42 tests a moved gateway on the fallback and the one-box test for the gateway.
+- A direct hop whose gateway's NeighborInfo lists another node with the sender's byte, several NeighborInfo reports in one 24-hour window, and a gateway's own report uplinked by another gateway: questions in PR #66. Every case has at most one report, uplinked by the node that sent it.

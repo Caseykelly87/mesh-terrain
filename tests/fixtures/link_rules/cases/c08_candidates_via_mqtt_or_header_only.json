@@ -4,7 +4,7 @@
   "rules": ["lnk_01", "lnk_02", "lnk_04", "lnk_05"],
   "reasoning": [
     "Candidates are the senders of radio deliveries the gateway heard (lnk_01). c08-r7 (0x61) reached c08-g only via MQTT (via_mqtt true), so it is not a candidate. The receipt with relay_node 0x61 has no candidate and there is no NeighborInfo: dropped by lnk_01.",
-    "c08-r8 (0x62) reached c08-g only in a header-only radio delivery (decode_status stripped, via_mqtt false). The rule reads every radio delivery and says nothing of decode status, so c08-r8 is a candidate: the receipt with relay_node 0x62 resolves to c08-r8, link_source relay_node.",
+    "c08-r8 (0x62) reached c08-g only in a header-only radio delivery (decode_status stripped, via_mqtt false). lnk_01 reads every radio delivery, and ADR 0003 defines a radio delivery as \"an envelope that parses, has a sender, and has via_mqtt false\", with no decode status in it. A stripped envelope parses and carries its sender, so c08-r8 is a candidate: the receipt with relay_node 0x62 resolves to c08-r8, link_source relay_node.",
     "c08-r8 and c08-g are stationary (lnk_02), 2745.603 m apart (lnk_05): counted. Its link-hour has 1 packet: dropped by lnk_04."
   ],
   "messages": [
