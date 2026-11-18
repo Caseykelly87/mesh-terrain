@@ -38,7 +38,7 @@ Run `make check` yourself before writing the report and include its result in on
 
 Before you finish, post your findings as a comment on the PR you reviewed, in the form you return them; the lead reads them there (Casey, issue #55 comment 6963192892, item 5).
 
-Findings posted on a PR follow the counts-only rule for real data and never include ids, positions or outcomes (Casey, PR #64 comment 6968763718, item 5).
+Findings posted on a PR follow the same counts-only rule for real data as run reports and never include ids, positions or outcomes (the lead's extension of Casey's rule on run reports, PR #64 comment 6968763718, item 5, put to Casey on PR #64).
 
 ## Writing
 
