@@ -28,6 +28,7 @@ from engine.grid import run_grid
 from engine.points import Endpoint
 from engine.snapshots import resolve_snapshots
 from engine.terrain_build import check_covers
+from ingester import tile_selection
 from ingester.link_cells import Cell, box_around, cell_of
 from ingester.link_pairs import (
     USABLE_BITS,
@@ -48,12 +49,15 @@ from ingester.tile_selection import (
     AnyPair,
     DroppedPair,
     Extent,
+    KindConflict,
+    PlacedNode,
     Selection,
     busiest_two,
     counted_states,
     dem_extent,
     dropped_pairs,
     inside_dem,
+    kind_conflicts,
     pair_states,
     parse_tile,
     row_state,
@@ -478,6 +482,76 @@ def test_a_straddling_gateway_only_relayer_fails_the_one_both_ends_pair_check() 
     found = links(BOXED[0], across("B", "G2", 5, "relayer"), BOXED[2])
     with pytest.raises(SelectionError, match="2 pairs have both ends in x72y429, not one"):
         select(found, 3)
+
+
+def test_reproduction_a_a_both_ends_pair_by_the_counts_and_not_by_its_rows_refuses() -> None:
+    """Reviewer, PR #70 comment 6989619559, Blocking 1 (a); interim guard until Casey answers.
+
+    B's row with G1 lies outside the tile and its row with C inside. The
+    counts read B to G1 as the both-ends pair and pass; by its own rows it is
+    a gateway-only pair, so no receiver row exists. The strict run refuses
+    with a SelectionError, not an IndexError, and names no node.
+    """
+    b_inside = (-10_000.0, 0.0)
+    pairs = (boxed("B", "G1", 2), boxed("C", "B", 4, gateway_shift=b_inside), boxed("D", "G2", 1))
+    found = links(*pairs, nodes=two_boxes("B", *b_inside))
+    assert tile_counts(counted_states(found, TILE)) == {
+        "both ends": 1,
+        "only the gateway end": 2,
+        "only the relayer end": 0,
+        "touched": 3,
+    }
+    assert kind_conflicts(found, TILE) == (
+        KindConflict(pairs[0], GATEWAY_ONLY_PAIR, BOTH_ENDS_PAIR),
+    )
+    with pytest.raises(SelectionError, match="kind by their own rows") as refused:
+        select(found, 3)
+    assert not any(node.pseudonym in str(refused.value) for node in NODES.values())
+
+
+def test_reproduction_b_a_counted_gateway_only_pair_is_not_lost_silently() -> None:
+    """Reviewer, PR #70 comment 6989619559, Blocking 1 (b); interim guard until Casey answers.
+
+    G2's row with B lies inside the tile and its row with C 15 km east. The
+    counts read C to G2 as the second gateway-only pair and pass; by its own
+    rows it is no selected pair. The strict run refuses, and the conflict is
+    there for a sites-only run to report.
+    """
+    g2_east = (15_000.0, 0.0)
+    pairs = (boxed("A", "G1", 2), boxed("B", "G2", 5), boxed("C", "G2", 4, gateway_shift=g2_east))
+    found = links(*pairs, nodes=two_boxes("G2", *g2_east))
+    assert kind_conflicts(found, TILE) == (KindConflict(pairs[2], OTHER_PAIR, GATEWAY_ONLY_PAIR),)
+    with pytest.raises(SelectionError, match="kind by their own rows"):
+        select(found, 3)
+
+
+def test_pairs_whose_kinds_agree_have_no_conflict() -> None:
+    assert kind_conflicts(links(*BOXED), TILE) == ()
+
+
+def test_layers_without_a_receiver_row_refuse_rather_than_fail() -> None:
+    site = PlacedNode(pseudonym("G1"), "both_ends_gateway", 724_000.0, 4_285_000.0, 17.8, False)
+    selection = Selection(placed=(site,), dem_check={pseudonym("G1"): True}, dropped=())
+    with pytest.raises(SelectionError, match="no receiver row"):
+        selection.layers()
+
+
+@pytest.mark.parametrize(
+    ("extent", "state"),
+    [
+        ((710_000.0, 4_285_000.0, 720_000.0, 4_285_100.0), "out"),
+        ((720_000.0, 4_285_000.0, 720_100.0, 4_285_100.0), "in"),
+        ((729_900.0, 4_289_900.0, 730_000.0, 4_290_000.0), "in"),
+        ((729_900.0, 4_285_000.0, 730_001.0, 4_285_100.0), "split"),
+        ((725_000.0, 4_279_900.0, 725_100.0, 4_280_000.0), "out"),
+    ],
+)
+def test_a_box_whose_upper_edge_meets_the_tile_edge_only_touches_it(
+    monkeypatch: pytest.MonkeyPatch, extent: Extent, state: str
+) -> None:
+    """Reviewer nit: a box's east and north edges are exclusive, so touching is not straddling."""
+    monkeypatch.setattr(tile_selection, "box_extent_m", lambda _box: extent)
+    assert row_state(cell_of(*NODES["G2"].box()), TILE) == state
 
 
 def test_the_counts_check_runs_before_a_two_box_pair_is_dropped() -> None:

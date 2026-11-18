@@ -31,7 +31,7 @@ from structlog.testing import capture_logs
 from engine import positions_marker
 from engine.points import read_points
 from engine.prepare import command as prepare_command
-from ingester import engine_inputs
+from ingester import engine_inputs, link_pairs
 from ingester.link_cells import cell_of
 from ingester.link_pairs import CaptureLinks, MovedPair, PairActivity, SelectionError
 from ingester.tile_selection import (
@@ -408,6 +408,48 @@ def test_a_kept_pair_with_another_box_in_hours_not_kept_is_reported_locally(
     assert coordinates_in(printed + repr(events)) == []
 
 
+def links_with_a_kind_conflict() -> CaptureLinks:
+    """Reviewer reproduction (a), PR #70 comment 6989619559: B's rows on both sides of the edge.
+
+    B's row with G1 lies outside the tile and its row with C inside, so the
+    counts read B to G1 as the both-ends pair while its own rows read it as a
+    gateway-only pair.
+    """
+
+    def pair(relayer: str, gateway: str, hours: int, shift: float = 0.0) -> PairActivity:
+        boxes = cell_of(*NODES[relayer].box()), cell_of(*NODES[gateway].box(shift))
+        return PairActivity(
+            pseudonym(relayer), pseudonym(gateway), hours, hours, 0, 3 * hours, *boxes
+        )
+
+    pairs = (pair("B", "G1", 2), pair("C", "B", 4, -10_000.0), pair("D", "G2", 1))
+    return CaptureLinks(pairs, link_pairs._nodes(pairs), 0, 0)
+
+
+def test_a_kind_conflict_refuses_a_strict_run_with_exit_2(
+    tmp_path: Path,
+    capture: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interim guard until Casey answers (PR #70): exit 2 and nothing written, no traceback."""
+    monkeypatch.setattr(engine_inputs, "capture_links", lambda _rows: links_with_a_kind_conflict())
+    with capture_logs() as events:
+        assert run(tmp_path, expect_pairs="3") == 2
+    assert not (tmp_path / "configs").exists()
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    conflict = names(
+        "kind differs, pair {B} to {G1}: gateway-only pair by its own rows, both-ends pair by the "
+        "counts check; reported for Casey (PR #70, interim)"
+    )
+    assert conflict in lines
+    refusal = next(text for text in lines if text.startswith("refused, nothing written: "))
+    assert "1 pairs have a kind by their own rows" in refusal
+    assert lines.index(conflict) < lines.index(refusal)
+    assert coordinates_in(printed + repr(events)) == []
+
+
 @pytest.mark.parametrize("option", ["nested_g1", "nested_g3", "ignored_a"])
 def test_boxes_the_overlap_rule_reads_as_one_place_leave_the_layers_as_they_are(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], option: str
@@ -542,6 +584,7 @@ def counts_for_issue(lines: list[str]) -> str:
 
 REPORT_PREFIXES = (
     "data-quality",
+    "kind differs",
     "pairs kept with another box",
     "kept pair",
     "dropped",
@@ -862,6 +905,13 @@ def test_sites_only_roles_follow_each_pairs_own_rows(
     assert [text for text in lines if text.startswith("dropped")] == [
         names("dropped other pair {B} to {PB}: relayer straddles the tile edge"),
     ]
+    # The interim guard (PR #70): the run goes on and reports the pair whose kinds differ.
+    conflict = names(
+        "kind differs, pair {B} to {G2}: gateway-only pair by its own rows, both-ends pair by the "
+        "counts check; reported for Casey (PR #70, interim)"
+    )
+    assert [text for text in lines if text.startswith("kind differs")] == [conflict]
+    assert conflict in report_lines(tmp_path)
     assert counts_for_issue(lines).endswith(f"sites written 3, left out 0; {NO_RECEIVER}")
     assert_report(tmp_path, printed)
     assert coordinates_in(printed + repr(events)) == []
