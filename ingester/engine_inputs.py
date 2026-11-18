@@ -108,7 +108,6 @@ import structlog
 
 from ingester.link_pairs import (
     CaptureLinks,
-    PairActivity,
     SelectionError,
     capture_links,
     read_capture_rows,
@@ -117,8 +116,10 @@ from ingester.settings import get_ingester_settings
 from ingester.tile_selection import (
     FAILS_DEM,
     LAYER_EPSG,
+    MORE_THAN_ONE_BOX,
     SITE_RULE,
     STRADDLES,
+    AnyPair,
     DroppedPair,
     Extent,
     PlacedNode,
@@ -126,8 +127,8 @@ from ingester.tile_selection import (
     SiteSelection,
     Tile,
     count_differences,
+    counted_states,
     dem_extent,
-    pair_states,
     parse_tile,
     select_nodes,
     select_sites,
@@ -170,6 +171,7 @@ SITES_ONLY_RULE = (
 # count in the run report". The name is the one B2b gave it (PR #68).
 DIRECT_HOP_CONTRADICTED = "lnk_01_direct_hop_contradicted"
 ONE_BOX_DROPPED_HOURS = "one_box_dropped_hours"
+OTHER_BOX_COUNT = "pairs kept with another box in hours not kept:"
 COUNTS_CHECK = "counts check against 2026-11-08"
 # Casey, issue #55, 7: "write the counts line and every left-out gateway line
 # into the local run report, not only the terminal. Nothing public."
@@ -191,12 +193,32 @@ def data_quality_line(links: CaptureLinks) -> str:
     )
 
 
+def other_box_lines(links: CaptureLinks) -> list[str]:
+    """The count of kept pairs whose hours not kept show another box, then one line per pair.
+
+    Casey, issue #55 comment 6985802330, item 2: such a pair "is kept but
+    reported to me in the session, never on issue #44". The per-pair lines
+    name pseudonyms, so they are local; only the count is a count.
+    """
+    lines = [
+        f"{OTHER_BOX_COUNT} {len(links.other_box_pairs)} (Casey, issue #55 comment "
+        "6985802330, item 2: kept, reported to Casey in the session, never on issue #44)"
+    ]
+    for pair in links.other_box_pairs:
+        ends = " and ".join(pair.ends)
+        lines.append(
+            f"kept pair {pair.relayer} to {pair.gateway}: {ends} used another box in hours not kept"
+        )
+    return lines
+
+
 def _print_pairs(links: CaptureLinks) -> list[str]:
-    """The pair lines, then the data-quality counts and one line per pair dropped for its boxes.
+    """The pair lines, then the data-quality counts and the pairs kept with another box.
 
     Returns:
         The lines the local run report keeps: the data-quality line and the
-        drop lines, in order.
+        other-box lines, in order. The pairs dropped for two boxes print
+        with the straddle lines, after the tile line (`straddle_drops`).
     """
     counts = links.pair_counts
     missing = links.one_coordinate_missing
@@ -213,25 +235,19 @@ def _print_pairs(links: CaptureLinks) -> list[str]:
             f"{pair.link_hours_meshstl}; receipts {pair.receipts}"
         )
     record: list[str] = []
-    _say(data_quality_line(links), record)
-    for moved in links.moved_pairs:
-        ends = " and ".join(moved.ends)
-        line = (
-            f"dropped pair {moved.relayer} to {moved.gateway}: {ends} used more than one box "
-            "in its counted receipts (Casey, issue #44, 2026-11-17)"
-        )
+    for line in (data_quality_line(links), *other_box_lines(links)):
         _say(line, record)
     return record
 
 
 def _print_tile(links: CaptureLinks, tile: Tile) -> dict[str, int]:
-    counts = tile_counts(pair_states(links, tile))
+    counts = tile_counts(counted_states(links, tile))
     parts = ", ".join(f"{label} {count}" for label, count in counts.items())
     print(f"tile {tile.name}: pairs with {parts}")
     return counts
 
 
-DropEnd = tuple[PairActivity, str, str]
+DropEnd = tuple[AnyPair, str, str]
 """A pair, the end that drops it and the reason."""
 
 
@@ -294,7 +310,8 @@ def counts_line(links: CaptureLinks, tile: dict[str, int], selection: Selection)
         f"{tile['touched']} (both ends {tile['both ends']}); nodes selected {len(verdicts)}; "
         f"extent pass {sum(verdicts)}, fail {len(verdicts) - sum(verdicts)}; pairs dropped "
         f"{len(selection.dropped)} ({STRADDLES} {reasons.count(STRADDLES)}, "
-        f"{FAILS_DEM} {reasons.count(FAILS_DEM)})"
+        f"{FAILS_DEM} {reasons.count(FAILS_DEM)}, {MORE_THAN_ONE_BOX} "
+        f"{reasons.count(MORE_THAN_ONE_BOX)})"
     )
 
 
@@ -539,7 +556,7 @@ def _write_sites(run: _Run) -> None:
     the terminal has the lines.
     """
     record = [*run.capture_lines, *run.straddle_lines]
-    states = pair_states(run.links, run.tile)
+    states = counted_states(run.links, run.tile)
     differences = count_differences(run.links, states, run.tile, run.expect_pairs)
     _say(counts_check_line(differences), record)
     chosen = select_sites(run.links, run.tile, run.extent)
