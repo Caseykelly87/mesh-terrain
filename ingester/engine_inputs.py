@@ -1,13 +1,14 @@
 """Real site and receiver layers for an engine run on one USGS 1 m tile, from a capture snapshot.
 
 `python -m ingester.engine_inputs` reads a finished capture snapshot (checked
-against its manifest), finds the pairs positioned at both ends by the ADR 0003
-spike's rules (`ingester.link_pairs`), selects the tile's nodes
-(`ingester.tile_selection`) and writes two GeoParquet layers in EPSG:26915
-with the columns the lead agreed for the x72y429 run (issue #44):
-`tx_sites_real.parquet` (`site_id`, `geometry`, `box_half_width_m`, `role`)
-and `rx_real.parquet` (`rx_id`, `geometry`, `box_half_width_m`), each node at
-its smallest box's centre with that box's half-width. Both files carry the
+against its manifest), finds its pairs under the contract's link-hour rules on
+the merged snapshot (`ingester.link_rules`, `ingester.link_pairs`), selects
+the tile's nodes (`ingester.tile_selection`) and writes two GeoParquet layers
+in EPSG:26915 with the columns the lead agreed for the x72y429 run (issue
+#44): `tx_sites_real.parquet` (`site_id`, `geometry`, `box_half_width_m`,
+`role`) and `rx_real.parquet` (`rx_id`, `geometry`, `box_half_width_m`), each
+node at the centre of the box its pairs' counted receipts used, with that
+box's smaller half-width (the inscribed square). Both files carry the
 key `mesh_terrain:positions` with the value `real` in their Parquet metadata
 (Casey, issue #44, 4 (a)); the engine does not read it yet.
 
@@ -17,16 +18,19 @@ with both ends in it (Casey, issue #44, busiest pair, 2026-11-17). The
 command still prints each pair's link-hours and receipts for the local
 record; no busiest-pair ranking selects anything.
 
-Nodes are placed by the amended `lnk_02` (ADR 0003, Overlap amendment,
-2026-11-17): only a node's usable boxes (15 bits or more) inside the MSA,
-from either broker and either source, over the capture, are read; when they
-all overlap one another the node is stationary and is placed at its smallest
-box, and a stationary node is in or out of the tile by that box's centre.
-Coarse boxes and boxes outside the MSA are not read. The pairs still come
-from the spike's rules (`ingester.link_pairs`).
+Each pair carries the box its counted receipts used at each end (Casey,
+issue #44, 2026-11-17), under `lnk_02` with the floor, the box around merged
+fixes, one box per end for the hour and the half-open cell. A pair whose end
+used more than one box over its kept hours is dropped before the tile is
+looked at, and the command prints one local line for it. A node is placed at
+the one box its pairs used and is in or out of the tile by that box's centre.
+The command also prints the data-quality counts the rules give: receipts
+dropped as a direct hop that the gateway's NeighborInfo contradicts (Casey,
+PR #66, Q4 (a): "count these drops as a data-quality count in the run
+report"), and link-hours dropped for more than one box (`lnk_02`).
 
-A node that is not stationary and whose usable boxes lie on both sides of the
-tile edge counts as in the tile for the tile check, then drops its own pair,
+A node that used a different box in two pairs, with boxes on both sides of the
+tile edge, counts as in the tile for the tile check, then drops its own pair,
 as a node the run places that fails the DEM edge check does (Casey, issue
 #44, engine_inputs Q1 (a), 2026-11-17; the rule in full is in
 `ingester.tile_selection`). The command prints one line per end that drops a
@@ -49,8 +53,8 @@ dropped pair stops the run. The candidates are the in-tile gateways of the
 site rule above. Their roles follow the counted states, a straddling node
 counted as in the tile, so a straddling relayer can make a second pair a
 both-ends pair and give its gateway the `both_ends_gateway` role. A candidate
-is written only when it is stationary under `lnk_02`, does not straddle the
-tile edge and passes the DEM edge check
+is written only when its pairs used one box for it, it does not straddle the
+tile edge and it passes the DEM edge check
 (`ingester.tile_selection.select_sites`). Each gateway left out gets a local
 `left out` line with its reason. A run with no site left refuses, with its
 own message when no pair touching the tile has its gateway in it. No relayer
@@ -58,11 +62,11 @@ is placed, so no receiver is chosen and only a gateway's DEM check can drop
 a pair. The counts line gains the sites written and left out and states that
 no real receiver was written and that relayers were not DEM-checked. Beside
 the layer, through the same staging folder, it writes the local run report
-`engine_inputs_report.md`: the drop, counts check, rule, per-gateway and
-left-out lines and the counts line, in the order they printed (Casey, issue
-#55, 7). The report names pseudonyms, so it is local only, like the layer; a
-refusal writes neither, and an existing report is refused. A run without the
-flag writes no report.
+`engine_inputs_report.md`: the data-quality counts line, the drop, counts
+check, rule, per-gateway and left-out lines and the counts line, in the order
+they printed (Casey, issue #55, 7). The report names pseudonyms, so it is
+local only, like the layer; a refusal writes neither, and an existing report
+is refused. A run without the flag writes no report.
 
 The layers are written into a staging folder inside the output folder and
 moved to their names only when all are complete. A refusal exits 2 and any
@@ -152,10 +156,14 @@ NEVER_PUBLISH = (
 # no real receiver. Corridor runs keep the strict checks (issue #44 fallback).
 SITES_ONLY_TILE = "x72y429"
 SITES_ONLY_RULE = (
-    "sites only (Casey, 2026-11-17, engine_inputs (c)): a gateway is written when it is "
-    "stationary under lnk_02, does not straddle the tile edge and passes the DEM edge check; "
-    "no real receiver; neither a dropped pair nor the counts check stops the run"
+    "sites only (Casey, 2026-11-17, engine_inputs (c)): a gateway is written when its pairs "
+    "used one box for it under lnk_02, it does not straddle the tile edge and it passes the "
+    "DEM edge check; no real receiver; neither a dropped pair nor the counts check stops the run"
 )
+# Casey, PR #66, Q4 (a): "drop the receipt, and count these drops as a data-quality
+# count in the run report". The name is the one B2b gave it (PR #68).
+DIRECT_HOP_CONTRADICTED = "lnk_01_direct_hop_contradicted"
+ONE_BOX_DROPPED_HOURS = "one_box_dropped_hours"
 COUNTS_CHECK = "counts check against 2026-11-08"
 # Casey, issue #55, 7: "write the counts line and every left-out gateway line
 # into the local run report, not only the terminal. Nothing public."
@@ -168,21 +176,46 @@ REPORT_NOTE = (
 )
 
 
-def _print_pairs(links: CaptureLinks) -> None:
+def data_quality_line(links: CaptureLinks) -> str:
+    """The data-quality counts of the link rules: counts only, no pseudonym."""
+    return (
+        f"data-quality counts: {DIRECT_HOP_CONTRADICTED} {links.direct_hop_contradicted} "
+        "(lnk_01, a direct hop the gateway's NeighborInfo contradicts, dropped; Casey, "
+        f"PR #66, Q4 (a)); {ONE_BOX_DROPPED_HOURS} {links.one_box_dropped_hours} (lnk_02)"
+    )
+
+
+def _print_pairs(links: CaptureLinks) -> list[str]:
+    """The pair lines, then the data-quality counts and one line per pair dropped for its boxes.
+
+    Returns:
+        The lines the local run report keeps: the data-quality line and the
+        drop lines, in order.
+    """
     counts = links.pair_counts
     missing = links.one_coordinate_missing
     print(f"positions with one coordinate missing, not positions (pos_01): {missing}")
     print(
-        "pairs positioned at both ends, stationarity rule, 500 m: "
-        f"public {counts['public']}, MeshSTL {counts['meshstl']}, "
-        f"shared {counts['shared']}, union {counts['union']}"
+        "pairs with a kept link-hour under the contract, both brokers merged: "
+        f"{counts['pairs']} ({counts['placed']} with one box per end, "
+        f"{counts['more than one box']} with more than one box)"
     )
     for pair in links.pairs:
         print(
-            f"pair {pair.relayer} to {pair.gateway}: link-hours over both runs "
-            f"{pair.link_hours_union}, public {pair.link_hours_public}, MeshSTL "
+            f"pair {pair.relayer} to {pair.gateway}: link-hours {pair.link_hours}, with a "
+            f"public receipt {pair.link_hours_public}, with a MeshSTL receipt "
             f"{pair.link_hours_meshstl}; receipts {pair.receipts}"
         )
+    record: list[str] = []
+    _say(data_quality_line(links), record)
+    for moved in links.moved_pairs:
+        ends = " and ".join(moved.ends)
+        line = (
+            f"dropped pair {moved.relayer} to {moved.gateway}: {ends} used more than one box "
+            "in its counted receipts (Casey, issue #44, 2026-11-17)"
+        )
+        _say(line, record)
+    return record
 
 
 def _print_tile(links: CaptureLinks, tile: Tile) -> dict[str, int]:
@@ -250,8 +283,8 @@ def counts_line(links: CaptureLinks, tile: dict[str, int], selection: Selection)
         reason for dropped in selection.dropped for reason in {r for _, r in dropped.reasons}
     ]
     return (
-        f"counts for issue #44: pairs public {pairs['public']}, MeshSTL {pairs['meshstl']}, "
-        f"shared {pairs['shared']}, union {pairs['union']}; pairs touching the tile "
+        f"counts for issue #44: pairs {pairs['pairs']} (one box per end {pairs['placed']}, "
+        f"more than one box {pairs['more than one box']}); pairs touching the tile "
         f"{tile['touched']} (both ends {tile['both ends']}); nodes selected {len(verdicts)}; "
         f"extent pass {sum(verdicts)}, fail {len(verdicts) - sum(verdicts)}; pairs dropped "
         f"{len(selection.dropped)} ({STRADDLES} {reasons.count(STRADDLES)}, "
@@ -444,7 +477,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", required=True, type=Path, help="folder for the two layers")
     parser.add_argument(
         "--expect-pairs", required=True, type=int,
-        help="the union of both-ends pairs the tile check found (8 on 2026-11-08)",
+        help="the pairs the contract's link-hour rules give on the snapshot (pairs with a kept "
+        "link-hour, those dropped for more than one box included)",
     )  # fmt: skip
     parser.add_argument("--snapshots-dir", type=Path, default=None)
     parser.add_argument(
@@ -475,6 +509,7 @@ class _Run:
     printed: set[DropEnd]
     straddle_lines: list[str]
     source: str
+    capture_lines: tuple[str, ...] = ()
 
 
 def _write_both(run: _Run) -> None:
@@ -492,11 +527,12 @@ def _write_both(run: _Run) -> None:
 def _write_sites(run: _Run) -> None:
     """The sites-only run: the counts check reported, never applied; the site layer alone.
 
-    The report holds the straddle, counts check, selection, rule and left-out
-    lines and the counts line, and is written beside the layer only when the
-    layer is; a refusal writes neither, though the terminal has the lines.
+    The report holds the data-quality, pair drop, straddle, counts check,
+    selection, rule and left-out lines and the counts line, and is written
+    beside the layer only when the layer is; a refusal writes neither, though
+    the terminal has the lines.
     """
-    record = list(run.straddle_lines)
+    record = [*run.capture_lines, *run.straddle_lines]
     states = pair_states(run.links, run.tile)
     differences = count_differences(run.links, states, run.tile, run.expect_pairs)
     _say(counts_check_line(differences), record)
@@ -525,7 +561,7 @@ def _run(args: argparse.Namespace) -> None:
     rows = read_capture_rows(snapshot_folder(root, args.snapshot))
     print(f"snapshot {args.snapshot}: {len(rows)} delivery rows, every file matched its manifest")
     links = capture_links(rows)
-    _print_pairs(links)
+    capture_lines = _print_pairs(links)
     counts = _print_tile(links, tile)
     # Casey, PR #51, (a): straddle drop lines print before the count checks
     # in select_nodes can refuse, so a refusal shows which pair and end caused it.
@@ -536,7 +572,10 @@ def _run(args: argparse.Namespace) -> None:
     else:
         straddles = _print_drops(straddle_drops(links, tile, args.expect_pairs), printed)
     source = f"Snapshot {args.snapshot}, DEM snapshot {args.dem_snapshot}."
-    run = _Run(args.out, args.expect_pairs, links, tile, extent, counts, printed, straddles, source)
+    run = _Run(
+        args.out, args.expect_pairs, links, tile, extent, counts, printed, straddles, source,
+        tuple(capture_lines),
+    )  # fmt: skip
     (_write_sites if args.sites_only else _write_both)(run)
     print(NEVER_PUBLISH)
 
