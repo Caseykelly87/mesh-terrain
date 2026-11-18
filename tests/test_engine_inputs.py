@@ -4,7 +4,6 @@ Every test runs on the synthetic capture and DEM in tests/engine_inputs_fixture.
 none reads the real snapshot.
 """
 
-import math
 import re
 from pathlib import Path
 from typing import Any
@@ -16,6 +15,7 @@ from engine_fixture import no_logger_caching
 from engine_inputs_fixture import (
     DEM_SNAPSHOT_ID,
     NODES,
+    PARTNERS,
     SNAPSHOT_ID,
     box_centre_m,
     build_capture,
@@ -28,7 +28,8 @@ from structlog.testing import capture_logs
 from engine import positions_marker
 from engine.points import read_points
 from ingester import engine_inputs
-from ingester.link_pairs import CaptureLinks, PairActivity, SelectionError
+from ingester.link_cells import cell_of
+from ingester.link_pairs import CaptureLinks, MovedPair, PairActivity, SelectionError
 from ingester.tile_selection import (
     FAILS_DEM,
     OTHER_PAIR,
@@ -54,9 +55,8 @@ SITE_ROLES = ["both_ends_gateway", "gateway_only_gateway", "gateway_only_gateway
 
 
 def east_west_half_m(name: str) -> float:
-    """The east-west half of a node's box: Casey's inscribed square (issue #44, 1 (b))."""
-    latitude_i, _, bits = NODES[name].box()
-    return 2 ** (31 - bits) * 1e-7 * 111_320.0 * math.cos(math.radians(latitude_i / 1e7))
+    """The east-west half of a node's box: Casey's inscribed square (issue #44, 1 (b)), pos_01."""
+    return cell_of(*NODES[name].box()).half_width_ew_m
 
 
 def run(
@@ -152,7 +152,7 @@ def test_the_busiest_pair_outside_the_tile_leaves_the_sites_as_they_are(
     build_capture(tmp_path / "snapshots", busy_outside_pair=True)
     assert run(tmp_path) == 0
     printed = capsys.readouterr().out
-    assert f"pair {pseudonym('D')} to {pseudonym('E')}: link-hours over both runs 6," in printed
+    assert f"pair {pseudonym('D')} to {pseudonym('E')}: link-hours 6," in printed
     out = tmp_path / "configs" / "x72y429"
     sites = gpd.read_parquet(out / "tx_sites_real.parquet")
     assert list(sites["site_id"]) == [pseudonym(name) for name in SITE_ORDER]
@@ -178,7 +178,7 @@ def test_the_counts_line_names_no_pseudonym(
         text for text in capsys.readouterr().out.splitlines() if text.startswith("counts for")
     )
     assert line == (
-        "counts for issue #44: pairs public 4, MeshSTL 2, shared 1, union 5; pairs touching "
+        "counts for issue #44: pairs 5 (one box per end 5, more than one box 0); pairs touching "
         "the tile 3 (both ends 1); nodes selected 4; extent pass 4, fail 0; pairs dropped 0 "
         "(straddles the tile edge 0, fails the DEM edge check 0)"
     )
@@ -190,10 +190,11 @@ def placed(name: str, role: str) -> PlacedNode:
 
 def test_the_counts_line_carries_the_drop_counts_and_no_pseudonym() -> None:
     """A pair dropped for both reasons counts once in the total and once under each reason."""
-    links = CaptureLinks((), {"public": 4, "meshstl": 2, "shared": 1, "union": 5}, {}, 0, 0)
+    one = PairActivity(pseudonym("D"), pseudonym("E"), 1, 1, 0, 3)
+    two = PairActivity(pseudonym("M"), pseudonym("E"), 1, 1, 0, 3)
+    moved = MovedPair(pseudonym("B"), pseudonym("G2"), ("gateway",), 2)
+    links = CaptureLinks((one, two), {}, 0, 0, (moved,))
     tile = {"both ends": 1, "only the gateway end": 2, "only the relayer end": 0, "touched": 3}
-    one = PairActivity(pseudonym("D"), pseudonym("E"), 1, 0, 1, 3)
-    two = PairActivity(pseudonym("M"), pseudonym("E"), 1, 0, 1, 3)
     selection = Selection(
         placed=(placed("G1", "both_ends_gateway"), placed("A", "both_ends_relayer")),
         dem_check={pseudonym("G1"): True, pseudonym("A"): False},
@@ -204,7 +205,7 @@ def test_the_counts_line_carries_the_drop_counts_and_no_pseudonym() -> None:
     )
     line = engine_inputs.counts_line(links, tile, selection)
     assert line == (
-        "counts for issue #44: pairs public 4, MeshSTL 2, shared 1, union 5; pairs touching "
+        "counts for issue #44: pairs 3 (one box per end 2, more than one box 1); pairs touching "
         "the tile 3 (both ends 1); nodes selected 2; extent pass 1, fail 1; pairs dropped 2 "
         "(straddles the tile edge 2, fails the DEM edge check 1)"
     )
@@ -212,7 +213,9 @@ def test_the_counts_line_carries_the_drop_counts_and_no_pseudonym() -> None:
 
 
 def names(text: str) -> str:
-    return text.format(**{name: pseudonym(name) for name in NODES})
+    """The text with each {name} of a fixture node or partner (`{PG2}`) as its pseudonym."""
+    partners = {node.name: node.pseudonym for node in PARTNERS.values()}
+    return text.format(**{name: pseudonym(name) for name in NODES}, **partners)
 
 
 SITE_RULE_LINE = "sites by tile membership:"
@@ -221,16 +224,6 @@ SITE_RULE_LINE = "sites by tile membership:"
 @pytest.mark.parametrize(
     ("options", "line", "before_selection"),
     [
-        (
-            {"straddler": "G2"},
-            "dropped gateway-only pair {B} to {G2}: gateway straddles the tile edge",
-            True,
-        ),
-        (
-            {"straddler": "A"},
-            "dropped both-ends pair {A} to {G1}: relayer straddles the tile edge",
-            True,
-        ),
         (
             {"g3_at_edge": True},
             "dropped gateway-only pair {C} to {G3}: gateway fails the DEM edge check",
@@ -245,7 +238,13 @@ def test_a_dropped_selected_pair_stops_the_run_before_any_write(
     line: str,
     before_selection: bool,
 ) -> None:
-    """A straddle line prints before the selection's lines, an edge-check line after them, once."""
+    """An edge-check line prints after the selection's lines, once, and the run stops.
+
+    A straddling node's second box now comes with a second pair, which also
+    touches the tile, so on the fixture every straddle refuses on the
+    2026-11-08 counts before this stop (the next test); `test_tile_selection`
+    covers the stop on a straddle drop.
+    """
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", **options)
     with capture_logs() as events:
@@ -264,22 +263,39 @@ def test_a_dropped_selected_pair_stops_the_run_before_any_write(
     assert coordinates_in(printed + repr(events)) == []
 
 
+UNDETERMINED = "dropped pair (kind not determined) "
+
+
 @pytest.mark.parametrize(
-    ("straddler", "line", "refusal", "tile_line"),
+    ("straddler", "drops", "refusal", "tile_line"),
     [
         (
             "D",
-            "dropped pair (kind not determined) {D} to {E}: relayer straddles the tile edge",
+            ["{D} to {PD}: relayer straddles the tile edge", "{D} to {E}: relayer straddles"],
             "refused, nothing written: pairs touching x72y429 are not 3",
-            "tile x72y429: pairs with both ends 1, only the gateway end 2, only the relayer end 1, "
-            "touched 4",
+            "tile x72y429: pairs with both ends 1, only the gateway end 2, only the relayer end 2, "
+            "touched 5",
         ),
         (
             "B",
-            "dropped pair (kind not determined) {B} to {G2}: relayer straddles the tile edge",
+            ["{B} to {PB}: relayer straddles the tile edge", "{B} to {G2}: relayer straddles"],
             "refused, nothing written: 2 pairs have both ends in x72y429, not one",
-            "tile x72y429: pairs with both ends 2, only the gateway end 1, only the relayer end 0, "
-            "touched 3",
+            "tile x72y429: pairs with both ends 2, only the gateway end 1, only the relayer end 1, "
+            "touched 4",
+        ),
+        (
+            "G2",
+            ["{PG2} to {G2}: gateway straddles the tile edge", "{B} to {G2}: gateway straddles"],
+            "refused, nothing written: 3 pairs have only the gateway end in x72y429, not two",
+            "tile x72y429: pairs with both ends 1, only the gateway end 3, only the relayer end 0, "
+            "touched 4",
+        ),
+        (
+            "A",
+            ["{A} to {PA}: relayer straddles the tile edge", "{A} to {G1}: relayer straddles"],
+            "refused, nothing written: pairs touching x72y429 are not 3",
+            "tile x72y429: pairs with both ends 1, only the gateway end 2, only the relayer end 1, "
+            "touched 4",
         ),
     ],
 )
@@ -287,21 +303,27 @@ def test_a_straddle_line_prints_before_a_tile_check_refusal(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     straddler: str,
-    line: str,
+    drops: list[str],
     refusal: str,
     tile_line: str,
 ) -> None:
-    """Counted as in the tile, the node fails a count check; its drop line comes first."""
+    """Counted as in the tile in both its pairs, the node fails a count check; drops come first.
+
+    The straddler used its own box in one pair and its second place in the
+    other (`second_place`), so both pairs are dropped and the pair count is 6.
+    """
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", straddler=straddler)
     with capture_logs() as events:
-        assert run(tmp_path) == 2
+        assert run(tmp_path, expect_pairs="6") == 2
     assert not (tmp_path / "configs").exists()
     printed = capsys.readouterr().out
     lines = printed.splitlines()
     assert tile_line in lines
-    assert [text for text in lines if text.startswith("dropped")] == [names(line)]
-    assert lines.index(names(line)) < lines.index(refusal)
+    expected = [names(UNDETERMINED + line + ("" if "edge" in line else " the tile edge"))
+                for line in drops]  # fmt: skip
+    assert [text for text in lines if text.startswith("dropped")] == expected
+    assert all(lines.index(line) < lines.index(refusal) for line in expected)
     assert not any(text.startswith(SITE_RULE_LINE) for text in lines)
     assert coordinates_in(printed + repr(events)) == []
 
@@ -320,26 +342,41 @@ def test_a_refused_run_prints_and_logs_no_coordinate(
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", moved_a=True)
     with capture_logs() as events:
-        assert run(tmp_path) == 2
+        assert run(tmp_path, expect_pairs="6") == 2
     text = capsys.readouterr().out + repr(events)
-    assert "refused, nothing written: the both_ends_relayer's 2 usable boxes" in text
+    assert "refused, nothing written: pairs touching x72y429 are not 3" in text
     assert coordinates_in(text) == []
 
 
-def test_command_refuses_a_node_that_moved_during_the_capture(
+MOVED_C_G3 = (
+    "dropped pair {C} to {G3}: gateway used more than one box in its counted receipts "
+    "(Casey, issue #44, 2026-11-17)"
+)
+
+
+def test_a_pair_whose_gateway_used_two_boxes_is_dropped_and_reported(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Both of A's boxes lie inside the tile: it does not straddle, so no drop rule applies."""
+    """C to G3's fourth hour uses a second box for G3: the pair is dropped before the tile.
+
+    The contract's pair count still holds it (5), and the strict run then
+    refuses on the gateway-only pairs left (one, not two).
+    """
     build_dem(tmp_path / "snapshots")
-    build_capture(tmp_path / "snapshots", moved_a=True)
-    assert run(tmp_path) == 2
+    build_capture(tmp_path / "snapshots", moved_in_pair=True)
+    with capture_logs() as events:
+        assert run(tmp_path) == 2
     assert not (tmp_path / "configs").exists()
-    lines = capsys.readouterr().out.splitlines()
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
     assert (
-        "refused, nothing written: the both_ends_relayer's 2 usable boxes in the MSA do not "
-        "all overlap; the layers need a stationary node (lnk_02)"
+        "pairs with a kept link-hour under the contract, both brokers merged: 5 (4 with one box "
+        "per end, 1 with more than one box)"
     ) in lines
-    assert not any(text.startswith("dropped") for text in lines)
+    assert [text for text in lines if text.startswith("dropped")] == [names(MOVED_C_G3)]
+    refusal = "refused, nothing written: 1 pairs have only the gateway end in x72y429, not two"
+    assert lines.index(names(MOVED_C_G3)) < lines.index(refusal)
+    assert coordinates_in(printed + repr(events)) == []
 
 
 @pytest.mark.parametrize("option", ["nested_g1", "nested_g3", "ignored_a"])
@@ -474,7 +511,20 @@ def counts_for_issue(lines: list[str]) -> str:
     return next(text for text in lines if text.startswith("counts for"))
 
 
-REPORT_PREFIXES = ("dropped", "counts check", "sites by", "sites only", "left out", "counts for")
+REPORT_PREFIXES = (
+    "data-quality",
+    "dropped",
+    "counts check",
+    "sites by",
+    "sites only",
+    "left out",
+    "counts for",
+)
+DATA_QUALITY = (
+    "data-quality counts: lnk_01_direct_hop_contradicted {count} (lnk_01, a direct hop the "
+    "gateway's NeighborInfo contradicts, dropped; Casey, PR #66, Q4 (a)); one_box_dropped_hours "
+    "0 (lnk_02)"
+)
 GATEWAY_LINE = re.compile(r"[0-9a-f]{64} (both_ends|gateway_only)_gateway: ")
 
 
@@ -556,9 +606,10 @@ def test_sites_only_writes_the_sites_and_no_receiver(
         "no rx_real.parquet: no real receiver written (--sites-only)"
     ) in lines
     assert_report(tmp_path, printed)
+    assert report_lines(tmp_path)[0] == DATA_QUALITY.format(count=0)
     assert report_lines(tmp_path)[-1] == counts_for_issue(lines)
     assert counts_for_issue(lines) == (
-        "counts for issue #44: pairs public 4, MeshSTL 2, shared 1, union 5; pairs touching "
+        "counts for issue #44: pairs 5 (one box per end 5, more than one box 0); pairs touching "
         "the tile 3 (both ends 1); nodes selected 3; extent pass 3, fail 0; pairs dropped 0 "
         "(straddles the tile edge 0, fails the DEM edge check 0); sites written 3, left out 0; "
         "no real receiver written; relayers not DEM-checked"
@@ -571,7 +622,7 @@ def test_sites_only_writes_the_sites_and_no_receiver(
 def test_sites_only_writes_the_gateway_of_a_both_ends_pair_its_relayer_drops(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A straddles, so A to G1 is dropped; G1 is still a site, and the run does not stop."""
+    """A straddles, so A to G1 and A's second pair are dropped; G1 is still a site."""
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", straddler="A")
     with capture_logs() as events:
@@ -580,11 +631,12 @@ def test_sites_only_writes_the_gateway_of_a_both_ends_pair_its_relayer_drops(
     printed = capsys.readouterr().out
     lines = printed.splitlines()
     assert [text for text in lines if text.startswith("dropped")] == [
-        names("dropped both-ends pair {A} to {G1}: relayer straddles the tile edge")
+        names("dropped other pair {A} to {PA}: relayer straddles the tile edge"),
+        names("dropped both-ends pair {A} to {G1}: relayer straddles the tile edge"),
     ]
     assert not any(text.startswith("left out") for text in lines)
     assert counts_for_issue(lines).endswith(
-        "pairs dropped 1 (straddles the tile edge 1, fails the DEM edge check 0); "
+        "pairs dropped 2 (straddles the tile edge 2, fails the DEM edge check 0); "
         f"sites written 3, left out 0; {NO_RECEIVER}"
     )
     assert_report(tmp_path, printed)
@@ -598,9 +650,12 @@ def test_sites_only_writes_the_gateway_of_a_both_ends_pair_its_relayer_drops(
             {"straddler": "G2"},
             "left out {G2} gateway_only_gateway: straddles the tile edge",
             ("G1", "G3"),
-            ["dropped gateway-only pair {B} to {G2}: gateway straddles the tile edge"],
-            "nodes selected 2; extent pass 2, fail 0; pairs dropped 1 (straddles the tile "
-            "edge 1, fails the DEM edge check 0); sites written 2, left out 1",
+            [
+                "dropped gateway-only pair {PG2} to {G2}: gateway straddles the tile edge",
+                "dropped gateway-only pair {B} to {G2}: gateway straddles the tile edge",
+            ],
+            "nodes selected 2; extent pass 2, fail 0; pairs dropped 2 (straddles the tile "
+            "edge 2, fails the DEM edge check 0); sites written 2, left out 1",
         ),
         (
             {"g3_at_edge": True},
@@ -612,7 +667,7 @@ def test_sites_only_writes_the_gateway_of_a_both_ends_pair_its_relayer_drops(
         ),
         (
             {"moved_g3": True},
-            "left out {G3} gateway_only_gateway: is not stationary under lnk_02",
+            "left out {G3} gateway_only_gateway: used more than one box across its pairs (lnk_02)",
             ("G1", "G2"),
             [],
             "nodes selected 2; extent pass 2, fail 0; pairs dropped 0 (straddles the tile "
@@ -646,18 +701,21 @@ def test_sites_only_leaves_out_a_gateway_with_its_reason(
     assert coordinates_in(printed + repr(events)) == []
 
 
-D_STRADDLES = ["dropped other pair {D} to {E}: relayer straddles the tile edge"]
+D_STRADDLES = [
+    "dropped other pair {D} to {PD}: relayer straddles the tile edge",
+    "dropped other pair {D} to {E}: relayer straddles the tile edge",
+]
 
 
 @pytest.mark.parametrize(
     ("options", "expect_pairs", "differences", "dropped"),
     [
         ({}, "8", "5 pairs, not the 8 expected", []),
-        ({"straddler": "D"}, "5", "pairs touching x72y429 are not 3", D_STRADDLES),
+        ({"straddler": "D"}, "6", "pairs touching x72y429 are not 3", D_STRADDLES),
         (
             {"straddler": "D"},
             "8",
-            "5 pairs, not the 8 expected; pairs touching x72y429 are not 3",
+            "6 pairs, not the 8 expected; pairs touching x72y429 are not 3",
             D_STRADDLES,
         ),
     ],
@@ -703,7 +761,7 @@ def test_sites_only_roles_follow_the_counted_states(
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", straddler="B")
     with capture_logs() as events:
-        assert run_sites_only(tmp_path) == 0
+        assert run_sites_only(tmp_path, expect_pairs="6") == 0
     out = tmp_path / "configs" / "x72y429"
     assert sorted(path.name for path in out.iterdir()) == [
         "engine_inputs_report.md",
@@ -720,11 +778,12 @@ def test_sites_only_roles_follow_the_counted_states(
     lines = printed.splitlines()
     assert (
         "counts check against 2026-11-08: differs (2 pairs have both ends in x72y429, not one; "
-        "1 pairs have only the gateway end in x72y429, not two); --sites-only reports it and "
-        "does not refuse"
+        "1 pairs have only the gateway end in x72y429, not two; pairs touching x72y429 are not "
+        "3); --sites-only reports it and does not refuse"
     ) in lines
     assert [text for text in lines if text.startswith("dropped")] == [
-        names("dropped both-ends pair {B} to {G2}: relayer straddles the tile edge")
+        names("dropped other pair {B} to {PB}: relayer straddles the tile edge"),
+        names("dropped both-ends pair {B} to {G2}: relayer straddles the tile edge"),
     ]
     assert counts_for_issue(lines).endswith(f"sites written 3, left out 0; {NO_RECEIVER}")
     assert_report(tmp_path, printed)
@@ -811,12 +870,49 @@ def test_a_failed_sites_only_move_leaves_neither_the_layer_nor_the_report(
 def test_without_sites_only_a_moved_gateway_still_refuses(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The strict path is unchanged: a selected gateway that is not stationary refuses."""
+    """The strict path refuses where sites-only leaves G3 out: here on the counts first.
+
+    G3's second place comes with a third gateway-only pair; the refusal for a
+    selected node with two boxes is covered in `test_tile_selection`.
+    """
     build_dem(tmp_path / "snapshots")
     build_capture(tmp_path / "snapshots", moved_g3=True)
-    assert run(tmp_path) == 2
+    assert run(tmp_path, expect_pairs="6") == 2
     assert not (tmp_path / "configs").exists()
     assert (
-        "refused, nothing written: the gateway_only_gateway's 2 usable boxes in the MSA do not "
-        "all overlap; the layers need a stationary node (lnk_02)"
+        "refused, nothing written: 3 pairs have only the gateway end in x72y429, not two"
     ) in capsys.readouterr().out.splitlines()
+
+
+def test_sites_only_reports_a_pair_dropped_for_two_boxes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """C to G3 is dropped before the tile, so G3 is no candidate; the drop is in the report."""
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", moved_in_pair=True)
+    with capture_logs() as events:
+        assert run_sites_only(tmp_path) == 0
+    assert_sites(tmp_path, ("G1", "G2"))
+    printed = capsys.readouterr().out
+    assert names(MOVED_C_G3) in report_lines(tmp_path)
+    assert counts_for_issue(printed.splitlines()).startswith(
+        "counts for issue #44: pairs 5 (one box per end 4, more than one box 1);"
+    )
+    assert_report(tmp_path, printed)
+    assert coordinates_in(printed + repr(events)) == []
+
+
+def test_sites_only_reports_the_direct_hops_neighbor_info_contradicts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Casey, PR #66, Q4 (a): D's three direct hops to E are dropped and counted in the report."""
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", contradicted_d=True)
+    with capture_logs() as events:
+        assert run_sites_only(tmp_path, expect_pairs="4") == 0
+    assert_sites(tmp_path, SITE_ORDER)
+    printed = capsys.readouterr().out
+    assert report_lines(tmp_path)[0] == DATA_QUALITY.format(count=3)
+    assert COUNTS_PASS.replace("pass", "differs") not in printed
+    assert_report(tmp_path, printed)
+    assert coordinates_in(printed + repr(events)) == []
