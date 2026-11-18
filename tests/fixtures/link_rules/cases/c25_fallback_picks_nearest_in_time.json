@@ -3,7 +3,7 @@
   "title": "The 30-minute fallback: inside and outside the window, nearest, exactly 30 minutes, and a tie",
   "rules": ["lnk_02", "lnk_04", "lnk_05"],
   "reasoning": [
-    "c25-r's 20-bit cells of 21 and 22 October are about 1 km apart and the eight 32-bit fixes are each at least 300 m from the others, so c25-r has moved at every receipt and takes the position nearest in time within 30 minutes, 30 included, the earlier on a tie (lnk_02, Q5).",
+    "c25-r's 20-bit cells of 21 and 22 October are about 1 km apart and every two of the eight 32-bit fixes are at least 299.99 m apart (the nearest pair, c25-m004 and c25-m005, 299.9951 m), far beyond the 40 m floor, so c25-r has moved at every receipt and takes the position nearest in time within 30 minutes, 30 included, the earlier on a tie (lnk_02, Q5).",
     "Receipt at 10:30, fixes 31 minutes before (outside) and 29 minutes after (inside): the one after (x2, 4121.335 m from g16; the other, c25-m004, is 3827.268 m).",
     "Receipt at 12:30, fixes 10 minutes before and 20 minutes after, both inside: the nearer, before (y1, 3899.914 m from g16; the other, c25-m008, is 4188.890 m).",
     "Receipt at 14:30, fixes exactly 30 minutes before (inside, Q5) and 31 minutes after (outside): the one before (z1, 3993.830 m from g16; the other, c25-m011, is 4276.462 m).",

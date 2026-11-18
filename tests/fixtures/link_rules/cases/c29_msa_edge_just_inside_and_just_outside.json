@@ -3,7 +3,7 @@
   "title": "32-bit fixes about 29 m inside and 29 m outside the MSA boundary",
   "rules": ["pos_02", "lnk_02", "lnk_04", "lnk_05"],
   "reasoning": [
-    "The MSA boundary crosses longitude -90.55 at about 38.011393 N, on the edge between the vertices (-90.550518, 38.01127) and (-90.545413, 38.01248) of the seed polygon. c29-ra's fix lies 30 m north of the crossing and about 28.9 m inside the polygon; c29-rb's lies 30 m south of it and about 28.9 m outside (distances to the boundary measured with pyproj's WGS84 geodesic to the nearest boundary point).",
+    "The MSA boundary crosses longitude -90.55 at about 38.011393 N, on the edge between the vertices (-90.550518, 38.01127) and (-90.545413, 38.01248) of the seed polygon. c29-ra's fix lies 30 m north of the crossing and about 28.7 m inside the polygon (28.743 m); c29-rb's lies 30 m south of it and about 28.7 m outside (28.738 m). Each distance is the shortest pyproj WGS84 geodesic from the fix to a point on the boundary's edges, searched along each edge; the point nearest in degrees gives about 28.9 m, which is not the geodesic minimum.",
     "c29-ra is stationary on its fix (lnk_02, pos_02); c29-rb has no position inside the MSA, so its receipts are dropped by lnk_02. c29-g's 16-bit cell centre is about 3.7 km inside.",
     "c29-ra's receipts pass lnk_05 at 3918.639 m: kept with 3 packets. Medians over the counted receipts: SNR 5, 6 and 7 dB give 6.0; RSSI -90, -95 and -100 dBm give -95.0 (lnk_04, percentile_cont).",
     "position_uncertainty_m is the larger half-width of each end's box, ra_32 0.005550 m plus g16 363.716165 m, = 363.721715 m (lnk_05)."
