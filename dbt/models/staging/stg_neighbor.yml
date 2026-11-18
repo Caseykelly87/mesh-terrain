@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: stg_neighbor
+    description: >
+      One row per neighbour listed in a NeighborInfo report, in message order.
+      lnk_01 reads a gateway's own reports from here to resolve a relay byte.
+    columns:
+      - name: snapshot_id
+        description: The snapshot the report's row was loaded from.
+        tests:
+          - not_null
+      - name: delivery_key
+        description: The report's delivery key; with neighbour_position, one row.
+        tests:
+          - not_null
+      - name: neighbour_position
+        description: The neighbour's place in the report's list, starting at 1.
+        tests:
+          - not_null
+      - name: received_at
+        description: When our capture received the report, in UTC.
+      - name: reporter_pseudonym
+        description: The pseudonym of the node that sent the report.
+      - name: gateway_pseudonym
+        description: The pseudonym of the gateway that uplinked the report.
+      - name: neighbour_pseudonym
+        description: The listed neighbour's pseudonym.
+      - name: neighbour_low_byte
+        description: >
+          The listed neighbour's low id byte, 1 to 255. Where raw holds 0 this
+          holds 255, since firmware sends a relayer whose low byte is 0 as
+          relay_node 0xFF; staging never holds 0 here.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                max_value: 255
+      - name: neighbour_snr
+        description: The SNR in dB the reporter last heard the neighbour at, as sent.
+      - name: neighbour_last_heard
+        description: When the reporter last heard the neighbour, in Unix seconds as sent.
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ["snapshot_id", "delivery_key", "neighbour_position"]

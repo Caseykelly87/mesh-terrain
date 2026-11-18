@@ -1,0 +1,149 @@
+version: 2
+
+models:
+  - name: int_link_window
+    description: >
+      One row per kept link-hour: the last relayer, the gateway and the clock
+      hour (lnk_08), with at least 3 counted receipts (lnk_04), each end's
+      box under lnk_02 and the line between the box centres (lnk_07).
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ["tx_node_hash", "gateway_node_hash", "hour"]
+          config:
+            meta: {contract: lnk_08}
+    columns:
+      - name: tx_node_hash
+        description: The pseudonym of the last relayer, the link's transmitting end (lnk_08).
+        tests:
+          - not_null:
+              config:
+                meta: {contract: lnk_08}
+      - name: gateway_node_hash
+        description: The pseudonym of the gateway, the link's receiving end (lnk_08).
+        tests:
+          - not_null:
+              config:
+                meta: {contract: lnk_08}
+      - name: hour
+        description: The clock hour in UTC, half-open, that holds every counted receipt (lnk_04, lnk_08).
+        tests:
+          - not_null:
+              config:
+                meta: {contract: lnk_08}
+      - name: packet_count
+        description: The counted receipts, those that pass lnk_05's per-receipt test with the box each uses; at least 3 (lnk_04).
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 3
+              config:
+                meta: {contract: lnk_04}
+      - name: first_received_at
+        description: The earliest counted receipt's received_at, in UTC.
+      - name: last_received_at
+        description: The latest counted receipt's received_at, in UTC.
+        tests:
+          - not_null
+      - name: median_snr_db
+        description: The median SNR in dB over the counted receipts, percentile_cont(0.5) (lnk_04).
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -30
+                max_value: 20
+              config:
+                meta: {contract: lnk_06}
+      - name: median_rssi_dbm
+        description: The median RSSI in dBm over the counted receipts, percentile_cont(0.5) (lnk_04).
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -150
+                max_value: -1
+              config:
+                meta: {contract: lnk_06}
+      - name: modem_preset
+        description: The counted receipts' modem preset when they all name the same one, otherwise null.
+      - name: distance_m
+        description: >
+          The median over the counted receipts of the WGS84 geodesic between
+          the two box centres, in metres; 500 to 60 000 (lnk_05).
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 500
+                max_value: 60000
+              config:
+                meta: {contract: lnk_05}
+      - name: bearing_deg
+        description: The geodesic azimuth from the relayer box centre to the gateway box centre, in degrees clockwise from north.
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 360
+      - name: position_uncertainty_m
+        description: >
+          The larger of the relayer box's two half-widths plus the larger of
+          the gateway box's, in metres, until the rectangle-draws unit (lnk_05).
+        tests:
+          - not_null
+      - name: relayer_south_i
+        description: The relayer box's south edge in 1e-7 degrees, included; the box is half-open (lnk_02).
+        tests:
+          - not_null
+      - name: relayer_north_i
+        description: The relayer box's north edge in 1e-7 degrees, excluded.
+      - name: relayer_west_i
+        description: The relayer box's west edge in 1e-7 degrees, included.
+      - name: relayer_east_i
+        description: The relayer box's east edge in 1e-7 degrees, excluded.
+      - name: relayer_merged
+        description: True when the relayer box is the rectangle around two or more cells the 40 m floor made one place.
+      - name: relayer_precision_bits
+        description: The most precision_bits among the cells the relayer box covers.
+      - name: relayer_half_width_ns_m
+        description: Half the relayer box's north-south extent in metres, WGS84 (pos_01's formula).
+      - name: relayer_half_width_ew_m
+        description: Half the relayer box's east-west extent in metres, WGS84 (pos_01's formula).
+      - name: relayer_precise_source
+        description: >
+          True when every cell the relayer box covers was sent, among the
+          positions lnk_02 read for that end in that hour, in a delivery that
+          qualifies under pos_04 (D7). Such a box never leaves core at its
+          own precision (prv_02).
+        tests:
+          - not_null
+      - name: gateway_south_i
+        description: The gateway box's south edge in 1e-7 degrees, included; the box is half-open (lnk_02).
+        tests:
+          - not_null
+      - name: gateway_north_i
+        description: The gateway box's north edge in 1e-7 degrees, excluded.
+      - name: gateway_west_i
+        description: The gateway box's west edge in 1e-7 degrees, included.
+      - name: gateway_east_i
+        description: The gateway box's east edge in 1e-7 degrees, excluded.
+      - name: gateway_merged
+        description: True when the gateway box is the rectangle around two or more cells the 40 m floor made one place.
+      - name: gateway_precision_bits
+        description: The most precision_bits among the cells the gateway box covers.
+      - name: gateway_half_width_ns_m
+        description: Half the gateway box's north-south extent in metres, WGS84 (pos_01's formula).
+      - name: gateway_half_width_ew_m
+        description: Half the gateway box's east-west extent in metres, WGS84 (pos_01's formula).
+      - name: gateway_precise_source
+        description: As relayer_precise_source, for the gateway box.
+        tests:
+          - not_null
+      - name: geom
+        description: >
+          LINESTRING in SRID 4326, first point the relayer box centre, second
+          the gateway box centre (lnk_07).
+        tests:
+          - not_null

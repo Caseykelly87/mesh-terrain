@@ -11,8 +11,9 @@ fixtures (`tests/fixture_rows.py`), commits so dbt's own connections see them,
 runs dbt on the development target with the var raw_schema naming the schema,
 and drops it at the end, also after a failure. dbt's singular tests do the
 comparisons with the hand-worked values: `assert_pos_01_fixture_positions`,
-`assert_pos_02_fixture_positions_in_core`, `assert_ing_06_first_copy_kept`
-and the rest.
+`assert_pos_02_fixture_positions_in_core`, `assert_ing_06_first_copy_kept`,
+the link-rules cases' `assert_lnk_04_fixture_receipts` and
+`assert_lnk_04_fixture_link_hours`, and the rest.
 
 The build runs three times, after `dbt seed --full-refresh`. First `dbt run
 --full-refresh` without the second fixture snapshot; then that snapshot is
@@ -64,7 +65,22 @@ NAMED_TESTS = (
     "assert_pos_03_no_zero_position",
     "assert_pos_03_zero_mapped_count",
     "assert_pos_04_precise_flag",
+    "assert_lnk_01_direct_hop_contradicted",
+    "assert_lnk_01_fixture_resolution",
+    "assert_lnk_02_finest_box_in_hour",
+    "assert_lnk_02_floor_box",
+    "assert_lnk_02_no_chaining",
+    "assert_lnk_02_one_box_per_end",
+    "assert_lnk_02_stationary_floor",
+    "assert_lnk_04_fixture_link_hours",
+    "assert_lnk_04_fixture_receipts",
+    "assert_lnk_05_hour_box",
+    "assert_lnk_07_fixture_point_order",
+    "assert_lnk_07_link_geometry",
 )
+# The tests that report a count on every run, Casey's lnk_06 count
+# (2026-11-14), warn by design; each must warn with the fixture's count.
+REPORTING_TESTS = {"assert_lnk_06_excluded_count": 7}
 
 
 def drop_fixture_schema(conn: psycopg.Connection, schema: str) -> None:
@@ -111,7 +127,17 @@ def dbt_on_fixture(arguments: list[str], schema: str, work_dir: Path) -> dict[st
     result = dbt_result(command, work_dir)
     assert result.returncode == 0, f"dbt {arguments}:\n{result.stdout}\n{result.stderr}"
     results = json.loads((target_path / "run_results.json").read_text(encoding="utf-8"))
-    return {entry["unique_id"].split(".")[2]: entry["status"] for entry in results["results"]}
+    return {
+        entry["unique_id"].split(".")[2]: reported_status(entry) for entry in results["results"]
+    }
+
+
+def reported_status(entry: dict[str, Any]) -> str:
+    """A node's status, a reporting test's warn with its expected count read as pass."""
+    name = entry["unique_id"].split(".")[2]
+    if name in REPORTING_TESTS and entry["status"] == "warn":
+        return "pass" if entry["failures"] == REPORTING_TESTS[name] else f"warn {entry['failures']}"
+    return str(entry["status"])
 
 
 def core_rows(conn: psycopg.Connection) -> list[tuple[Any, ...]]:
@@ -158,7 +184,7 @@ def test_every_node_of_the_fixture_build_passes(builds: dict[str, Any], build: s
 
 @pytest.mark.parametrize("build", ["incremental", "full_refresh"])
 def test_the_fixture_build_runs_the_contract_tests(builds: dict[str, Any], build: str) -> None:
-    assert set(NAMED_TESTS) <= set(builds[build])
+    assert {*NAMED_TESTS, *REPORTING_TESTS} <= set(builds[build])
 
 
 def test_incremental_and_full_refresh_builds_leave_the_same_core_rows(

@@ -74,14 +74,6 @@ PENDING = frozenset(
     {
         # prv_01 (allowlist) has pytest tests, which the parser does not count.
         "ing_02",
-        "lnk_01",
-        "lnk_02",
-        "lnk_03",
-        "lnk_04",
-        "lnk_05",
-        "lnk_06",
-        "lnk_07",
-        "lnk_08",
         "prv_01",
         "prv_02",
         "prv_03",

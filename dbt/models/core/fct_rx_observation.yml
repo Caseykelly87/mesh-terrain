@@ -1,0 +1,87 @@
+version: 2
+
+models:
+  - name: fct_rx_observation
+    description: >
+      One row per receipt that passes lnk_01, lnk_03 and lnk_06: a radio
+      receipt whose last relayer resolved to exactly one known node other than
+      the gateway, with both readings in range. The link is relayer to gateway,
+      not sender to gateway.
+    columns:
+      - name: delivery_key
+        description: The receipt's kept copy in stg_packet, the grain of this table (ing_01).
+        tests:
+          - unique
+          - not_null
+      - name: snapshot_id
+        description: The snapshot of the kept copy.
+        tests:
+          - not_null
+      - name: received_at
+        description: When our capture received the kept copy, in UTC; the incremental watermark.
+        tests:
+          - not_null
+      - name: hour
+        description: The clock hour in UTC that holds received_at, half-open, the receipt's link-hour (lnk_04).
+        tests:
+          - not_null
+      - name: tx_node_hash
+        description: >
+          The pseudonym of the last relayer, resolved under lnk_01; for a
+          direct hop the sender itself. The name is the one lnk_08 gives the
+          link-hour key.
+        tests:
+          - not_null
+      - name: gateway_node_hash
+        description: The pseudonym of the gateway that heard the receipt by radio and uplinked it.
+        tests:
+          - not_null
+      - name: link_source
+        description: relay_node when the relay byte resolved, neighbor_info when only the gateway's NeighborInfo did (lnk_01).
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["relay_node", "neighbor_info"]
+              config:
+                meta: {contract: lnk_01}
+      - name: origin_pseudonym
+        description: The pseudonym of the node that sent the packet.
+        tests:
+          - not_null
+      - name: packet_id
+        description: The packet's id from its sender.
+      - name: relay_node
+        description: The relayer's low id byte as the gateway reported it, 1 to 255.
+        tests:
+          - not_null
+      - name: rx_snr
+        description: The gateway's signal-to-noise ratio for the receipt in dB, -30 to 20 (lnk_06).
+        tests:
+          - not_null:
+              config:
+                meta: {contract: lnk_06}
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -30
+                max_value: 20
+              config:
+                meta: {contract: lnk_06}
+      - name: rx_rssi
+        description: The gateway's received signal strength in dBm, -150 to -1, since [-150, 0) holds whole numbers only (lnk_06).
+        tests:
+          - not_null:
+              config:
+                meta: {contract: lnk_06}
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -150
+                max_value: -1
+              config:
+                meta: {contract: lnk_06}
+      - name: modem_preset
+        description: The modem preset parsed from the topic, null for a custom channel name.
+      - name: seen_public
+        description: True when the public broker carried the kept copy.
+      - name: seen_meshstl
+        description: True when the MeshSTL broker carried the kept copy.

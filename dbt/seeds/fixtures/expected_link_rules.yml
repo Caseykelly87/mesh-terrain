@@ -1,0 +1,30 @@
+version: 2
+
+seeds:
+  - name: expected_link_receipts
+    description: >
+      The link-rules fixture's expected receipts, copied from the hand-worked
+      cases by tests/link_rules_expected.py, a named box written out as its
+      edges. Built only on a development target with the var raw_schema set.
+    columns:
+      - name: delivery_key
+        description: The receipt's delivery key.
+      - name: outcome
+        description: counted, or dropped by the rule in rule.
+      - name: rule
+        description: The rule that drops the receipt, ing_06 for a copy stg_packet does not keep.
+      - name: distance_m
+        description: The geodesic between the box centres in metres, where the receipt reaches lnk_05.
+  - name: expected_link_hours
+    description: >
+      The link-rules fixture's expected link-hours, every (relayer, gateway,
+      hour) with a counted receipt, copied from the hand-worked cases by
+      tests/link_rules_expected.py. Built only on a development target with
+      the var raw_schema set.
+    columns:
+      - name: receipts
+        description: The counted receipts' delivery keys in order, separated by spaces.
+      - name: outcome
+        description: kept, or dropped by the rule in rule.
+      - name: position_uncertainty_m
+        description: The hand-worked lnk_05 figure for a kept hour, in metres.
