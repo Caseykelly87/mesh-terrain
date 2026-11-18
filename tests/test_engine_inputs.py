@@ -93,6 +93,7 @@ def test_command_writes_the_layers(
     assert run(tmp_path) == 0
     out = tmp_path / "configs" / "x72y429"
     assert sorted(path.name for path in out.iterdir()) == [
+        "engine_inputs_report.md",
         "rx_real.parquet",
         "tx_sites_real.parquet",
     ]
@@ -408,46 +409,93 @@ def test_a_kept_pair_with_another_box_in_hours_not_kept_is_reported_locally(
     assert coordinates_in(printed + repr(events)) == []
 
 
-def links_with_a_kind_conflict() -> CaptureLinks:
-    """Reviewer reproduction (a), PR #70 comment 6989619559: B's rows on both sides of the edge.
+def capture_with(*specs: tuple[str, str, int, float]) -> CaptureLinks:
+    """Pairs (relayer, gateway, link-hours, the gateway's box shifted east in metres)."""
 
-    B's row with G1 lies outside the tile and its row with C inside, so the
-    counts read B to G1 as the both-ends pair while its own rows read it as a
-    gateway-only pair.
-    """
-
-    def pair(relayer: str, gateway: str, hours: int, shift: float = 0.0) -> PairActivity:
+    def pair(relayer: str, gateway: str, hours: int, shift: float) -> PairActivity:
         boxes = cell_of(*NODES[relayer].box()), cell_of(*NODES[gateway].box(shift))
         return PairActivity(
             pseudonym(relayer), pseudonym(gateway), hours, hours, 0, 3 * hours, *boxes
         )
 
-    pairs = (pair("B", "G1", 2), pair("C", "B", 4, -10_000.0), pair("D", "G2", 1))
+    pairs = tuple(pair(*spec) for spec in specs)
     return CaptureLinks(pairs, link_pairs._nodes(pairs), 0, 0)
 
 
-def test_a_kind_conflict_refuses_a_strict_run_with_exit_2(
+# Reviewer reproductions, PR #70 comment 6989619559: (a) B's row with G1 lies
+# outside the tile and its row with C inside; (b) G2's row with C lies 15 km east.
+REPRODUCTION_A = (("B", "G1", 2, 0.0), ("C", "B", 4, -10_000.0), ("D", "G2", 1, 0.0))
+REPRODUCTION_B = (("A", "G1", 2, 0.0), ("B", "G2", 5, 0.0), ("C", "G2", 4, 15_000.0))
+KIND_LINE = (
+    "kind differs, pair {{{r}}} to {{{g}}}: {by_rows} by its own rows, {counted} by the counts "
+    "check; for Casey in the session (issue #55 comment 6990646633, item 3)"
+)
+
+
+def kind_line(relayer: str, gateway: str, by_rows: str, counted: str) -> str:
+    return names(KIND_LINE.format(r=relayer, g=gateway, by_rows=by_rows, counted=counted))
+
+
+def test_a_disagreement_with_no_receiver_row_ends_with_exit_2_not_a_traceback(
     tmp_path: Path,
     capture: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Interim guard until Casey answers (PR #70): exit 2 and nothing written, no traceback."""
-    monkeypatch.setattr(engine_inputs, "capture_links", lambda _rows: links_with_a_kind_conflict())
+    """Reproduction (a): kinds by rows leave no both-ends pair, so no receiver row.
+
+    The disagreement is listed and does not stop the run; the run then ends
+    with exit 2 because a strict run's layers need the both-ends pair's
+    relayer as receiver (Casey, issue #44, busiest pair, 2026-11-17), and
+    nothing is written.
+    """
+    monkeypatch.setattr(engine_inputs, "capture_links", lambda _rows: capture_with(*REPRODUCTION_A))
     with capture_logs() as events:
         assert run(tmp_path, expect_pairs="3") == 2
     assert not (tmp_path / "configs").exists()
     printed = capsys.readouterr().out
     lines = printed.splitlines()
-    conflict = names(
-        "kind differs, pair {B} to {G1}: gateway-only pair by its own rows, both-ends pair by the "
-        "counts check; reported for Casey (PR #70, interim)"
-    )
+    conflict = kind_line("B", "G1", "gateway-only pair", "both-ends pair")
     assert conflict in lines
-    refusal = next(text for text in lines if text.startswith("refused, nothing written: "))
-    assert "1 pairs have a kind by their own rows" in refusal
+    refusal = "refused, nothing written: no receiver row: no both-ends pair has a row of its own"
     assert lines.index(conflict) < lines.index(refusal)
     assert coordinates_in(printed + repr(events)) == []
+
+
+def test_a_disagreement_is_listed_in_a_strict_runs_report_and_the_run_goes_on(
+    tmp_path: Path,
+    capture: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reproduction (b), Casey (issue #55 comment 6990646633, item 3): listed, no stop.
+
+    The line names pseudonyms, so it is in the terminal and the local report,
+    and not in the counts line that goes on issue #44.
+    """
+    monkeypatch.setattr(engine_inputs, "capture_links", lambda _rows: capture_with(*REPRODUCTION_B))
+    with capture_logs() as events:
+        assert run(tmp_path, expect_pairs="3") == 0
+    printed = capsys.readouterr().out
+    lines = printed.splitlines()
+    conflict = kind_line("C", "G2", "other pair", "gateway-only pair")
+    assert conflict in lines
+    assert conflict in report_lines(tmp_path)
+    assert "kind differs" not in counts_for_issue(lines)
+    sites = gpd.read_parquet(tmp_path / "configs" / "x72y429" / "tx_sites_real.parquet")
+    assert list(sites["site_id"]) == [pseudonym("G1"), f"{pseudonym('G2')}.1"]
+    assert_report(tmp_path, printed, heading="engine_inputs")
+    assert coordinates_in(printed + repr(events)) == []
+
+
+def test_a_strict_run_writes_its_local_report(
+    tmp_path: Path, capture: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The strict run keeps its lines in engine_inputs_report.md, as a sites-only run does."""
+    assert run(tmp_path) == 0
+    printed = capsys.readouterr().out
+    assert_report(tmp_path, printed, heading="engine_inputs")
+    assert report_lines(tmp_path)[-1] == counts_for_issue(printed.splitlines())
 
 
 @pytest.mark.parametrize("option", ["nested_g1", "nested_g3", "ignored_a"])
@@ -479,7 +527,9 @@ def test_command_refuses_an_unexpected_pair_count(tmp_path: Path, capture: Path)
     assert not (tmp_path / "configs").exists()
 
 
-@pytest.mark.parametrize("name", ["rx_real.parquet", "engine-inputs.partial"])
+@pytest.mark.parametrize(
+    "name", ["rx_real.parquet", "engine-inputs.partial", "engine_inputs_report.md"]
+)
 def test_command_refuses_to_overwrite(tmp_path: Path, capture: Path, name: str) -> None:
     out = tmp_path / "configs" / "x72y429"
     out.mkdir(parents=True)
@@ -599,7 +649,7 @@ DATA_QUALITY = (
     "gateway's NeighborInfo contradicts, dropped; Casey, PR #66, Q4 (a)); one_box_dropped_hours "
     "0 (lnk_02)"
 )
-GATEWAY_LINE = re.compile(r"[0-9a-f]{64}(\.\d+)? (both_ends|gateway_only)_gateway: ")
+GATEWAY_LINE = re.compile(r"[0-9a-f]{64}(\.\d+)? (both_ends|gateway_only)_(gateway|relayer): ")
 
 
 def recorded(lines: list[str]) -> list[str]:
@@ -619,10 +669,12 @@ def report_lines(tmp_path: Path) -> list[str]:
     return block.splitlines()
 
 
-def assert_report(tmp_path: Path, printed: str) -> None:
+def assert_report(
+    tmp_path: Path, printed: str, heading: str = "engine_inputs --sites-only"
+) -> None:
     """The report holds every recorded terminal line and no coordinate (Casey, issue #55, 7)."""
     text = report_text(tmp_path)
-    assert text.startswith("# engine_inputs --sites-only, x72y429\n")
+    assert text.startswith(f"# {heading}, x72y429\n")
     assert engine_inputs.REPORT_NOTE in text
     assert f"Snapshot {SNAPSHOT_ID}, DEM snapshot {DEM_SNAPSHOT_ID}." in text
     assert report_lines(tmp_path) == recorded(printed.splitlines())
@@ -905,10 +957,11 @@ def test_sites_only_roles_follow_each_pairs_own_rows(
     assert [text for text in lines if text.startswith("dropped")] == [
         names("dropped other pair {B} to {PB}: relayer straddles the tile edge"),
     ]
-    # The interim guard (PR #70): the run goes on and reports the pair whose kinds differ.
+    # Casey (issue #55 comment 6990646633, item 3): the pair's own rows decide;
+    # the disagreement is listed and the run goes on.
     conflict = names(
         "kind differs, pair {B} to {G2}: gateway-only pair by its own rows, both-ends pair by the "
-        "counts check; reported for Casey (PR #70, interim)"
+        "counts check; for Casey in the session (issue #55 comment 6990646633, item 3)"
     )
     assert [text for text in lines if text.startswith("kind differs")] == [conflict]
     assert conflict in report_lines(tmp_path)
