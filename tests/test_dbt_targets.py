@@ -325,6 +325,29 @@ def test_make_refuses_the_real_target_from_the_environment() -> None:
     assert result.stdout == ""
 
 
+@pytest.mark.parametrize("goal", ["check", "dbt-build"])
+def test_make_refuses_the_real_target_from_a_dotenv_file(goal: str, tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(f"DBT_DEV_TARGET={REAL_TARGET}\n", encoding="utf-8")
+    result = make_dry_run(goal, directory=tmp_path)
+    assert result.returncode != 0
+    assert "make dbt-build-real" in result.stderr
+    assert result.stdout == ""
+
+
+def test_dbt_build_refuses_the_real_target_when_reached_from_another_goal(
+    tmp_path: Path,
+) -> None:
+    """The parse-time guard reads the goals named; a goal that depends on dbt-build is not one."""
+    extra = tmp_path / "extra.mk"
+    extra.write_text("through-dependency: dbt-build\n", encoding="utf-8")
+    result = make_dry_run(
+        "-f", str(extra), "through-dependency", f"DBT_DEV_TARGET={REAL_TARGET}", directory=tmp_path
+    )
+    assert result.returncode != 0
+    assert "make dbt-build-real" in result.stderr
+    assert f"--target {REAL_TARGET}" not in result.stdout
+
+
 @pytest.mark.usefixtures("warehouse")
 def test_a_real_build_value_other_than_true_is_refused() -> None:
     assert "make dbt-build-real" in schema_hook(REAL_TARGET, "--vars", "{real_build: 'true'}")
