@@ -12,8 +12,9 @@
 -- gateway, with both readings in range. The relayer is tx_node_hash and the
 -- gateway gateway_node_hash, the names lnk_08 gives the link-hour key.
 --
--- Incremental: a run adds the receipts received after the latest received_at
--- already here, and every receipt of a snapshot not yet here. Resolution
+-- Incremental: received_at is the watermark. A run adds the receipts
+-- received after the latest received_at already here, every receipt of a
+-- snapshot not yet here, and every receipt when the table is empty. Resolution
 -- reads only the 24 hours before a receipt, so later data never changes a
 -- receipt already here; a new snapshot that adds deliveries before a receipt
 -- already here needs --full-refresh.
@@ -24,7 +25,9 @@ with receipts as (
     where drop_rule is null
     {% if is_incremental() %}
         and (
-            received_at > (select max(received_at) from {{ this }})
+            received_at > coalesce(
+                (select max(received_at) from {{ this }}), '-infinity'::timestamptz
+            )
             or snapshot_id not in (select distinct snapshot_id from {{ this }})
         )
     {% endif %}

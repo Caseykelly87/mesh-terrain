@@ -62,7 +62,7 @@ models:
       - name: rx_time
         description: The gateway's own receive time in Unix seconds, as sent; stored and never used to order anything (ing_06).
       - name: rx_snr
-        description: The gateway's signal-to-noise ratio for the packet in dB, as raw holds it.
+        description: The gateway's signal-to-noise ratio for the packet in dB, as raw holds it, except that a value that is not a number (NaN) lands as null (lnk_06).
       - name: rx_rssi
         description: The gateway's received signal strength in dBm, as raw holds it, null where it was 0.
       - name: channel
