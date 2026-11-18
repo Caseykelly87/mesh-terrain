@@ -7,7 +7,7 @@
 -- received_at. That covers c27 to c32 of the link-rules fixture and the
 -- staging cases s01 to s03. Each kept row carries its staging values, and
 -- the precise flag the hand-written rows give core, which reads seen_meshstl
--- on any copy of the delivery (s01-m009; awaiting Casey on PR #69).
+-- on any copy of the delivery (s01-m009; Casey, issue #55 comment 6985802330, item 7).
 -- Returns each row that is missing on either side or differs.
 
 with expected as (

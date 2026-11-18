@@ -12,8 +12,8 @@
 -- PR #66, Q3). When several snapshots hold the delivery, the row's values come
 -- from its first copy by received_at, then snapshot id, and seen_public and
 -- seen_meshstl are true when any copy carried them, so precise_source reads
--- seen_meshstl on any copy of the delivery (pos_04; the any-copy reading
--- awaits Casey on PR #69).
+-- seen_meshstl on any copy of the delivery (pos_04; Casey, issue #55 comment 6985802330, item 7:
+-- "(a), any copy in any snapshot").
 --
 -- Incremental: a run reads the positions at or after the latest received_at
 -- already here, and every position of a snapshot not yet here, since a new
@@ -137,8 +137,11 @@ select
     first_copies.half_width_ew_m,
     broker_flags.seen_public,
     broker_flags.seen_meshstl,
-    coalesce(first_copies.precision_bits >= 20 and broker_flags.seen_meshstl, false)
-        as precise_source
+    {{ precise_flag(
+        'first_copies.precision_bits',
+        'first_copies.position_source',
+        'broker_flags.seen_meshstl'
+    ) }} as precise_source
 from first_copies
 inner join broker_flags
     on broker_flags.delivery_key = first_copies.delivery_key
