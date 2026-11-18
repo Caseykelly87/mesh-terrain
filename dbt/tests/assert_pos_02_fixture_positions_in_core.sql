@@ -1,14 +1,15 @@
 {{ config(enabled=fixture_build()) }}
 
--- pos_02 on the synthetic fixtures: core.fct_node_position holds exactly the
--- position deliveries the seed puts in core, those whose stored value lies
--- inside the MSA (a 32-bit position's stored value, not its cell centre;
--- Casey, PR #66, Q3), one row per delivery from its first copy by
--- received_at. That covers c27 to c32 of the link-rules fixture and the
--- staging cases s01 to s03. Each kept row carries its staging values, and
--- the precise flag the hand-written rows give core, which reads seen_meshstl
--- on any copy of the delivery (s01-m009; Casey, issue #55 comment 6985802330, item 7).
--- Returns each row that is missing on either side or differs.
+-- pos_02 on the synthetic fixtures: compares every position row of the
+-- link-rules cases and the staging cases with the hand-written rows in the
+-- seed. core.fct_node_position must hold exactly the deliveries the seed puts
+-- in core, those whose stored value lies inside the MSA (a 32-bit position's
+-- stored value, not its cell centre; Casey, PR #66, Q3), one row per delivery
+-- from its first copy by received_at, and no other. Each kept row carries its
+-- staging values and the precise flag the hand-written rows give core, which
+-- reads seen_meshstl on any copy of the delivery (s01-m009, s04-m003 and
+-- s04-m004; Casey, issue #55 comment 6985802330, item 7). Returns each row
+-- that is missing on either side or differs.
 
 with expected as (
     select *
