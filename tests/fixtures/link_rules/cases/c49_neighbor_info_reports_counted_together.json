@@ -1,0 +1,31 @@
+{
+  "case_id": "c49_neighbor_info_reports_counted_together",
+  "title": "Two NeighborInfo reports in 24 hours name different nodes with one byte: nothing resolves",
+  "rules": ["lnk_01", "lnk_02", "lnk_04", "lnk_05"],
+  "reasoning": [
+    "Casey's Q5 answer (PR #66 comment 6968763406, item 2), as PR #67 words it in lnk_01: a NeighborInfo pair resolves the relay byte \"when the gateway's own NeighborInfo reports in the same 24 hours list exactly one neighbour with that low byte, counted across all of those reports together\".",
+    "c49-g sent two NeighborInfo reports, both within 24 hours before every receipt: at 23 06:00 listing c49-n1 (byte 113) and c49-ra (114), and at 23 08:00 listing c49-n2 (113) and c49-ra (114). By radio c49-g heard only its own packets and c49-s (byte 80), the sender of the receipts, so no candidate has 113 or 114.",
+    "10:10, relay 113: the reports together list two neighbours with 113, c49-n1 and c49-n2, so NeighborInfo resolves nothing: dropped by lnk_01. Read one report at a time, each would resolve, to a different node.",
+    "10:20, relay 114: the reports together list one neighbour with 114, c49-ra, named in both; one node named twice is one neighbour. Relayer c49-ra, link_source neighbor_info.",
+    "c49-ra is stationary on c20 and c49-g on g16 (lnk_02); the 10:20 receipt passes lnk_05 at 2745.603 m and is counted. 1 packet in the 10:00 hour: dropped by lnk_04."
+  ],
+  "messages": [
+    {"delivery_key": "c49-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "c49-g", "origin_low_byte": 10, "gateway_pseudonym": "c49-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 49001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"delivery_key": "c49-m002", "received_at": "2026-10-22T09:05:00Z", "origin_pseudonym": "c49-ra", "origin_low_byte": 114, "gateway_pseudonym": "c49-ra", "gateway_low_byte": 114, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 49002, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"delivery_key": "c49-m003", "received_at": "2026-10-23T06:00:00Z", "origin_pseudonym": "c49-g", "origin_low_byte": 10, "gateway_pseudonym": "c49-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 49003, "relay_node": null, "portnum": 71, "neighbour_pseudonyms": ["c49-n1", "c49-ra"], "neighbour_low_bytes": [113, 114]},
+    {"delivery_key": "c49-m004", "received_at": "2026-10-23T08:00:00Z", "origin_pseudonym": "c49-g", "origin_low_byte": 10, "gateway_pseudonym": "c49-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 49004, "relay_node": null, "portnum": 71, "neighbour_pseudonyms": ["c49-n2", "c49-ra"], "neighbour_low_bytes": [113, 114]},
+    {"delivery_key": "c49-m005", "received_at": "2026-10-23T10:10:00Z", "origin_pseudonym": "c49-s", "origin_low_byte": 80, "gateway_pseudonym": "c49-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 49005, "relay_node": 113, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95},
+    {"delivery_key": "c49-m006", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "c49-s", "origin_low_byte": 80, "gateway_pseudonym": "c49-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 49006, "relay_node": 114, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95}
+  ],
+  "boxes": {
+    "c20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521},
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876}
+  },
+  "expected_receipts": [
+    {"delivery_key": "c49-m005", "outcome": "dropped", "rule": "lnk_01"},
+    {"delivery_key": "c49-m006", "outcome": "counted", "relayer": "c49-ra", "link_source": "neighbor_info", "relayer_box": "c20", "gateway_box": "g16", "distance_m": 2745.603337}
+  ],
+  "expected_link_hours": [
+    {"relayer": "c49-ra", "gateway": "c49-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["c49-m006"], "packets": 1, "outcome": "dropped", "rule": "lnk_04"}
+  ]
+}
