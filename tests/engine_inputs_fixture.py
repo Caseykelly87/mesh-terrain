@@ -6,7 +6,9 @@ x72y429 and quantised the way firmware quantises a reduced-precision position,
 and every row is written with the allowlist schema into a finished snapshot
 folder with its manifest, as a capture or the reduction would leave it.
 
-The links, relayer to gateway (positions in EPSG:26915 before quantisation):
+The links, relayer to gateway (positions in EPSG:26915 before quantisation),
+under the contract's link-hour rules on the merged snapshot
+(`ingester.link_rules`):
 
 - A to G1, both inside the tile, MeshSTL only, 2 link-hours. G1 sends at 20 bits
   on MeshSTL, so it is a precise source (`pos_04`). A also sends a Position at
@@ -20,34 +22,43 @@ The links, relayer to gateway (positions in EPSG:26915 before quantisation):
 - D to E, both east of the tile, public, 1 link-hour. With `busy_outside_pair`,
   6 link-hours, which makes it the busiest pair by link-hours though it does
   not touch the tile.
-- M to E, public, 1 link-hour; M sends two different boxes, so it is not
-  stationary and its link rests on the 30-minute rule.
+- M to E, public, 1 link-hour. M sends two boxes 1.7 km apart; at its first
+  receipt it has no position in the 7 days before and takes the first box by
+  the 30-minute fallback, and at the other two that box is its only one, so
+  the hour's counted receipts all use it and M is placed there.
 - F to G1, MeshSTL; F sends only 13-bit positions (coarse), so it never makes a
   pair.
 
-With `moved_g3`, G3 also sends a second box 2 km west of its own, inside the
-tile, as a MeshSTL row outside the MeshSTL run's window: the two boxes do not
-overlap, so G3 is not stationary over the capture, though it does not straddle
-the tile edge and the pairs stay as above.
+A second place (`second_place`): the node also sends a box shifted by the
+given metres on 25 October, and a link-hour that starts 10 minutes later with
+an invented partner (`PARTNERS`, 12 km east of that box, outside the tile)
+reads it by the 30-minute fallback, since the node's 7-day look-back then
+holds two places. The partner is the relayer when the node is a gateway and
+the gateway otherwise. The node then used a different box in each of two
+pairs: it straddles the tile edge when the two lie on both sides of it, and
+otherwise it is a node with more than one box. `straddler` gives one node of
+`STRADDLE_SHIFTS_M` its second place across the tile edge; `moved_a` gives A
+one 2 km east and `moved_g3` gives G3 one 2 km west, both inside the tile.
 
-With `straddler`, one node also sends a second box on the other side of the
-tile edge (`STRADDLE_SHIFTS_M`), as a MeshSTL row outside the MeshSTL run's
-window: neither spike run sees it, so the pairs and their link-hours stay as
-above, while the node's boxes over the capture lie on both sides of the edge.
+`contradicted_d` gives E a NeighborInfo report, before D's receipts, that
+names an invented node with D's low byte: each of D's direct hops to E is then
+dropped by `lnk_01` and counted (Casey, PR #66, Q4 (a)), so D to E is no pair.
 
-Three options exercise the amended `lnk_02` overlap rule (ADR 0003, Overlap
-amendment, 2026-11-17), each adding boxes that the rule of 2026-10-31 would
-refuse or count as straddling and the overlap rule places as before:
+`moved_in_pair` gives C to G3 a fourth link-hour, at 14:00 on 23 October,
+where G3 reads a box 2 km west by the fallback: the pair's counted receipts
+then used two boxes for G3, so the pair is dropped and reported (Casey, issue
+#44, 2026-11-17).
+
+Three options add boxes the rules read as one place, or do not read, so the
+layers stay as they are:
 
 - `nested_g1`: G1 also sends its position at 15 bits on the public broker, a
-  box holding its 20-bit MeshSTL box. G1 is in no public pair, so the spike's
-  per-run rules give the same pairs.
+  box holding its 20-bit MeshSTL box, the day before its receipts.
 - `nested_g3`: G3 also sends its position at 15 bits, a box holding its
-  18-bit box whose centre lies east of the tile edge, as a MeshSTL row outside
-  the MeshSTL run's window.
+  18-bit box whose centre lies east of the tile edge, before its receipts.
 - `ignored_a`: A also sends a 16-bit box outside the MSA
-  (`OUTSIDE_MSA_SHIFT_M`) and a coarse 13-bit box, as MeshSTL rows outside
-  the MeshSTL run's window.
+  (`OUTSIDE_MSA_SHIFT_M`) and a coarse 13-bit box before its receipts;
+  neither is read.
 """
 
 import hashlib
@@ -73,6 +84,7 @@ DEM_SNAPSHOT_ID = "dem-fixture-x72y429"
 DEM_BOUNDS_M = (719_994.0, 4_279_994.0, 730_006.0, 4_290_006.0)
 TELEMETRY_APP = 67
 POSITION_APP = 3
+NEIGHBORINFO_APP = 71
 _TO_DEGREES = Transformer.from_crs(26915, 4326, always_xy=True)
 _TO_METRES = Transformer.from_crs(4326, 26915, always_xy=True)
 
@@ -122,11 +134,10 @@ def box_centre_m(box: tuple[int, int, int]) -> tuple[float, float]:
 
 def every_box() -> list[tuple[int, int, int]]:
     """Every box the fixture can send: each node's own and every box an option adds."""
-    boxes = [node.box() for node in NODES.values()]
-    boxes += [NODES[name].box(*shift) for name, shift in STRADDLE_SHIFTS_M.items()]
+    boxes = [node.box() for node in (*NODES.values(), *PARTNERS.values())]
+    boxes += [NODES[key.split("_")[0]].box(*shift) for key, shift in SECOND_PLACES_M.items()]
     boxes += [NODES["G1"].box(bits=WIDE_BITS), NODES["G3"].box(bits=WIDE_BITS)]
     boxes += [NODES["A"].box(east_shift_m=OUTSIDE_MSA_SHIFT_M), NODES["A"].box(bits=COARSE_BITS)]
-    boxes.append(NODES["G3"].box(east_shift_m=G3_MOVED_SHIFT_M))
     return [*boxes, NODES["G3"].box(east_shift_m=G3_EDGE_SHIFT_M)]
 
 
@@ -163,8 +174,30 @@ STRADDLE_SHIFTS_M = {
 }
 # G3's box 45 m from the tile's east edge, as the fixture first placed it.
 G3_EDGE_SHIFT_M = 250.0
-# G3's second box with moved_g3: 2 km west, still inside the tile.
+# G3's second box with moved_g3 or moved_in_pair: 2 km west, still inside the tile.
 G3_MOVED_SHIFT_M = -2_000.0
+# A's second box with moved_a: 2 km east, still inside the tile.
+A_MOVED_SHIFT_M = 2_000.0
+# Every second place an option can add, by key: the node's name, then any suffix.
+SECOND_PLACES_M = {
+    **STRADDLE_SHIFTS_M,
+    "G3": (G3_MOVED_SHIFT_M, 0.0),
+    "A_moved": (A_MOVED_SHIFT_M, 0.0),
+}
+# The partner of a second place lies this far east of it, outside the tile.
+PARTNER_EAST_M = 12_000.0
+GATEWAYS = ("G1", "G2", "G3", "E")
+
+
+def _partner(key: str, low_byte: int) -> FakeNode:
+    node = NODES[key.split("_")[0]]
+    east_m, north_m = SECOND_PLACES_M[key]
+    return FakeNode(
+        f"P{key}", low_byte, node.easting_m + east_m + PARTNER_EAST_M, node.northing_m + north_m, 16
+    )
+
+
+PARTNERS = {key: _partner(key, 0x31 + index) for index, key in enumerate(SECOND_PLACES_M)}
 # The precision of the boxes nested_g1 and nested_g3 add: usable, and wide
 # enough that G3's 15-bit box centre lies east of the tile edge.
 WIDE_BITS = 15
@@ -211,10 +244,15 @@ class RowMaker:
         self.rows.append(row)
 
     def receipts(
-        self, sender: FakeNode, gateway: FakeNode, hour: datetime, flags: dict[str, bool]
+        self,
+        sender: FakeNode,
+        gateway: FakeNode,
+        hour: datetime,
+        flags: dict[str, bool],
+        minutes: tuple[int, ...] = (5, 20, 40),
     ) -> None:
         """Three direct-hop radio receipts in one clock hour: one link-hour."""
-        for minute in (5, 20, 40):
+        for minute in minutes:
             self._row(
                 sender,
                 gateway,
@@ -225,6 +263,20 @@ class RowMaker:
                 portnum=TELEMETRY_APP,
                 **flags,
             )
+
+    def neighbours(
+        self, sender: FakeNode, when: datetime, neighbours: list[FakeNode], flags: dict[str, bool]
+    ) -> None:
+        """A NeighborInfo packet the sender uplinks itself, listing the given neighbours."""
+        self._row(
+            sender,
+            sender,
+            when,
+            portnum=NEIGHBORINFO_APP,
+            neighbour_pseudonyms=[node.pseudonym for node in neighbours],
+            neighbour_low_bytes=[node.low_byte for node in neighbours],
+            **flags,
+        )
 
     def position(
         self,
@@ -249,7 +301,7 @@ class RowMaker:
         )
 
 
-def _positions(rows: RowMaker, moved_a: bool, one_coordinate: bool, g3_at_edge: bool) -> None:
+def _positions(rows: RowMaker, one_coordinate: bool, g3_at_edge: bool) -> None:
     n = NODES
     for when in (at(24, 1), at(24, 4)):
         rows.position(n["G1"], n["G1"], when, MESHSTL, n["G1"].box())
@@ -258,10 +310,8 @@ def _positions(rows: RowMaker, moved_a: bool, one_coordinate: bool, g3_at_edge: 
     rows.position(n["A"], n["G1"], at(24, 5), MESHSTL, (0, 0, 16))
     if one_coordinate:
         rows.position(n["A"], n["G1"], at(24, 6), MESHSTL, (None, n["A"].box()[1], 16))
-    if moved_a:
-        rows.position(n["A"], n["G2"], at(23, 9), PUBLIC, n["A"].box(east_shift_m=2_000))
     for name, gateway in (("G2", "G2"), ("B", "G2")):
-        rows.position(n[name], n[gateway], at(24, 1, 50), BOTH, n[name].box())
+        rows.position(n[name], n[gateway], at(23, 10, 50), BOTH, n[name].box())
     g3_shift_m = G3_EDGE_SHIFT_M if g3_at_edge else 0.0
     rows.position(n["G3"], n["G3"], at(23, 10), PUBLIC, n["G3"].box(east_shift_m=g3_shift_m))
     for name, gateway in (("C", "G3"), ("D", "E"), ("E", "E")):
@@ -286,21 +336,47 @@ def _links(rows: RowMaker, busy_outside_pair: bool) -> None:
     rows.receipts(n["M"], n["E"], at(23, 15), PUBLIC)
 
 
-def _overlap_options(
-    rows: RowMaker, nested_g1: bool, nested_g3: bool, ignored_a: bool, moved_g3: bool
-) -> None:
-    """Boxes the overlap rule places as before, or that make G3 move (module docstring)."""
+def _overlap_options(rows: RowMaker, nested_g1: bool, nested_g3: bool, ignored_a: bool) -> None:
+    """Boxes the rules read as one place or do not read (module docstring)."""
     n = NODES
-    if moved_g3:
-        rows.position(n["G3"], n["G3"], at(25, 1), MESHSTL, n["G3"].box(G3_MOVED_SHIFT_M))
     if nested_g1:
         rows.position(n["G1"], n["G1"], at(23, 9), PUBLIC, n["G1"].box(bits=WIDE_BITS))
     if nested_g3:
-        rows.position(n["G3"], n["G3"], at(25, 1), MESHSTL, n["G3"].box(bits=WIDE_BITS))
+        rows.position(n["G3"], n["G3"], at(23, 9), PUBLIC, n["G3"].box(bits=WIDE_BITS))
     if ignored_a:
         outside = n["A"].box(east_shift_m=OUTSIDE_MSA_SHIFT_M)
-        rows.position(n["A"], n["G1"], at(25, 1), MESHSTL, outside)
-        rows.position(n["A"], n["G1"], at(25, 2), MESHSTL, n["A"].box(bits=COARSE_BITS))
+        rows.position(n["A"], n["G1"], at(24, 0, 30), MESHSTL, outside)
+        rows.position(n["A"], n["G1"], at(24, 0, 40), MESHSTL, n["A"].box(bits=COARSE_BITS))
+
+
+SECOND_PLACE_MINUTES = (0, 10, 20)
+
+
+def second_place(rows: RowMaker, key: str) -> None:
+    """The node's box shifted by SECOND_PLACES_M[key], read by a link-hour with its partner.
+
+    The shifted box is sent at 01:50 on 25 October and the receipts follow at
+    02:00, 02:10 and 02:20, all within the 30-minute fallback; the node's
+    look-back then holds its own box too, so it is not stationary there.
+    """
+    node, partner = NODES[key.split("_")[0]], PARTNERS[key]
+    rows.position(partner, partner, at(25, 1), PUBLIC, partner.box())
+    rows.position(node, node, at(25, 1, 50), PUBLIC, node.box(*SECOND_PLACES_M[key]))
+    if node.name in GATEWAYS:
+        rows.receipts(partner, node, at(25, 2), PUBLIC, SECOND_PLACE_MINUTES)
+    else:
+        rows.receipts(node, partner, at(25, 2), PUBLIC, SECOND_PLACE_MINUTES)
+
+
+# An invented neighbour sharing D's low byte, never positioned and never heard.
+NEIGHBOUR_LIKE_D = FakeNode("N", 0x24, 0.0, 0.0, 16)
+
+
+def _moved_in_pair(rows: RowMaker) -> None:
+    """C to G3 at 14:00 on 23 October, with G3 on a box 2 km west (module docstring)."""
+    n = NODES
+    rows.position(n["G3"], n["G3"], at(23, 13, 50), PUBLIC, n["G3"].box(G3_MOVED_SHIFT_M))
+    rows.receipts(n["C"], n["G3"], at(23, 14), PUBLIC, SECOND_PLACE_MINUTES)
 
 
 def position_row(name: str, place: tuple[int, int, int], meshstl: bool = False) -> dict[str, Any]:
@@ -317,17 +393,12 @@ def position_row(name: str, place: tuple[int, int, int], meshstl: bool = False) 
     }
 
 
-def _straddle(rows: RowMaker, name: str) -> None:
-    """A second box across the tile edge, after the MeshSTL run's window closes."""
-    node = NODES[name]
-    east_m, north_m = STRADDLE_SHIFTS_M[name]
-    rows.position(node, node, at(25, 1), MESHSTL, node.box(east_m, north_m))
-
-
 def build_capture(
     root: Path,
     *,
     moved_a: bool = False,
+    moved_in_pair: bool = False,
+    contradicted_d: bool = False,
     one_coordinate: bool = True,
     g3_at_edge: bool = False,
     straddler: str | None = None,
@@ -341,27 +412,36 @@ def build_capture(
 
     Args:
         root: The snapshots folder.
-        moved_a: Also give A a second box on the public broker, outside the
-            MeshSTL window, 2 km east and still inside the tile, so A is
-            stationary in the MeshSTL run but not over the capture.
+        moved_a: Give A a second place 2 km east, inside the tile, in a
+            second pair (`second_place`).
+        moved_in_pair: Give C to G3 a link-hour where G3 uses a second box,
+            so the pair used two boxes for G3.
+        contradicted_d: Give E a NeighborInfo report naming another node
+            with D's low byte, so D's direct hops to E are dropped (Q4).
         one_coordinate: Include A's Position with no latitude.
         g3_at_edge: Place G3 45 m from the tile's east edge, where its box plus
             50 m reaches outside the DEM.
-        straddler: A key of STRADDLE_SHIFTS_M: that node also sends a box on
-            the other side of the tile edge.
+        straddler: A key of STRADDLE_SHIFTS_M: that node has a second place
+            on the other side of the tile edge, in a second pair.
         busy_outside_pair: Give D to E, which does not touch the tile, 5 more
             link-hours, so it is the busiest pair by link-hours.
         nested_g1: G1 also sends a 15-bit box holding its 20-bit box.
         nested_g3: G3 also sends a 15-bit box, centred east of the tile edge.
         ignored_a: A also sends a box outside the MSA and a coarse box.
-        moved_g3: G3 also sends a box 2 km west inside the tile, so it is
-            not stationary and does not straddle.
+        moved_g3: G3 has a second place 2 km west inside the tile, in a
+            second pair, so it used two boxes and does not straddle.
     """
     rows = RowMaker()
-    _positions(rows, moved_a, one_coordinate, g3_at_edge)
-    _overlap_options(rows, nested_g1, nested_g3, ignored_a, moved_g3)
-    if straddler is not None:
-        _straddle(rows, straddler)
+    _positions(rows, one_coordinate, g3_at_edge)
+    _overlap_options(rows, nested_g1, nested_g3, ignored_a)
+    places = [straddler] if straddler is not None else []
+    places += [key for key, wanted in (("A_moved", moved_a), ("G3", moved_g3)) if wanted]
+    for key in places:
+        second_place(rows, key)
+    if moved_in_pair:
+        _moved_in_pair(rows)
+    if contradicted_d:
+        rows.neighbours(NODES["E"], at(23, 10, 30), [NEIGHBOUR_LIKE_D], PUBLIC)
     _links(rows, busy_outside_pair)
     partial = common.start_snapshot(root, SNAPSHOT_ID)
     by_hour: dict[datetime, list[dict[str, Any]]] = {}
