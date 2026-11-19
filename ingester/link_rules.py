@@ -270,16 +270,50 @@ def read_position(row: Row, inside: InArea) -> Position | None:
     return Position(row["received_at"], Cell(latitude_i, longitude_i, bits), qualifies)
 
 
+def broadcast_key(row: Row) -> tuple[Any, ...]:
+    """What a broadcast's copies share: node, `packet_id` and stored values (ADR 0003).
+
+    A row with a null or zero `packet_id` is a position on its own.
+    """
+    if not row["packet_id"]:
+        return (row["delivery_key"],)
+    stored = (row["latitude_i"], row["longitude_i"], row["precision_bits"])
+    return (row["origin_pseudonym"], row["packet_id"], *stored)
+
+
+def read_broadcasts(rows: Iterable[Row], inside: InArea) -> dict[str, list[Position]]:
+    """Each node's positions, a broadcast's gateway copies read as one (ADR 0003).
+
+    Casey, issue #55 comment 6995037213, item 3: "A broadcast's gateway
+    copies count as one position, timed by the first copy, precise if any
+    copy qualifies."
+    """
+    broadcasts: dict[tuple[Any, ...], tuple[str, Position]] = {}
+    for row in rows:
+        position = read_position(row, inside)
+        if position is None:
+            continue
+        key = broadcast_key(row)
+        if key in broadcasts:
+            first = broadcasts[key][1]
+            position = Position(
+                min(first.received_at, position.received_at),
+                first.cell,
+                first.qualifies or position.qualifies,
+            )
+        broadcasts[key] = (row["origin_pseudonym"], position)
+    per_node: dict[str, list[Position]] = {}
+    for node, position in broadcasts.values():
+        per_node.setdefault(node, []).append(position)
+    return per_node
+
+
 def build_index(rows: Sequence[Row], inside: InArea) -> Index:
     """Positions per node, radio senders per (gateway, byte) and NeighborInfo per gateway."""
-    positions: dict[str, list[tuple[datetime, Position]]] = {}
     heard: dict[tuple[str, int], list[tuple[datetime, str]]] = {}
     neighbours: dict[str, list[tuple[datetime, tuple[tuple[str, int], ...]]]] = {}
     for row in rows:
         when, origin = row["received_at"], row["origin_pseudonym"]
-        position = read_position(row, inside)
-        if position is not None:
-            positions.setdefault(origin, []).append((when, position))
         sender_byte = low_byte(row["origin_low_byte"])
         if row["via_mqtt"] is False and origin and sender_byte is not None:
             heard.setdefault((row["gateway_pseudonym"], sender_byte), []).append((when, origin))
@@ -287,7 +321,10 @@ def build_index(rows: Sequence[Row], inside: InArea) -> Index:
         if report is not None:
             neighbours.setdefault(origin, []).append((when, report))
     return Index(
-        {node: Timeline(entries) for node, entries in positions.items()},
+        {
+            node: Timeline((position.received_at, position) for position in found)
+            for node, found in read_broadcasts(rows, inside).items()
+        },
         {key: Timeline(entries) for key, entries in heard.items()},
         {node: Timeline(entries) for node, entries in neighbours.items()},
     )
