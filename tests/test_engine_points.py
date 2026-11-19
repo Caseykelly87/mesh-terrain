@@ -138,3 +138,25 @@ def test_a_layer_records_the_point_schema_its_columns_use(tmp_path: Path) -> Non
 
     assert layer_schema_version(with_edges) == "1.1.0"
     assert layer_schema_version(square) == "1.0.0"
+
+
+@pytest.mark.parametrize(
+    "edges",
+    [
+        (EDGES[1], EDGES[0], EDGES[2], EDGES[3]),
+        (EDGES[0], EDGES[1], EDGES[2], None),
+        (899_999_000, 900_000_001, EDGES[2], EDGES[3]),
+    ],
+    ids=["order", "some null", "range"],
+)
+def test_a_bad_edge_row_is_refused_without_its_edges_in_the_message(
+    tmp_path: Path, edges: tuple[int | None, ...]
+) -> None:
+    path = write_edge_layer(tmp_path / "bad.parquet", [("node-a", TX_CELL.centre_xy_m, edges)])
+    with pytest.raises(ConfigError) as raised:
+        read_points(path, "rx_id")
+    message = str(raised.value)
+    assert "node-a" in message
+    for value in edges:
+        if value is not None:
+            assert str(value) not in message
