@@ -26,7 +26,10 @@ def test_every_expected_receipt_and_link_hour_is_in_a_seed() -> None:
     hours = sum(len(case["expected_link_hours"]) for case in cases)
     assert (len(seed_rows(RECEIPTS_SEED)), len(seed_rows(HOURS_SEED))) == (receipts, hours)
     assert len(read_cases(LINK_RULES_CASES)) == 51
-    assert [case["case_id"][:3] for case in cases[51:]] == [f"s{n:02d}" for n in range(5, 13)]
+    assert [case["case_id"][:3] for case in cases[51:]] == [
+        *(f"s{n:02d}" for n in range(5, 13)),
+        "s14",
+    ]
 
 
 def test_the_seeds_hold_the_two_one_box_drops_and_three_contradicted_direct_hops() -> None:
