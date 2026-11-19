@@ -16,7 +16,7 @@ from shapely.geometry import Point
 from test_terrain_edge_boxes import TX_CELL
 
 from engine.errors import ConfigError
-from engine.points import EDGE_COLUMNS, box_form, read_points
+from engine.points import EDGE_COLUMNS, box_form, layer_schema_version, read_points
 from terrain.draws import EdgeBox, EndpointBox
 
 INT64 = pa.int64()
@@ -124,3 +124,17 @@ def test_bad_edges_are_refused(
     )
     with pytest.raises(ConfigError, match=message):
         read_points(path, "rx_id")
+
+
+def test_a_layer_records_the_point_schema_its_columns_use(tmp_path: Path) -> None:
+    rows = [("grid", (725_400.0, 4_285_300.0), (None, None, None, None))]
+    with_edges = write_edge_layer(tmp_path / "edges.parquet", rows)
+    square = tmp_path / "square.parquet"
+    gpd.GeoDataFrame(
+        {"rx_id": ["a"], "box_half_width_m": [5.0]},
+        geometry=[Point(725_400.0, 4_285_300.0)],
+        crs="EPSG:26915",
+    ).to_parquet(square, index=False)
+
+    assert layer_schema_version(with_edges) == "1.1.0"
+    assert layer_schema_version(square) == "1.0.0"
