@@ -66,15 +66,34 @@ models:
           The gateway's signal-to-noise ratio for the packet in dB, as raw holds
           it, except that a value the radio chips cannot report lands as null:
           NaN, or outside -32 to 31.75 dB inclusive (lnk_06; Casey, PR #72,
-          Q2). The datasheet sections behind the limits are not cited yet
-          (docs/STATUS.md, Known issues).
+          Q2). Both chip families report packet SNR as one signed byte in
+          quarter decibels, so -128 / 4 to 127 / 4. SX1261/2 Data Sheet Rev
+          2.2 (Dec 2024), section 13.5.3 GetPacketStatus, Table 13-79 (SnrPkt
+          is one byte) and Table 13-80 Status Fields ("two's compliment format
+          multiplied by 4", "Actual SNR in dB = SnrPkt/4"). SX1276/77/78/79
+          Data Sheet Rev. 7 (May 2020), section 6.4 LoRa Mode Register Map,
+          page 111, RegPktSnrValue (0x19), bits 7-0 ("In two's compliment
+          format mutiplied by 4"). lnk_06 decides which receipts count:
+          [-30, 20] dB in fct_rx_observation.
       - name: rx_rssi
         description: >
           The gateway's received signal strength in dBm, as raw holds it (raw
-          lands 0 as null), except that a value outside -189 to +98 dBm
+          lands 0 as null), except that a value outside -196 to +115 dBm
           inclusive, the range the radio chips can report, lands as null
-          (lnk_06; Casey, PR #72, Q2). The datasheet sections behind the
-          limits are not cited yet (docs/STATUS.md, Known issues).
+          (lnk_06; Casey, PR #72, RSSI answer (b)). SX1261/2 Data Sheet Rev
+          2.2 (Dec 2024), section 13.5.3 GetPacketStatus, Table 13-79 (RssiPkt
+          is one byte) and Table 13-80 Status Fields ("Actual signal power is
+          -RssiPkt/2 (dBm)"), so -127.5 to 0 dBm. SX1276/77/78/79 Data Sheet
+          Rev. 7 (May 2020), section 6.4 LoRa Mode Register Map, page 111,
+          RegPktRssiValue (0x1A), bits 7-0 ("-157 + Rssi" on the HF port,
+          "-164 + Rssi" on the LF port), and section 3.5.5 RSSI and SNR in
+          LoRa Mode, page 87, which adds "PacketSnr * 0.25" when SNR < 0 and
+          gives the slope correction "-157+16/15 * PacketRssi". The low edge is
+          -164 + 0 - 32 = -196 (LF port, SNR -32 dB), the high edge
+          -157 + 16/15 x 255 = +115 (HF port, slope correction). The same
+          section notes that the constants "may vary with the front-end
+          setup". lnk_06 decides which receipts count: [-150, 0) dBm in
+          fct_rx_observation.
       - name: channel
         description: The packet's channel hash.
       - name: portnum
