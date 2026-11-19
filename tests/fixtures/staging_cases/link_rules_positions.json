@@ -210,6 +210,11 @@
     ["c55-m009", "usable", false, false, true, true],
     ["c55-m010", "usable", false, false, true, true],
     ["c55-m011", "usable", false, true, true, true],
-    ["c55-m012", "usable", false, false, true, true]
+    ["c55-m012", "usable", false, false, true, true],
+    ["c56-m001", "usable", false, false, true, true],
+    ["c56-m002", "usable", false, false, true, true],
+    ["c56-m003", "usable", false, false, true, true],
+    ["c56-m004", "usable", false, false, true, true],
+    ["c56-m005", "usable", false, false, true, true]
   ]
 }
