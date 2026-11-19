@@ -35,7 +35,7 @@ from engine_fixture import (
 from shapely.geometry import Point
 
 import engine.run
-from engine import MANIFEST_VERSION, SCHEMA_VERSION
+from engine import ENGINE_VERSION, INPUT_SCHEMA_VERSION, MANIFEST_VERSION, SCHEMA_VERSION
 from engine.errors import ConfigError
 from engine.run import run_engine
 from terrain.baselines import fspl_db
@@ -204,8 +204,9 @@ def test_the_manifest_records_versions_seed_snapshots_inputs_and_code(
     two_runs: tuple[Path, Path],
 ) -> None:
     manifest = manifest_of(two_runs[0])
-    assert manifest["manifest_version"] == MANIFEST_VERSION == "1.1.0"
+    assert manifest["manifest_version"] == MANIFEST_VERSION == "1.2.0"
     assert manifest["schema_version"] == SCHEMA_VERSION == "1.2.0"
+    assert manifest["engine_version"] == ENGINE_VERSION == "0.2.0"
     assert manifest["run_id"] == "fixture"
     assert manifest["seed"] == 20261108
     assert set(manifest["models"]) == {"fspl", "knife_edge", "hata", "p1812"}
@@ -219,6 +220,13 @@ def test_the_manifest_records_versions_seed_snapshots_inputs_and_code(
     names = {Path(path).name for path in inputs}
     assert {"two_sites.parquet", "receivers_500.parquet", "observations.parquet"} <= names
     assert {"profiles/site_gateway.yaml", "profiles/mesh_node.yaml"} <= inputs
+    # Manifest 1.2.0 (ADR 0008, Casey's Q2 (b)): each point layer's schema and box form.
+    layers = {Path(i["path"]).name: i for i in manifest["inputs"] if "box_form" in i}
+    assert set(layers) == {"two_sites.parquet", "receivers_500.parquet"}
+    assert layers["two_sites.parquet"]["box_form"] == "point"
+    assert layers["receivers_500.parquet"]["box_form"] == "square"
+    assert {i["input_schema_version"] for i in layers.values()} == {INPUT_SCHEMA_VERSION}
+    assert INPUT_SCHEMA_VERSION == "1.1.0"
     assert re.fullmatch(r"[0-9a-f]{40}", manifest["engine_git_commit"])
     assert isinstance(manifest["engine_git_dirty"], bool)
     assert manifest["py1812_commit"] == "6c9061dd022e93c84169059a016643926ce89964"
@@ -926,3 +934,46 @@ def test_a_coverage_cell_at_a_receiver_holds_that_receivers_median(tmp_path: Pat
 
 # The import above activates the autouse fixture for this module.
 _ = no_logger_caching
+
+
+# ADR 0008: receivers whose boxes are given by their lnk_02 edges.
+
+
+def edge_receivers(folder: Path) -> Path:
+    """Two made-up 20-bit cells inside the fixture sub-tile, as a GeoParquet layer."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from engine.points import EDGE_COLUMNS
+    from test_terrain_edge_boxes import cell_box
+
+    cells = [cell_box(725_400.0, 4_285_300.0, bits=20), cell_box(725_700.0, 4_285_800.0, bits=20)]
+    layer = gpd.GeoDataFrame(
+        {"rx_id": ["cell-0", "cell-1"]},
+        geometry=[Point(*cell.centre_xy_m) for cell in cells],
+        crs="EPSG:26915",
+    )
+    path = folder / "edge_receivers.parquet"
+    layer.to_parquet(path, index=False)
+    table = pq.read_table(path)
+    for name in EDGE_COLUMNS:
+        values = [getattr(cell, name.removeprefix("box_")) for cell in cells]
+        table = table.append_column(name, pa.array(values, type=pa.int64()))
+    pq.write_table(table, path)
+    return path
+
+
+def test_an_edge_box_run_reproduces_and_records_rectangles(tmp_path: Path) -> None:
+    receivers = edge_receivers(tmp_path)
+    runs = []
+    for name in ("first", "second"):
+        folder = tmp_path / name
+        folder.mkdir()
+        config = small_config(folder, rx_points=str(receivers), run_id=f"edges-{name}")
+        runs.append(run_engine(config, fixture_settings()))
+
+    assert content_hashes(runs[0]) == content_hashes(runs[1])
+    layers = {Path(i["path"]).name: i for i in manifest_of(runs[0])["inputs"] if "box_form" in i}
+    assert layers["edge_receivers.parquet"]["box_form"] == "rectangle"
+    rows = gpd.read_parquet(runs[0] / "predictions.parquet")
+    assert (rows["endpoint_draws"] == fixture_fields()["endpoint_draws"]).all()

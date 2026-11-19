@@ -643,3 +643,64 @@ def test_a_move_never_replaces_a_file_that_appeared_meanwhile(tmp_path: Path) ->
         command.move_into_place(source, target)
     assert target.read_text(encoding="utf-8") == "appeared\n"
     assert source.read_text(encoding="utf-8") == "new\n"
+
+
+# ADR 0008: real layers whose boxes are their lnk_02 edges.
+
+
+def write_edge_inputs(folder: Path) -> Path:
+    """The same made-up nodes, each as the 16-bit cell holding it, edges and centre."""
+    import pyarrow as pa
+
+    from engine.points import EDGE_COLUMNS
+    from test_terrain_edge_boxes import cell_box
+
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, id_column, rows, roles in (
+        ("tx_sites_real.parquet", "site_id", SITES, [s[4] for s in SITES]),
+        ("rx_real.parquet", "rx_id", [RX_ROW], None),
+    ):
+        cells = [cell_box(row[1], row[2]) for row in rows]
+        layer = gpd.GeoDataFrame(
+            {id_column: [row[0] for row in rows]},
+            geometry=[Point(*cell.centre_xy_m) for cell in cells],
+            crs="EPSG:26915",
+        )
+        layer.to_parquet(folder / name)
+        table = pq.read_table(folder / name)
+        for column in EDGE_COLUMNS:
+            values = [getattr(cell, column.removeprefix("box_")) for cell in cells]
+            table = table.append_column(column, pa.array(values, type=pa.int64()))
+        if roles is not None:
+            table = table.append_column("role", pa.array(roles))
+        pq.write_table(table, folder / name)
+    return folder
+
+
+@pytest.mark.usefixtures("env")
+def test_edge_layers_are_carried_into_the_run_layers(tmp_path: Path) -> None:
+    from engine.points import EDGE_COLUMNS
+    from terrain.draws import EdgeBox, EndpointBox
+    from test_terrain_edge_boxes import cell_box
+
+    folder = write_edge_inputs(tmp_path / "x72y429")
+    assert run(folder) == 0
+
+    receivers = gpd.read_parquet(folder / "rx_points.parquet")
+    assert list(receivers.columns) == ["rx_id", "geometry", *EDGE_COLUMNS]
+    assert len(receivers) == 401
+    assert str(pq.read_schema(folder / "rx_points.parquet").field("box_south_i").type) == "int64"
+    endpoints = read_points(folder / "rx_points.parquet", "rx_id")
+    assert endpoints[0].box == cell_box(RX_ROW[1], RX_ROW[2])
+    assert all(isinstance(e.box, EndpointBox) and not e.box.has_area for e in endpoints[1:])
+
+    sites = read_points(folder / "tx_sites.parquet", "site_id")
+    assert list(gpd.read_parquet(folder / "tx_sites.parquet").columns) == [
+        "site_id",
+        "geometry",
+        *EDGE_COLUMNS,
+    ]
+    assert [s.endpoint_id for s in sites] == [SITE_A, SITE_B]
+    assert all(isinstance(s.box, EdgeBox) for s in sites)
+    crossing = (folder / "crossing.md").read_text(encoding="utf-8")
+    assert "box reach" in crossing

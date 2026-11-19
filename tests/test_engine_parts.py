@@ -386,3 +386,29 @@ def test_py1812_missing_from_the_environment_is_a_refusal(monkeypatch: pytest.Mo
 
 # The import above activates the autouse fixture for this module.
 _ = no_logger_caching
+
+
+# ADR 0008: a box given by its lnk_02 edges.
+
+
+def test_run_grid_covers_every_corner_of_an_edge_box_plus_the_margin() -> None:
+    from test_terrain_edge_boxes import TX_CELL
+
+    grid = run_grid([Endpoint(endpoint_id="cell", box=TX_CELL)], 1.0)
+    west, south, east, north = TX_CELL.extent_m
+
+    assert grid.west_m <= west - 50.0 < grid.west_m + 10.0
+    assert grid.south_m <= south - 50.0 < grid.south_m + 10.0
+    assert grid.east_m - 10.0 < east + 50.0 <= grid.east_m
+    assert grid.north_m - 10.0 < north + 50.0 <= grid.north_m
+    assert all(
+        edge % 10.0 == 0.0 for edge in (grid.west_m, grid.south_m, grid.east_m, grid.north_m)
+    )
+
+
+def test_an_edge_box_takes_the_configured_number_of_draws() -> None:
+    from test_terrain_edge_boxes import TX_CELL
+
+    point = EndpointBox(centre_xy_m=(725_500.0, 4_285_000.0), half_width_m=0.0)
+    assert draws_for(TX_CELL, point, 16) == 16
+    assert draws_for(point, TX_CELL, 16) == 16
