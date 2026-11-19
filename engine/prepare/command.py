@@ -14,7 +14,9 @@ It reads the two real layers another step wrote into the folder
    `tx_sites.parquet` (the sites in the run), `crossing.md` and
    `<tile>.yaml` into a new temporary folder inside the folder, stamps the
    two point layers with the positions marker (`real` unless every input
-   row is marked `synthetic`; `engine.positions_marker`), checks the
+   row is marked `synthetic`; `engine.positions_marker`), writes
+   `prepared.json` with the two layers' sha256 (`engine.prepared`; the
+   engine admits a real layer only beside it), checks the
    config with the engine's own `load_config`, then moves each file to its
    name, and prints `crossing.md`.
 
@@ -72,6 +74,7 @@ from engine.prepare.run_config import (
     config_text,
 )
 from engine.prepare.tile import Tile, grid_receivers, parse_tile
+from engine.prepared import STAMP_FILE, write_prepared_stamp
 from engine.run import SITE_ID
 from engine.settings import EngineSettings
 from engine.snapshots import NamedSnapshot, resolve_snapshots
@@ -199,7 +202,7 @@ def _check_grid_only(tile: Tile, real_receivers: bool) -> None:
 
 
 def _outputs(folder: Path, tile: Tile) -> list[Path]:
-    names = (RECEIVERS_FILE, SITES_FILE, CROSSING_FILE, config_name(tile.name))
+    names = (RECEIVERS_FILE, SITES_FILE, CROSSING_FILE, STAMP_FILE, config_name(tile.name))
     return [folder / name for name in names]
 
 
@@ -438,7 +441,7 @@ def _write_outputs(
     summary: str,
     markers: dict[str, str],
 ) -> None:
-    """Write the four outputs in a temporary folder, check the config, then move them in."""
+    """Write the five outputs in a temporary folder, check the config, then move them in."""
     started = time.monotonic()
     log.info("prepare_write_begin", tile=tile.name, folder=str(folder))
     staging = Path(tempfile.mkdtemp(prefix=".prepare-", dir=folder))
@@ -496,6 +499,8 @@ def _write_staged(
     _layer("site_id", sites).to_parquet(staging / SITES_FILE, index=False)
     for name, marker in markers.items():
         stamp_positions(staging / name, marker)
+    # After the markers, so the stamp holds the layers' final bytes.
+    write_prepared_stamp(staging, [RECEIVERS_FILE, SITES_FILE], tile.name)
     with (staging / CROSSING_FILE).open("x", encoding="utf-8", newline="\n") as handle:
         handle.write(summary)
     config = staging / config_name(tile.name)
@@ -507,4 +512,4 @@ def _write_staged(
         # Every check above passed, so a config the engine refuses is a bug here,
         # a failure (exit 1) rather than a refusal of the caller's input.
         raise RuntimeError(f"the written config fails the engine's check: {err}") from err
-    return [RECEIVERS_FILE, SITES_FILE, CROSSING_FILE, config.name]
+    return [RECEIVERS_FILE, SITES_FILE, CROSSING_FILE, STAMP_FILE, config.name]
