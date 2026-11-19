@@ -11,6 +11,7 @@ Pure functions for terrain profiles, line of sight, Fresnel clearance, diffracti
 | `baselines.py` | `fspl_db`, `hata_db`, and `hata_variant` (urban at a mean building share of 0.20, ADR 0006 decision 7.1) |
 | `clutter.py` | `clutter_height_m`, the per-pixel clutter rule of ADR 0006 item 6 (a) with the canopy fill of item 11 (i); `dsm_filled_mask`; `require_complete_clutter` |
 | `cells.py` | `FineLayers` (the open 1 m DEM, DSM and canopy on one grid) and `cell_profile`, P.1812's 10 m profile from fixed 10 by 10 pixel cells (items 7 to 9) |
+| `boxes.py` | `EndpointBox`, a square on the EPSG:26915 grid, and `EdgeBox`, the `lnk_02` box by its edges in 1e-7 degrees; each places drawn points, and `GEOGRAPHIC_TO_UTM` is the one conversion (ADR 0008) |
 | `draws.py` | `sample_link`, the endpoint sampler: N draws per link-hour, seeded by `draw_seed`, profiles from `MetroProfileBuilder` or `FineProfileBuilder`, models through a function the caller passes in, medians, interquartile ranges, shares, refusal counts and building draw counts |
 | `errors.py` | `OutOfExtentError` and `RefusedDrawError`, neither a `ValueError` (ADR 0006 item 11); `ZeroLengthPathError`, a `ValueError` subclass and the one error the feature asset catches, for a path whose endpoints are exactly 0 m apart |
 | `result.py` | `PathLossResult`, what every model returns for one draw: the loss in dB plus diagnostics only some models fill, Lbs for P.1812 and the warning flags for ITM (ADR 0006 item 10 (a)) |
@@ -49,6 +50,8 @@ A worked example (ADR 0006 item 6): a cell half covered by a roof 8 m above the 
 ## Endpoint draws
 
 `sample_link` places both endpoints at random inside their position boxes 16 times per link-hour (a draw each time), seeded from the run seed and the link id so a rerun gives the same draws, builds the profiles, runs the models through the function the caller passes in, and keeps the median and interquartile range of every number and the share of draws for every yes or no result. A refused draw is dropped for every model and counted under its reason; with every draw refused, every median is null. With one draw the endpoints are the box centres.
+
+A box is a square on the EPSG:26915 grid or the `lnk_02` box itself, a rectangle in latitude and longitude (ADR 0008). A 16-bit cell at tile x72y429 is 727.5 m north to south and 570.2 m east to west, and on the UTM grid it is turned by about 1.6 degrees, true north lying west of grid north. The sampler draws a point evenly between the cell's edges in latitude and longitude and converts it with pyproj, so every draw lands inside the cell and the turn comes from the conversion; that one interpolation between a box's own edges is the exception to computing in EPSG:26915 that Casey granted on PR #73. A square draws the same numbers it always has.
 
 Run: the functions are imported by the engine and the feature asset; `uv run pytest tests/test_terrain_*.py tests/test_path_loss.py tests/test_itm.py tests/test_p1812.py tests/test_p1812_cap.py` exercises them on synthetic DEMs written per test. The ITM tests that call libitm.so skip outside the Dagster image.
 
