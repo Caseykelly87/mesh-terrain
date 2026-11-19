@@ -1005,16 +1005,17 @@ def test_an_edge_box_run_reproduces_and_records_rectangles(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize("marker", [None, REAL], ids=["unmarked", "real without prepare"])
+@pytest.mark.parametrize(("field", "id_column"), [("tx_sites", "site_id"), ("rx_points", "rx_id")])
 def test_a_layer_engine_prepare_did_not_write_is_refused_before_any_write(
-    tmp_path: Path, marker: str | None
+    tmp_path: Path, marker: str | None, field: str, id_column: str
 ) -> None:
     path = tmp_path / "hand_built.parquet"
     gpd.GeoDataFrame(
-        {"rx_id": ["a"]}, geometry=[Point(725_400.0, 4_285_300.0)], crs="EPSG:26915"
+        {id_column: ["a"]}, geometry=[Point(725_400.0, 4_285_300.0)], crs="EPSG:26915"
     ).to_parquet(path, index=False)
     if marker is not None:
         stamp_positions(path, marker)
 
     with pytest.raises(ConfigError, match="hand_built.parquet"):
-        run_engine(small_config(tmp_path, rx_points=str(path)), fixture_settings())
+        run_engine(small_config(tmp_path, **{field: str(path)}), fixture_settings())
     assert not (tmp_path / "out").exists()

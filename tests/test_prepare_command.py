@@ -710,18 +710,23 @@ def test_edge_layers_are_carried_into_the_run_layers(tmp_path: Path) -> None:
 
 
 @pytest.mark.usefixtures("env")
+@pytest.mark.parametrize(
+    ("layer_name", "row"),
+    [("tx_sites_real.parquet", 1), ("rx_real.parquet", 0)],
+    ids=["a site", "the receiver, before the grid is added"],
+)
 def test_a_real_edge_layer_with_a_row_without_edges_is_refused_and_nothing_written(
-    tmp_path: Path,
+    tmp_path: Path, layer_name: str, row: int
 ) -> None:
     # Casey, PR #73: a layer mixing rows with edges and rows without is refused.
     import pyarrow as pa
 
     folder = write_edge_inputs(tmp_path / "x72y429")
-    path = folder / "tx_sites_real.parquet"
+    path = folder / layer_name
     table = pq.read_table(path)
     for name in ("box_south_i", "box_north_i", "box_west_i", "box_east_i"):
         values = table.column(name).to_pylist()
-        values[1] = None
+        values[row] = None
         table = table.set_column(
             table.schema.get_field_index(name), name, pa.array(values, pa.int64())
         )

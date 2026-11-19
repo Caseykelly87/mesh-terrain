@@ -110,3 +110,12 @@ def test_a_marker_other_than_real_or_synthetic_is_refused(tmp_path: Path) -> Non
 
     with pytest.raises(ConfigError, match="maybe"):
         require_admissible_layer(path)
+
+
+def test_a_stamp_another_writer_wrote_is_refused(tmp_path: Path) -> None:
+    receivers = layer(tmp_path / "rx_points.parquet", REAL)
+    stamp = {"written_by": "other", "layers": {receivers.name: sha256_file(receivers)}}
+    (tmp_path / STAMP_FILE).write_text(json.dumps(stamp), encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="not written by engine.prepare"):
+        require_admissible_layer(receivers)
