@@ -42,10 +42,11 @@ SCHEMA_PREFIX = "test_load_"
 THROWAWAY_PATTERN = re.compile(rf"{SCHEMA_PREFIX}[0-9a-f]{{12}}")
 REAL_SCHEMAS = ("raw", "raw_dev_wh", "raw_dev_ta")
 
-# What tests/conftest.py puts in WAREHOUSE_USER and WAREHOUSE_PASSWORD when no
-# test role is configured, so the server refuses the login, and the test fails,
-# instead of falling back to the owner. The password is not empty because libpq
-# treats an empty one as none and stops before the server can refuse.
+# The placeholders tests/conftest.py puts in the environment for every session,
+# and the login connect_or_skip uses when no test role is configured, so the
+# server refuses it, and the test fails, instead of falling back to the owner.
+# The password is not empty because libpq treats an empty one as none and stops
+# before the server can refuse.
 UNCONFIGURED_ROLE = "test_role_not_configured"
 UNCONFIGURED_PASSWORD = "test-role-not-configured"
 # SQLSTATE invalid_password and invalid_authorization_specification.
@@ -97,10 +98,11 @@ def session_credentials(role: RoleForTests | None) -> tuple[str, str]:
     return role.user, role.password
 
 
-# The configured test role, held only here: tests/conftest.py sets it once and
-# puts placeholders in the environment, so a test that copies os.environ holds
-# no test role value (Casey, issue #55 comment 7017280290, item 2). Only the
-# modules whose dbt runs connect put the values in the environment, through
+# The configured test role. tests/conftest.py sets it once, gives the same two
+# values to tests/report_redaction.py for scrubbing, and puts placeholders in
+# the environment, so a test that copies os.environ holds no test role value
+# (Casey, issue #55 comment 7017280290, item 2). Only the modules in conftest's
+# ROLE_IN_ENVIRONMENT get the values in the environment, through
 # role_environment, while they run.
 _role: list[RoleForTests] = []
 ROLE_VARIABLES = ("WAREHOUSE_USER", "WAREHOUSE_PASSWORD")

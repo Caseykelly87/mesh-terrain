@@ -183,7 +183,7 @@ def test_a_text_report_and_its_sections_lose_both_values(monkeypatch: pytest.Mon
     scrubbed = report("x role_a y secret_b", [("Captured stdout", "secret_b and role_a")])
     report_redaction.scrub(scrubbed)
     placeholder = report_redaction.PLACEHOLDER
-    assert scrubbed.longrepr == f"x {placeholder} y {placeholder}"
+    assert str(scrubbed.longrepr) == f"x {placeholder} y {placeholder}"
     assert scrubbed.sections == [("Captured stdout", f"{placeholder} and {placeholder}")]
 
 
