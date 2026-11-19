@@ -23,7 +23,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import psycopg
 import pytest
 import yaml
 from dbt_listing import (
@@ -34,8 +33,7 @@ from dbt_listing import (
     dbt_nodes,
     dbt_result,
 )
-
-from pipeline.common.settings import get_settings
+from raw_schema import connect_or_skip
 
 # Track A's development target; DEVELOPMENT_TARGET (dev_wh) is Track B's.
 TRACK_A_TARGET = "dev_ta"
@@ -45,8 +43,11 @@ CREATED_SCHEMA = re.compile(r'create schema if not exists "([^"]+)"', re.IGNOREC
 REAL_SCHEMAS = {"raw", "staging", "core", "analytics"}
 REAL_BUILD_FLAG = "{real_build: true}"
 SQL_FOLDERS = ("models", "tests", "snapshots", "macros", "analyses")
-# Never the real values: a dry run needs only that the two are set.
+# Never the real values: a dry run needs only that the two are set. Under
+# tests/conftest.py, WAREHOUSE_USER and WAREHOUSE_PASSWORD hold the test
+# role's values too, and a dry run needs neither, so all four are dropped.
 INVENTED_TEST_ROLE = {"WAREHOUSE_TEST_USER": "invented", "WAREHOUSE_TEST_PASSWORD": "invented"}
+TEST_ROLE_VALUES = (*INVENTED_TEST_ROLE, "WAREHOUSE_USER", "WAREHOUSE_PASSWORD")
 JINJA = re.compile(r"\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}", re.DOTALL)
 SQL_COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
 SCHEMA_REFERENCE = re.compile(
@@ -76,33 +77,28 @@ def sources(nodes: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
 
 @pytest.fixture
 def warehouse() -> None:
-    """Skip when no warehouse answers: dbt run-operation opens a connection first."""
-    settings = get_settings()
-    try:
-        psycopg.connect(
-            host=settings.warehouse_host,
-            port=settings.warehouse_port,
-            user=settings.warehouse_user,
-            password=settings.warehouse_password.get_secret_value(),
-            dbname=settings.warehouse_db,
-            connect_timeout=3,
-        ).close()
-    except psycopg.OperationalError as err:
-        pytest.skip(f"no local warehouse ({err.__class__.__name__}); run make up")
+    """Skip when no warehouse answers: dbt run-operation opens a connection first.
+
+    Through connect_or_skip, as every other warehouse test connects, so a
+    warehouse that refuses the test role's login fails the test.
+    """
+    with connect_or_skip():
+        pass
 
 
-def schema_hook(target: str, *extra: str, environment: dict[str, str] | None = None) -> str:
+def schema_hook(target: str, *extra: str) -> str:
     """Run the on-run-start macro alone and return dbt's output; '' means it ran.
 
     run-operation renders the macro, raising its refusal, and runs none of the
     SQL it returns, so this writes nothing on any target. It reads no schema.
+    dbt inherits the test's environment; a test that changes a variable sets
+    it with monkeypatch, so no copy of the environment, which holds the test
+    role's values, sits in a local or an assert.
     """
     target_arguments = ["--target", target] if target else []
     with tempfile.TemporaryDirectory() as work:
         result = dbt_result(
-            ["run-operation", "create_target_schemas", *target_arguments, *extra],
-            Path(work),
-            environment,
+            ["run-operation", "create_target_schemas", *target_arguments, *extra], Path(work)
         )
     return "" if result.returncode == 0 else result.stdout + result.stderr
 
@@ -150,7 +146,11 @@ def make_dry_run(
     if make is None:
         pytest.skip("make is not installed")
     passed_down = {"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "DBT_DEV_TARGET"}
-    environment = {name: value for name, value in os.environ.items() if name not in passed_down}
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in passed_down and name not in TEST_ROLE_VALUES
+    }
     environment.update(INVENTED_TEST_ROLE)
     if dbt_dev_target is not None:
         environment["DBT_DEV_TARGET"] = dbt_dev_target
@@ -276,9 +276,11 @@ def test_the_real_target_refuses_to_run_without_the_real_build_flag() -> None:
 
 
 @pytest.mark.usefixtures("warehouse")
-def test_dbt_target_in_the_environment_cannot_start_a_real_build() -> None:
-    environment = {**os.environ, "DBT_TARGET": REAL_TARGET}
-    assert "make dbt-build-real" in schema_hook("", environment=environment)
+def test_dbt_target_in_the_environment_cannot_start_a_real_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DBT_TARGET", REAL_TARGET)
+    assert "make dbt-build-real" in schema_hook("")
 
 
 @pytest.mark.usefixtures("warehouse")
