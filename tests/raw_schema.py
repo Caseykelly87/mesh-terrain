@@ -40,9 +40,22 @@ SCHEMA_PREFIX = "test_load_"
 THROWAWAY_PATTERN = re.compile(rf"{SCHEMA_PREFIX}[0-9a-f]{{12}}")
 REAL_SCHEMAS = ("raw", "raw_dev_wh", "raw_dev_ta")
 
-# What tests/conftest.py puts in WAREHOUSE_USER when no test role is configured,
-# so a login is refused, and the test fails, instead of falling back to the owner.
+# What tests/conftest.py puts in WAREHOUSE_USER and WAREHOUSE_PASSWORD when no
+# test role is configured, so the server refuses the login, and the test fails,
+# instead of falling back to the owner. The password is not empty because libpq
+# treats an empty one as none and stops before the server can refuse.
 UNCONFIGURED_ROLE = "test_role_not_configured"
+UNCONFIGURED_PASSWORD = "test-role-not-configured"
+# SQLSTATE invalid_password and invalid_authorization_specification.
+AUTHENTICATION_SQLSTATES = frozenset({"28P01", "28000"})
+# The server's own messages for those two codes, for the errors psycopg raises
+# without a SQLSTATE, as it does for every failed connection: libpq gives it no
+# server result there. They are English, as this image's server writes them.
+AUTHENTICATION_MESSAGES = (
+    "FATAL:  password authentication failed",
+    "FATAL:  role ",
+    "FATAL:  no pg_hba.conf entry",
+)
 
 
 class RoleForTests(NamedTuple):
@@ -75,14 +88,23 @@ class ThrowawayRaw(NamedTuple):
     schema: str
 
 
-def server_refused_login(err: psycopg.OperationalError) -> bool:
+def session_credentials(role: RoleForTests | None) -> tuple[str, str]:
+    """The user and password the tests log in with: the test role, or one the server refuses."""
+    if role is None:
+        return UNCONFIGURED_ROLE, UNCONFIGURED_PASSWORD
+    return role.user, role.password
+
+
+def server_refused_login(err: psycopg.Error) -> bool:
     """Whether the server answered and refused the login, rather than not answering.
 
-    libpq puts the server's own message, which starts with its severity,
-    after the connection details; a server that does not answer leaves only
-    the client's error.
+    A server that is still starting up, or that does not answer, is not a
+    refusal: the test skips, as where no warehouse runs.
     """
-    return "FATAL:" in str(err)
+    if err.sqlstate is not None:
+        return err.sqlstate in AUTHENTICATION_SQLSTATES
+    text = str(err)
+    return any(message in text for message in AUTHENTICATION_MESSAGES)
 
 
 def connect_or_skip() -> psycopg.Connection:

@@ -10,15 +10,16 @@ is made as the test role, which cannot write `raw`, `raw_dev_wh` or
 `docker/warehouse/test-role.sql`). WAREHOUSE_USER and WAREHOUSE_PASSWORD are
 replaced in the environment before any test module is imported, so settings
 built later, and dbt's profile in a subprocess, see only the test role. With
-no test role configured they name a role that does not exist, so no test
-connects as the owner: where a warehouse answers, it refuses that login and
-each warehouse test fails, saying what to set (`tests/raw_schema.py`).
+no test role configured they name a role that does not exist, with a
+placeholder password, so no test connects as the owner: where a warehouse
+answers, it refuses that login and each warehouse test fails, saying what to
+set (`tests/raw_schema.py`).
 """
 
 from collections.abc import Iterator
 
 import pytest
-from raw_schema import UNCONFIGURED_ROLE, role_for_tests
+from raw_schema import role_for_tests, session_credentials
 
 from ingester.settings import IngesterSettings, get_ingester_settings
 from pipeline.common.settings import get_settings
@@ -26,12 +27,12 @@ from pipeline.common.settings import get_settings
 
 def pytest_configure(config: pytest.Config) -> None:
     """Point WAREHOUSE_USER and WAREHOUSE_PASSWORD at the test role for the whole session."""
-    role = role_for_tests()
     patch = pytest.MonkeyPatch()
     config.add_cleanup(patch.undo)
     config.add_cleanup(get_settings.cache_clear)
-    patch.setenv("WAREHOUSE_USER", role.user if role else UNCONFIGURED_ROLE)
-    patch.setenv("WAREHOUSE_PASSWORD", role.password if role else "")
+    user, password = session_credentials(role_for_tests())
+    patch.setenv("WAREHOUSE_USER", user)
+    patch.setenv("WAREHOUSE_PASSWORD", password)
     get_settings.cache_clear()
 
 
