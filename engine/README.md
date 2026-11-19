@@ -41,7 +41,7 @@ snapshots:
   p1812_maps: p1812-maps-synthetic     # required by p1812, with a dsm or canopy
 ```
 
-Site and receiver layers are GeoParquet points in EPSG:4326 or EPSG:26915 with `site_id` or `rx_id`, and an optional position box, never in both forms: `box_half_width_m`, a square on the grid, or the four `lnk_02` edges `box_south_i`, `box_north_i`, `box_west_i`, `box_east_i` (whole numbers in 1e-7 degrees, ADR 0008), with the point at the box centre to 1 mm and all four null on an exact point. A pair with a box at either end gets `endpoint_draws` draws; two exact points get one. The manifest names each point layer's `input_schema_version` and `box_form` (`rectangle`, `square` or `point`).
+Site and receiver layers are GeoParquet points in EPSG:4326 or EPSG:26915 with `site_id` or `rx_id`, and an optional position box, never in both forms: `box_half_width_m`, a square on the grid, or the four `lnk_02` edges `box_south_i`, `box_north_i`, `box_west_i`, `box_east_i` (whole numbers in 1e-7 degrees, ADR 0008), with the point at the box centre to 1 mm and all four null on an exact point. A pair with a box at either end gets `endpoint_draws` draws; two exact points get one. The manifest names each point layer's `input_schema_version` and `box_form` (`rectangle`, `square` or `point`). The engine admits a layer whose positions marker is `synthetic`, or `real` with the `prepared.json` that `engine.prepare` writes beside it listing the layer's sha256; an unmarked layer, a real layer copied away from that file and a real layer changed after prepare are refused, so prepare's checks on real layers bind (Casey, issue #55 comment 7018724580).
 
 ## What a run does
 
