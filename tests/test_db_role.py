@@ -235,6 +235,9 @@ def test_a_refused_login_fails_without_naming_the_role(monkeypatch: pytest.Monke
     finally:
         get_settings.cache_clear()
     assert invented not in str(failure.value)
+    # pytest reports a chained exception's text too, and the driver's names the role.
+    assert failure.value.__context__ is None
+    assert failure.value.__cause__ is None
 
 
 def test_with_no_test_role_the_tests_log_in_with_a_password_the_server_will_refuse() -> None:
