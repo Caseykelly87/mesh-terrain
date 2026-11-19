@@ -23,6 +23,14 @@ set client_min_messages to warning;
 
 begin;
 
+-- The alter role statement below holds the password, and the server logs the
+-- text of a statement that fails, so this transaction logs no statement text
+-- at all: neither value appears in a transcript or log (Casey, issue #55
+-- comment 7017280290, item 2). Both settings need a superuser, which the
+-- owner is, and end with the transaction.
+set local log_statement to 'none';
+set local log_min_error_statement to panic;
+
 -- Two runs at once would fail on the role and database updates with "tuple
 -- concurrently updated"; the second waits here for the first to commit.
 select pg_advisory_xact_lock(hashtext('mesh_terrain.test_role')) as locked \gset
@@ -40,8 +48,10 @@ begin
     if test_role = '' or test_role = current_user then
         raise exception 'WAREHOUSE_TEST_USER must name a role other than the owner %', current_user;
     end if;
+    -- No message names the role: neither value appears in a transcript or
+    -- log (Casey, issue #55 comment 7017280290, item 2).
     if exists (select from pg_roles where rolname = test_role and rolsuper) then
-        raise exception 'role % is a superuser; the test role never is', test_role;
+        raise exception 'WAREHOUSE_TEST_USER names a superuser; the test role never is one';
     end if;
 end
 $$;
@@ -102,8 +112,8 @@ begin
         where n.nspname = any(guarded) and p.proowner = test_oid
     ) as breached;
     if owned > 0 then
-        raise exception '% relations or routines in the raw or real schemas belong to the test role %; '
-            'the guard was breached, so nothing is repaired: look at them first', owned, test_role;
+        raise exception '% relations or routines in the raw or real schemas belong to the test role; '
+            'the guard was breached, so nothing is repaired: look at them first', owned;
     end if;
 
     for item in

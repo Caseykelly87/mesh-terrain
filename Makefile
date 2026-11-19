@@ -71,7 +71,7 @@ TEST_ROLE_MISSING = set $(1): in a worktree, export it from the main checkout's 
 TEST_ROLE_GUARD = $(foreach name,$(TEST_ROLE_VARIABLES),$(if $($(name)),, \
     $(error $(call TEST_ROLE_MISSING,$(name)))))
 unexport TEST_ROLE_MISSING TEST_ROLE_GUARD
-$(if $(filter check dbt-build dbt-debug test-role up,$(MAKECMDGOALS)),$(TEST_ROLE_GUARD))
+$(if $(filter check dbt-build test-role up,$(MAKECMDGOALS)),$(TEST_ROLE_GUARD))
 
 .PHONY: help env up down nuke rotate-owner-password check-credentials check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test test-role
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
@@ -234,8 +234,11 @@ test:
 dbt-deps:
 	$(DBT) deps $(DBT_ARGS)
 
+# As the owner, not the test role: dbt debug prints the connection's user, and
+# the test role's values never appear in a transcript or log (Casey, issue #55
+# comment 7017280290, item 2). It only connects and reads.
 dbt-debug: dbt-deps
-	$(DBT_AS_TEST_ROLE) $(DBT) debug $(DBT_ARGS)
+	$(DBT) debug $(DBT_ARGS)
 
 # A development target builds into staging_<target>, core_<target> and
 # analytics_<target> and reads raw_<target>, never the real schemas
