@@ -18,5 +18,6 @@ MANIFEST_VERSION = "1.2.0"
 point layer's `input_schema_version` and `box_form` (ADR 0008, Casey's Q2 (b))."""
 
 INPUT_SCHEMA_VERSION = "1.1.0"
-"""Version of the point layer columns the engine reads; 1.0.0 is the id, the geometry and
-`box_half_width_m`, 1.1.0 adds the four `lnk_02` box edges (ADR 0008)."""
+"""The newest point layer schema the engine reads; 1.0.0 is the id, the geometry and
+`box_half_width_m`, 1.1.0 adds the four `lnk_02` box edges (ADR 0008). The manifest
+records the one each layer's columns use (`engine.points.layer_schema_version`)."""

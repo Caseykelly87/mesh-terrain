@@ -21,10 +21,10 @@ from typing import Any
 
 import pyarrow.parquet as pq
 
-from engine import ENGINE_VERSION, INPUT_SCHEMA_VERSION, MANIFEST_VERSION, SCHEMA_VERSION
+from engine import ENGINE_VERSION, MANIFEST_VERSION, SCHEMA_VERSION
 from engine.config import RunConfig
 from engine.hashing import content_sha256
-from engine.points import BoxForm
+from engine.points import BoxForm, layer_schema_version
 from engine.provenance import Provenance
 from engine.snapshots import NamedSnapshot
 from pipeline.common.snapshot import sha256_file
@@ -73,7 +73,7 @@ def input_entries(config: RunConfig, box_forms: dict[str, BoxForm]) -> list[dict
     ]
     for field, entry in zip(paths, entries, strict=True):
         if field in box_forms:
-            entry["input_schema_version"] = INPUT_SCHEMA_VERSION
+            entry["input_schema_version"] = layer_schema_version(paths[field])
             entry["box_form"] = box_forms[field]
     entries += [
         {"path": f"profiles/{path.name}", "sha256": sha256_file(path)}
