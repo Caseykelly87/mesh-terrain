@@ -47,6 +47,13 @@ so a refusal shows which pair and end caused it; edge-check lines print after
 the nodes are placed. When the both-ends pair or a gateway-only pair is
 dropped it refuses (exit 2) after those lines, before anything is written.
 
+With or without `--sites-only`, it refuses (exit 2, nothing written) a
+capture snapshot whose manifest `brokers` does not list both
+`mqtt.meshtastic.org` and `mqtt.meshstl.org`: only the single merged
+snapshot holds every copy of a delivery, and `pos_04`'s MeshSTL flag reads
+every copy in any snapshot (Casey, issue #55 comment 6985802330, item 7;
+comment 7016583529, item 4; `ingester.link_pairs.require_merged`).
+
 With `--sites-only` (Casey, 2026-11-17, engine_inputs (c)) the command writes
 `tx_sites_real.parquet` alone and never `rx_real.parquet`, for the engine run
 whose receivers are the synthetic grid alone (terrain-rf-eng's
