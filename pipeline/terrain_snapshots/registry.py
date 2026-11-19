@@ -13,15 +13,20 @@ must be registered with the manifest_sha256 of the folder it reads (Casey,
 unit 5b: "OpenStreetMap water polygons from the registered snapshot"). Only
 `register` and that check touch the database; the other commands take no
 connection.
+
+Every function that sends SQL takes a keyword-only `schema`, `raw` by
+default. Only the tests pass another one: a throwaway schema built from the
+same DDL (Casey, issue #55 comment 6961809084, item 10).
 """
 
 from pathlib import Path
 
 import psycopg
+from psycopg import sql
 
 from ingester.load import apply_ddl
 from pipeline.common.settings import Settings, get_settings
-from pipeline.common.snapshot import register_verified, snapshot_folder
+from pipeline.common.snapshot import RAW_SCHEMA, register_verified, snapshot_folder
 from pipeline.terrain_snapshots.common import timed
 
 CONNECT_TIMEOUT_S = 10
@@ -40,19 +45,30 @@ def connect(settings: Settings | None = None) -> psycopg.Connection:
     )
 
 
-def raw_snapshot_exists(conn: psycopg.Connection) -> bool:
-    """Whether the table raw.snapshot exists."""
-    row = conn.execute("select to_regclass('raw.snapshot') is not null").fetchone()
+def raw_snapshot_exists(conn: psycopg.Connection, *, schema: str = RAW_SCHEMA) -> bool:
+    """Whether the schema's snapshot table exists.
+
+    Args:
+        conn: An open warehouse connection.
+        schema: The schema holding the raw tables; raw unless a test passes its own.
+            A schema that does not exist reads as no table.
+    """
+    row = conn.execute(
+        "select to_regclass(quote_ident(%s) || '.snapshot') is not null", (schema,)
+    ).fetchone()
     return bool(row and row[0])
 
 
-def register_snapshot(conn: psycopg.Connection, root: Path, snapshot_id: str) -> int:
-    """Register one finished, verified snapshot, creating raw.snapshot first if it is missing.
+def register_snapshot(
+    conn: psycopg.Connection, root: Path, snapshot_id: str, *, schema: str = RAW_SCHEMA
+) -> int:
+    """Register one finished, verified snapshot, creating the snapshot table first if it is missing.
 
     Args:
         conn: An open warehouse connection; the work runs in one transaction.
         root: The snapshots folder.
         snapshot_id: The finished snapshot's id.
+        schema: The schema holding the raw tables; raw unless a test passes its own.
 
     Returns:
         1 when the row is new, 0 when the id was already registered.
@@ -61,30 +77,47 @@ def register_snapshot(conn: psycopg.Connection, root: Path, snapshot_id: str) ->
         SnapshotError: for a missing, partial or changed snapshot, or a
             manifest register refuses.
     """
-    with timed("snapshot_register_command", snapshot_id=snapshot_id) as details:
+    with timed("snapshot_register_command", snapshot_id=snapshot_id, schema=schema) as details:
         folder = snapshot_folder(root, snapshot_id)
         with conn.transaction():
-            created = not raw_snapshot_exists(conn)
+            created = not raw_snapshot_exists(conn, schema=schema)
             if created:
-                apply_ddl(conn)
-            inserted = register_verified(conn, folder)
+                apply_ddl(conn, schema=schema)
+            inserted = register_verified(conn, folder, schema=schema)
         details.update(inserted=inserted, created_raw_tables=created)
     return inserted
 
 
-def registered_manifest_sha256(conn: psycopg.Connection, snapshot_id: str) -> str | None:
-    """The manifest_sha256 raw.snapshot holds for an id, or None when it has no row."""
-    if not raw_snapshot_exists(conn):
+def registered_manifest_sha256(
+    conn: psycopg.Connection, snapshot_id: str, *, schema: str = RAW_SCHEMA
+) -> str | None:
+    """The manifest_sha256 the snapshot table holds for an id, or None when it has no row.
+
+    Args:
+        conn: An open warehouse connection.
+        snapshot_id: The snapshot's id.
+        schema: The schema holding the raw tables; raw unless a test passes its own.
+    """
+    if not raw_snapshot_exists(conn, schema=schema):
         return None
-    row = conn.execute(
-        "select manifest_sha256 from raw.snapshot where snapshot_id = %s", (snapshot_id,)
-    ).fetchone()
+    query = sql.SQL("select manifest_sha256 from {} where snapshot_id = %s").format(
+        sql.Identifier(schema, "snapshot")
+    )
+    row = conn.execute(query, (snapshot_id,)).fetchone()
     return None if row is None else str(row[0])
 
 
-def lookup_registered(snapshot_id: str) -> str | None:
-    """registered_manifest_sha256 over a connection of its own, from the pipeline settings."""
-    with timed("registry_lookup", snapshot_id=snapshot_id) as details, connect() as conn:
-        found = registered_manifest_sha256(conn, snapshot_id)
+def lookup_registered(snapshot_id: str, *, schema: str = RAW_SCHEMA) -> str | None:
+    """registered_manifest_sha256 over a connection of its own, from the pipeline settings.
+
+    Args:
+        snapshot_id: The snapshot's id.
+        schema: The schema holding the raw tables; raw unless a test passes its own.
+    """
+    with (
+        timed("registry_lookup", snapshot_id=snapshot_id, schema=schema) as details,
+        connect() as conn,
+    ):
+        found = registered_manifest_sha256(conn, snapshot_id, schema=schema)
         details["registered"] = found is not None
     return found
