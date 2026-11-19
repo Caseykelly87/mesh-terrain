@@ -25,8 +25,9 @@ def test_every_expected_receipt_and_link_hour_is_in_a_seed() -> None:
     receipts = sum(len(case["expected_receipts"]) for case in cases)
     hours = sum(len(case["expected_link_hours"]) for case in cases)
     assert (len(seed_rows(RECEIPTS_SEED)), len(seed_rows(HOURS_SEED))) == (receipts, hours)
-    assert len(read_cases(LINK_RULES_CASES)) == 51
-    assert [case["case_id"][:3] for case in cases[51:]] == [
+    shared = [case["case_id"] for case in read_cases(LINK_RULES_CASES)]
+    assert [case["case_id"] for case in cases[: len(shared)]] == shared
+    assert [case["case_id"][:3] for case in cases[len(shared) :]] == [
         *(f"s{n:02d}" for n in range(5, 13)),
         "s14",
     ]
