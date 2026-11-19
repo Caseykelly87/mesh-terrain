@@ -150,6 +150,7 @@ Casey's answer to PR #72's Q3 (issue #55 comment 6995037213, item 3), as ADR 000
 - Validation's 3 km filter (`lnk_05`, marts) and `link_source` in `int_link_window`.
 - On the gateway side, an end with no position and an end on an hour box chosen over a finer cell: c15, c26 and c21 test those steps on the relayer side, and c42 tests a moved gateway on the fallback and the one-box test for the gateway.
 - A gateway's own NeighborInfo report uplinked by another gateway: the possible sixth question in PR #66 comment 6967160985, which Casey has not answered. Every report in the fixture is uplinked by the node that sent it.
-- A broadcast's copies at the early edge of the 7-day look-back, which is also the early edge of the hour box's union: staging case s12 (PR #72) pins it; no case here does.
+- A broadcast's copies at the early edge of the 7-day look-back, which is also the early edge of the hour box's union: staging case s12 (PR #72; SQL side only) pins it; no case here does.
+- Copies of one packet at a single gateway at a window edge: every broadcast in c52 to c55 reaches two gateways, so the reading `ingester/link_rules.py` states for copies at one gateway is not tested here.
 - The gateway side of c52 to c55: each pins a relayer, and the gateway's positions go through the same steps.
 - Copies of one broadcast that differ in stored values, which the link rules do not match as one position (ADR 0003): every broadcast in the fixture has copies with equal stored values.
