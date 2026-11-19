@@ -41,7 +41,7 @@ THROWAWAY_PATTERN = re.compile(rf"{SCHEMA_PREFIX}[0-9a-f]{{12}}")
 REAL_SCHEMAS = ("raw", "raw_dev_wh", "raw_dev_ta")
 
 # What tests/conftest.py puts in WAREHOUSE_USER when no test role is configured,
-# so a connection fails instead of falling back to the owner.
+# so a login is refused, and the test fails, instead of falling back to the owner.
 UNCONFIGURED_ROLE = "test_role_not_configured"
 
 
@@ -75,8 +75,23 @@ class ThrowawayRaw(NamedTuple):
     schema: str
 
 
+def server_refused_login(err: psycopg.OperationalError) -> bool:
+    """Whether the server answered and refused the login, rather than not answering.
+
+    libpq puts the server's own message, which starts with its severity,
+    after the connection details; a server that does not answer leaves only
+    the client's error.
+    """
+    return "FATAL:" in str(err)
+
+
 def connect_or_skip() -> psycopg.Connection:
-    """A connection to the local warehouse, or a skip where none answers (CI's tests job)."""
+    """A connection to the local warehouse, or a skip where none answers (CI's tests job).
+
+    A warehouse that answers and refuses the test role's login fails the test
+    instead: the role is missing, its password differs, or no test role is
+    configured, and a run that skipped every warehouse test would pass.
+    """
     settings = get_settings()
     try:
         return psycopg.connect(
@@ -88,6 +103,12 @@ def connect_or_skip() -> psycopg.Connection:
             connect_timeout=3,
         )
     except psycopg.OperationalError as err:
+        if server_refused_login(err):
+            pytest.fail(
+                f"the warehouse refused the login of {settings.warehouse_user!r}: set "
+                "WAREHOUSE_TEST_USER and WAREHOUSE_TEST_PASSWORD in .env as .env.example "
+                "does, then run make test-role"
+            )
         pytest.skip(f"no local warehouse ({err.__class__.__name__}); run make up")
 
 
