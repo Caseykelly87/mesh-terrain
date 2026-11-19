@@ -125,6 +125,7 @@ def test_the_command_writes_the_run_folder(
     names = sorted(p.name for p in folder.iterdir())
     assert names == [
         "crossing.md",
+        "prepared.json",
         "rx_points.parquet",
         "rx_real.parquet",
         "tx_sites.parquet",
@@ -529,6 +530,7 @@ def test_without_real_receivers_the_grid_alone_is_written_and_marked_synthetic(
         assert run_without_real_receivers(folder) == 0
     assert sorted(p.name for p in folder.iterdir()) == [
         "crossing.md",
+        "prepared.json",
         "rx_points.parquet",
         "tx_sites.parquet",
         "tx_sites_real.parquet",
@@ -728,3 +730,32 @@ def test_a_real_edge_layer_with_a_row_without_edges_is_refused_and_nothing_writt
 
     assert "has no box edges" in refusal(folder)
     assert sorted(p.name for p in folder.iterdir()) == before
+
+
+@pytest.mark.usefixtures("env")
+def test_prepare_stamps_the_layers_it_wrote(tmp_path: Path) -> None:
+    import json
+
+    from engine.prepared import STAMP_FILE, require_admissible_layer
+    from pipeline.common.snapshot import sha256_file
+
+    folder = write_inputs(tmp_path / "x72y429")
+    assert run(folder) == 0
+    stamp = json.loads((folder / STAMP_FILE).read_text(encoding="utf-8"))
+
+    assert stamp["written_by"] == "engine.prepare"
+    assert stamp["layers"] == {
+        name: sha256_file(folder / name) for name in ("rx_points.parquet", "tx_sites.parquet")
+    }
+    require_admissible_layer(folder / "rx_points.parquet")
+    require_admissible_layer(folder / "tx_sites.parquet")
+    assert_no_real_coordinates((folder / STAMP_FILE).read_text(encoding="utf-8"))
+
+
+@pytest.mark.usefixtures("env")
+def test_a_folder_already_holding_a_prepare_stamp_is_refused(tmp_path: Path) -> None:
+    from engine.prepared import STAMP_FILE
+
+    folder = write_inputs(tmp_path / "x72y429")
+    (folder / STAMP_FILE).write_text("{}", encoding="utf-8")
+    assert STAMP_FILE in refusal(folder)
