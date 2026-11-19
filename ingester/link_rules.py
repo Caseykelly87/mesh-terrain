@@ -53,10 +53,17 @@ never moves its time. And a NeighborInfo report is the gateway's own when
 the gateway sent it, whichever gateway uplinked it, which is warehouse-eng's
 reading too (PR #66, comment 6967498778).
 
-Rows with a null or zero `packet_id` are never treated as copies of each
-other, as receipts or as positions. The SQL side matches a zero `packet_id`
-like any other; the decoder lands zero as null, so only a hand-built row
-can tell the two apart.
+Three readings differ from warehouse-eng's SQL on PR #72 (`docs/STATUS.md`,
+Known issues). A null or zero `packet_id` is no id here, both for `ing_06`
+(`later_copies`) and for a broadcast (`broadcast_key`), while the SQL treats
+only null as no id (`stg_packet`, `int_usable_position`); the decoder lands
+zero as null, so only a hand-built row can tell the two apart. When two of
+a node's positions at one instant tie for the fallback, the one whose first
+copy has the smaller `delivery_key` wins here, and in the SQL the one with
+the smallest `delivery_key` among all its copies; Casey is asked which. And
+this module groups a broadcast's copies within the one snapshot it reads,
+while the SQL groups them across every snapshot in core; with one capture
+snapshot, no row reaches that difference.
 """
 
 import math
