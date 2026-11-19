@@ -11,7 +11,7 @@ The engine places each endpoint at random inside its position box 16 times per p
 
 The real box is the `lnk_02` box of `docs/data-quality-contract.md`: a rectangle in latitude and longitude, one cell or the rectangle around merged fixes, with edges stored as whole numbers in 1e-7 degrees and half-widths `half_width_ns_m` and `half_width_ew_m` (PLAN, Data model). Two things make the square wrong:
 
-- The square trims the long side. A 16-bit cell at the test tile (x72y429, latitude 38.69) has half-widths 363.8 m north-south and 285.1 m east-west, so the square drops 78.7 m from each north and south end. A merged box of 30 m by 1 cm has a square 1 cm across (reviewer, PR #70).
+- The square trims the long side. A 16-bit cell at the test tile (x72y429, latitude 38.69) has half-widths 363.8 m north-south and 285.1 m east-west, so the square drops 78.7 m from each north and south end. Two 32-bit fixes 30 m apart on one parallel merge into a box about 30 m by 1 cm, whose square is 1 cm across (reviewer, PR #70).
 - The rectangle is turned in EPSG:26915. East of the zone's central meridian (93 degrees west), true north lies west of grid north by the meridian convergence: 1.58 degrees at the tile's southwest corner, 1.66 at its northeast, 1.62 at its centre (pyproj `get_factors`). An unrotated grid rectangle of the right size puts a cell's corners 13 m from the real ones at 16 bits and 26 m at 15 bits, the coarsest cell `lnk_02` reads.
 
 ## Options
@@ -20,7 +20,7 @@ The real box is the `lnk_02` box of `docs/data-quality-contract.md`: a rectangle
 
 1. The four box edges, `box_south_i`, `box_north_i`, `box_west_i`, `box_east_i`: whole numbers in 1e-7 degrees (WGS84), exactly the `lnk_02` edges, half-open. The engine draws a point uniformly between the edges in latitude and longitude and converts each draw to EPSG:26915 with pyproj, so every draw lies inside the box and the turn comes from the conversion. Advantage: the contract's box, carried without loss; no rotation set by hand. Cost: an exception to CLAUDE.md's "store SRID 4326, compute in EPSG:26915" and ADR 0006's "No arithmetic on degrees", like the one for `lnk_05`'s geodesic (issue #55, Q4): one interpolation between a box's own edges, beside the midpoint in degrees `lnk_02` already takes. Uniform in degrees is not uniform in area, by about 1e-4 across a 16-bit cell.
 2. The same edges, with the corners converted once and each draw a bilinear blend of them in metres. Advantage: no arithmetic on degrees. Cost: converted parallels bow away from the pole, so a draw near the north edge can fall outside the box by up to 5 mm on a 16-bit cell and 20 mm on a 15-bit cell, the largest box `lnk_02` produces.
-3. Two metre half-widths, the rectangle turned by the convergence at its centre. Advantage: metres, which a caller without cells can supply. Cost: a 0.08 m strip at a 16-bit cell's edges is never reached, and a sign error in the turn is easy to miss.
+3. Two metre half-widths, the rectangle turned by the convergence at its centre. Advantage: metres, which a caller without cells can supply. Cost: on a grid scaled by 1.0002, a 0.08 m strip at a 16-bit cell's north and south edges is never reached, and a sign error in the turn is easy to make and hard to see.
 
 Recommended option 1. Under every option `box_half_width_m` and its `EndpointBox` stay, for callers with no cells and the fixtures, never both forms in one layer; and the `engine_inputs` DEM edge check tests the box's corners, not the square, so a rerun can pass fewer sites than on 2026-11-17.
 
@@ -39,7 +39,7 @@ Recommended option 1.
 
 1. The sum of each end's half-diagonal, the square root of `half_width_ns_m` squared plus `half_width_ew_m` squared. 924.3 m (924.1 to 924.6 across the tile); 477.2 m. Advantage: the farthest a point of each box lies from its centre, to within 2 cm per end for usable cells (3.9 mm short at 16 bits, 15.7 mm at 15 bits, since the east-west half-width is taken at the middle latitude); by the triangle inequality the distance between any two points of the boxes differs from `distance_m` by at most this sum. Cost: a worst case.
 2. Keep the sum of the larger half-widths. 727.5 m; 378.8 m. Advantage: stored values and fixture unchanged. Cost: not a bound: with ends at opposite corners on a long path along their diagonals the error exceeds it by up to 196.8 m.
-3. The sum of each box's half-extent along the path; 285.1 m to 462.2 m per 16-bit end. Advantage: tighter than 1 on long paths. Cost: a first-order bound only (643.6 m of error against 570.2 m on a 3 km east-west path).
+3. The sum of each box's half-extent along the path; 285.1 m to 462.2 m per 16-bit end. Advantage: tighter than 1 on long paths. Cost: a first-order bound only (643.6 m of error against 570.2 m on a 3 km east-west path), and each end's bearing must agree between SQL and Python to 1e-6 m.
 
 Recommended option 1.
 
