@@ -13,15 +13,27 @@ resolved, so the spelling of a statement cannot get past it; what can differ
 between forms is only whether a statement reaches the check, which is why each
 form below is sent for real. Every form must fail with "permission denied",
 whether or not the table it names exists: `raw_dev_wh` and `raw_dev_ta` hold
-no tables, and the schema check comes first. Two forms do not name the schema
-in the statement, a search_path and `set schema`; a schema without USAGE drops
-out of the search path, so they fail with "relation does not exist".
+no tables, and the schema check comes first. A statement that names no schema
+cannot reach these tables either, since a schema without USAGE drops out of
+the search path; the USAGE check below is the proof of that.
+
+Three ways round a grant are checked in the catalog instead of sent: a role
+attribute or membership (superuser, `pg_write_all_data`,
+`pg_execute_server_program`, the owner), which the attribute test refuses; a
+SECURITY DEFINER routine owned by another role, which runs as its owner, so
+none may be executable by the test role unless it is on `DEFINER_ALLOWLIST`;
+and a default privilege that would grant the role a table created later.
+
+The same no-privilege check covers the real built schemas, `staging`, `core`,
+`analytics` and `features`, which the role never needs.
 
 Each form runs in a savepoint inside a transaction that is rolled back, after
-the role has built its own snapshot table holding one row in a throwaway
-schema, so a form that wrongly succeeded would still leave nothing behind.
-Skipped where no warehouse answers (CI's tests job); CI's compose smoke test
-runs them through make check.
+the session has shown it is no superuser and holds no USAGE on a watched
+schema, and after the role has built its own snapshot table holding one row
+in a throwaway schema, so a form that wrongly succeeded would still leave
+nothing behind. Skipped where no warehouse answers (CI's tests job); a
+warehouse that answers and refuses the role's login fails them instead. CI's
+compose smoke test runs them through make check.
 """
 
 import secrets
@@ -33,7 +45,7 @@ import psycopg
 import pytest
 from psycopg import errors, sql
 from raw_schema import REAL_SCHEMAS as WATCHED
-from raw_schema import SCHEMA_PREFIX, UNCONFIGURED_ROLE, connect_or_skip
+from raw_schema import SCHEMA_PREFIX, UNCONFIGURED_ROLE, connect_or_skip, server_refused_login
 
 from ingester import load
 from pipeline.common.settings import get_settings
@@ -45,11 +57,17 @@ OWN_ROW = sql.SQL(
 )
 WRITE_PRIVILEGES = "INSERT, UPDATE, DELETE, TRUNCATE"
 MERGE = "merge into {table} as t using {own} as s on t.snapshot_id = s.snapshot_id "
+# The schemas dbt builds on the target prod, which the role never needs.
+REAL_BUILT = ("staging", "core", "analytics", "features")
+# SECURITY DEFINER routines owned by another role that the test role may run,
+# each reviewed as unable to write a guarded schema. None in PostgreSQL 17,
+# PostGIS 3.5 or h3-pg 4.2.
+DEFINER_ALLOWLIST: frozenset[str] = frozenset()
 
-# One statement or a sequence of them per form. The names are composed by
-# psycopg: {table} is <schema>.snapshot, {own} the role's own snapshot table,
-# {schema} the schema, {probe} a new table name in it, {database_table} the
-# three-part name, {owner} the schema's owner and {name} the schema as a string.
+# One statement per form. The names are composed by psycopg: {table} is
+# <schema>.snapshot, {own} the role's own snapshot table, {schema} the schema,
+# {probe} a new table name in it, {database_table} the three-part name and
+# {owner} the schema's owner.
 REFUSED = {
     "insert values": (
         "insert into {table} (snapshot_id, capture_date, source_url, licence, manifest_path, "
@@ -66,6 +84,7 @@ REFUSED = {
     "merge insert": MERGE + "when not matched then insert values (s.snapshot_id, "
     "s.capture_date, s.source_url, s.licence, s.manifest_path, s.manifest_sha256, "
     "s.registered_at)",
+    "copy from a program": "copy {table} from program 'true'",
     "update": "update {table} set licence = 'x'",
     "update from": (
         "update {table} as t set licence = s.licence from {own} as s "
@@ -88,19 +107,13 @@ REFUSED = {
     "drop a table": "drop table {table}",
     "grant itself the table": "grant " + WRITE_PRIVILEGES + " on {table} to current_user",
     "grant itself the schema": "grant usage, create on schema {schema} to current_user",
+    "grant itself future tables": (
+        "alter default privileges for role {owner} in schema {schema} "
+        "grant " + WRITE_PRIVILEGES + " on tables to current_user"
+    ),
     "take the schema": "alter schema {schema} owner to current_user",
     "become the owner": "set role {owner}",
     "become the owner by session": "set session authorization {owner}",
-}
-UNRESOLVED = {
-    "unqualified after search_path": (
-        "set local search_path to {schema}",
-        "insert into " + TABLE + " select * from {own}",
-    ),
-    "unqualified after set schema": (
-        "set local schema {name}",
-        "delete from " + TABLE,
-    ),
 }
 
 
@@ -111,11 +124,26 @@ class RoleSession(NamedTuple):
     own_schema: str
 
 
+def assert_cannot_reach_a_watched_schema(conn: psycopg.Connection) -> None:
+    """Fail before any form is sent if the session is a superuser or sees a watched schema."""
+    superuser = conn.execute(
+        "select rolsuper from pg_roles where rolname = current_user"
+    ).fetchone()
+    reachable = conn.execute(
+        "select nspname from pg_namespace where nspname = any(%s) "
+        "and has_schema_privilege(oid, 'USAGE') order by 1",
+        (list(WATCHED),),
+    ).fetchall()
+    assert superuser == (False,), "the test session is a superuser; no write form is sent"
+    assert reachable == [], f"the test session can reach {reachable}; no write form is sent"
+
+
 @contextmanager
 def role_session() -> Iterator[RoleSession]:
     """A rolled-back transaction in which the role owns a snapshot table holding one row."""
     own_schema = f"{SCHEMA_PREFIX}{secrets.token_hex(6)}"
     with connect_or_skip() as conn, conn.transaction(force_rollback=True):
+        assert_cannot_reach_a_watched_schema(conn)
         conn.execute(sql.SQL("create schema {}").format(sql.Identifier(own_schema)))
         load.apply_ddl(conn, schema=own_schema)
         conn.execute(OWN_ROW.format(sql.Identifier(own_schema, TABLE)))
@@ -140,15 +168,36 @@ def composed(template: str, session: RoleSession, schema: str) -> sql.Composed:
         probe=sql.Identifier(schema, "probe"),
         database_table=sql.Identifier(database, schema, TABLE),
         owner=sql.Identifier(schema_owner(session.conn, schema)),
-        name=sql.Literal(schema),
     )
 
 
-def send(session: RoleSession, schema: str, statements: tuple[str, ...]) -> None:
-    """Run the statements in a savepoint, which an error rolls back before it propagates."""
+def send(session: RoleSession, schema: str, template: str) -> None:
+    """Run the statement in a savepoint, which an error rolls back before it propagates."""
     with session.conn.transaction():
-        for template in statements:
-            session.conn.execute(composed(template, session, schema))
+        session.conn.execute(composed(template, session, schema))
+
+
+@pytest.mark.parametrize(
+    ("message", "refused"),
+    [
+        (
+            'connection to server at "127.0.0.1", port 5433 failed: FATAL:  password '
+            'authentication failed for user "mesh_test"',
+            True,
+        ),
+        (
+            'connection to server at "127.0.0.1", port 5433 failed: FATAL:  role "mesh_test" '
+            "does not exist",
+            True,
+        ),
+        ('connection to server at "127.0.0.1", port 5433 failed: Connection refused', False),
+        ("connection timeout expired", False),
+    ],
+)
+def test_a_refused_login_is_told_apart_from_a_server_that_does_not_answer(
+    message: str, refused: bool
+) -> None:
+    assert server_refused_login(psycopg.OperationalError(message)) is refused
 
 
 def test_the_tests_connect_as_the_test_role() -> None:
@@ -177,8 +226,37 @@ def test_the_test_role_has_no_attribute_or_membership_that_passes_a_grant() -> N
     assert parents == []
 
 
-@pytest.mark.parametrize("schema", WATCHED)
-def test_the_test_role_holds_no_privilege_on_a_real_raw_schema(schema: str) -> None:
+def test_no_security_definer_routine_of_another_role_is_open_to_the_test_role() -> None:
+    with connect_or_skip() as conn:
+        rows = conn.execute(
+            "select p.oid::regprocedure::text from pg_proc as p "
+            "where p.prosecdef "
+            "and p.proowner <> (select oid from pg_roles where rolname = current_user) "
+            "and has_function_privilege(p.oid, 'EXECUTE') order by 1"
+        ).fetchall()
+    assert {row[0] for row in rows} - DEFINER_ALLOWLIST == set()
+
+
+def test_no_default_privilege_reaches_the_test_role_in_a_guarded_schema() -> None:
+    """A default privilege, per schema or for every schema, would grant a table made later."""
+    with connect_or_skip() as conn:
+        rows = conn.execute(
+            "select coalesce(n.nspname, '<every schema>'), d.defaclobjtype::text, "
+            "acl.privilege_type "
+            "from pg_default_acl as d "
+            "left join pg_namespace as n on n.oid = d.defaclnamespace, "
+            "aclexplode(d.defaclacl) as acl "
+            "where (d.defaclnamespace = 0 or n.nspname = any(%s)) "
+            "and (acl.grantee = 0 "
+            "or acl.grantee = (select oid from pg_roles where rolname = current_user)) "
+            "order by 1, 2, 3",
+            ([*WATCHED, *REAL_BUILT],),
+        ).fetchall()
+    assert rows == []
+
+
+@pytest.mark.parametrize("schema", [*WATCHED, *REAL_BUILT])
+def test_the_test_role_holds_no_privilege_on_a_raw_or_real_schema(schema: str) -> None:
     with connect_or_skip() as conn:
         owner = schema_owner(conn, schema)
         held = conn.execute(
@@ -202,14 +280,7 @@ def test_the_test_role_holds_no_privilege_on_a_real_raw_schema(schema: str) -> N
 @pytest.mark.parametrize("schema", WATCHED)
 def test_a_write_to_a_real_raw_schema_is_refused(schema: str, form: str) -> None:
     with role_session() as session, pytest.raises(errors.InsufficientPrivilege):
-        send(session, schema, (REFUSED[form],))
-
-
-@pytest.mark.parametrize("form", sorted(UNRESOLVED))
-@pytest.mark.parametrize("schema", WATCHED)
-def test_a_write_by_an_unqualified_name_finds_no_raw_table(schema: str, form: str) -> None:
-    with role_session() as session, pytest.raises(errors.UndefinedTable):
-        send(session, schema, UNRESOLVED[form])
+        send(session, schema, REFUSED[form])
 
 
 @pytest.mark.parametrize("schema", WATCHED)
