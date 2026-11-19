@@ -27,6 +27,7 @@ import geopandas as gpd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from engine import INPUT_SCHEMA_VERSION
 from engine.errors import ConfigError
 from terrain.boxes import EdgeBox, EndpointBox, PositionBox
 
@@ -36,9 +37,8 @@ EDGE_COLUMNS = ("box_south_i", "box_north_i", "box_west_i", "box_east_i")
 CENTRE_TOLERANCE_M = 0.001
 """How far a row's point may lie from its edge box's centre, metres."""
 
-POINT_SCHEMA_VERSIONS = ("1.0.0", "1.1.0")
-"""Point layer schemas: 1.0.0 is the id, the geometry and `box_half_width_m`;
-1.1.0 adds the four box edges (ADR 0008)."""
+SQUARE_SCHEMA_VERSION = "1.0.0"
+"""The point layer schema before the box edges: the id, the geometry and `box_half_width_m`."""
 
 BoxForm = Literal["rectangle", "square", "point"]
 
@@ -119,7 +119,7 @@ def layer_schema_version(path: Path) -> str:
         "1.1.0" when the layer carries the box edge columns, else "1.0.0".
     """
     names = set(pq.read_schema(path).names)
-    return POINT_SCHEMA_VERSIONS[1] if names & set(EDGE_COLUMNS) else POINT_SCHEMA_VERSIONS[0]
+    return INPUT_SCHEMA_VERSION if names & set(EDGE_COLUMNS) else SQUARE_SCHEMA_VERSION
 
 
 def _check_layer(layer: gpd.GeoDataFrame, path: Path, id_column: str) -> None:
