@@ -77,6 +77,7 @@ __all__ = [
     "SnapshotInfo",
     "Source",
     "brokers_read",
+    "check_broker_hosts",
     "ordered_results",
     "reduce_capture",
 ]
