@@ -9,7 +9,7 @@ Changing the fixture needs review by both ingest-eng and warehouse-eng, and the 
 
 ## How the expected results were worked out
 
-Every outcome was decided by hand from the contract on main (`docs/data-quality-contract.md` at 8370dbd) and ADR 0003's Overlap and Link-rule amendments, with the reasoning written in each case's `reasoning` list. c44 to c51 were decided from Casey's answers to the PR #66 questions (PR #66 comment 6968763406, items 2 and 4) as PR #67 words them in the contract and PLAN (at 5e43c17), and each quotes that wording in its first reasoning line; c02 and c43 quote it where it makes a receipt's own sender a candidate for that receipt, which changes none of their outcomes. No expected value came from running B3, the ingester or the spike. Arithmetic used these named calls and formulas, so anyone can recompute it:
+Every outcome was decided by hand from the contract on main (`docs/data-quality-contract.md` at 8370dbd) and ADR 0003's Overlap and Link-rule amendments, with the reasoning written in each case's `reasoning` list. c44 to c51 were decided from Casey's answers to the PR #66 questions (PR #66 comment 6968763406, items 2 and 4) as PR #67 words them in the contract and PLAN (at 5e43c17), and each quotes that wording in its first reasoning line; c02 and c43 quote it where it makes a receipt's own sender a candidate for that receipt, which changes none of their outcomes. c52 to c55 were decided from ADR 0003's paragraph on a broadcast's gateway copies (Casey, issue #55 comment 6995037213, item 3, as ADR 0003 records it at bfe51aa), and each quotes it in its first reasoning line. No expected value came from running B3, the ingester or the spike. Arithmetic used these named calls and formulas, so anyone can recompute it:
 
 - Firmware grid: for 1 to 31 bits the stored value is the cell's low edge plus half its width, the low edge being the value rounded down to a multiple of the width `2^(32 - precision_bits)` (Python `//`, which rounds toward minus infinity as the firmware's mask does on negative values). At 32 bits the stored value is the raw value.
 - Cell edges: `low = stored - width / 2` (1 to 31 bits) or `low = stored` (32 bits); the cell is `[low, low + width)` on each axis.
@@ -39,6 +39,8 @@ The hour is `received_at` truncated to the hour in UTC, half-open, so a receipt 
 
 An end on the 30-minute fallback has its precise flag read from the positions in each counted receipt's 30-minute window and 7-day look-back, and nothing more (PLAN, Data model; c44).
 
+A position broadcast heard at several gateways is several deliveries and one position: its copies share node, `packet_id` and stored values, it is timed by the first copy's `received_at`, and it qualifies under `pos_04` when any copy does (ADR 0003: "A broadcast's gateway copies count as one position, timed by the first copy, precise if any copy qualifies."). Steps 5 and 6 place it in or out of each window by that time alone, so a copy outside a window is read when the first copy is inside, and no copy is read when the first is outside (c52 to c55).
+
 ## Layout
 
 `cases/cNN_<name>.json`, one file per case, with these keys in this order:
@@ -52,7 +54,7 @@ An end on the 30-minute fallback has its precise flag read from the positions in
 Conventions:
 
 - Pseudonyms are readable (`c23-r`, `c23-g`) and start with their case number, so no two cases share a node and every case can be loaded at once into one table. Times are UTC with a `Z`.
-- Position rows are the node's own packets, uplinked by itself (`gateway_pseudonym` is the node), with `relay_node` null; they never make a node a candidate at another gateway. A node heard only to make it a candidate has a row with `relay_node` null (portnum 67).
+- Position rows are the node's own packets with `relay_node` null. Most are uplinked by the node itself (`gateway_pseudonym` is the node); the copies of a broadcast in c52 to c55 are uplinked by gateways named `-h1` and `-h2`, which have no receipts. No position row makes a node a candidate at a gateway that has receipts. A node heard only to make it a candidate has a row with `relay_node` null (portnum 67).
 - `rx_snr` `"NaN"` is the IEEE value NaN.
 - Portnums: 1 text, 3 Position, 67 telemetry, 71 NeighborInfo, 73 MapReport. A MapReport row carries the `map` topic raw lands it on, `msh/US/2/map/` (`ingester/topics.py`).
 
@@ -124,6 +126,10 @@ Geometry (`lnk_07`, SQL only, since the Python side builds none): each kept hour
 | `c49_neighbor_info_reports_counted_together` | Q5: two reports, two nodes with one byte; one node in both | lnk_01 |
 | `c50_32_bit_stored_value_at_the_msa_edge` | Q3: stored value inside, centre outside, and the reverse | pos_02, lnk_02 |
 | `c51_neighbor_info_at_the_receipts_own_instant` | Q2: a NeighborInfo report at the receipt's instant | lnk_01 |
+| `c52_broadcast_copies_at_the_look_back_late_edge` | broadcast copies at a stationary end's look-back late edge: first at the receipt's instant, qualifying copy 1 s later | pos_04, lnk_02 |
+| `c53_broadcast_copies_at_the_fallback_late_edge` | broadcast copies at the fallback's late edge: first exactly 30 minutes after, qualifying copy outside | pos_04, lnk_02 |
+| `c54_broadcast_copies_at_the_hour_box_late_edge` | a finer broadcast at the hour box union's late edge sets the box; qualifying copy 1 s later | pos_04, lnk_02 |
+| `c55_broadcast_copies_at_the_fallback_early_edge` | broadcast copies at the fallback's early edge: first 10 s outside, not chosen, still read for the flag | pos_04, lnk_02 |
 
 The Rules column lists the main rules; each file's `rules` also names the rules its other expected rows cite.
 
@@ -135,6 +141,8 @@ The case list in issue #55's body (section 2, 1 to 35) maps as follows: 1 c01; 2
 
 Casey's answers to the PR #66 questions (PR #66 comment 6968763406, items 2 and 4) map as follows: Q1 c44 (look-back, its 7-day edge, a copy outside both windows, and a copy later in the hour); Q2 c45 (candidates at exactly 24 hours and at the receipt's instant, NeighborInfo at exactly 24 hours), c51 (NeighborInfo at the receipt's instant), c02 and c43 (a receipt's own sender is a candidate for it), c46 and c44 (the 7-day look-back), and c47 (the clock hour); Q3 c50; Q4 c48; Q5 c49; item 4, `lnk_07`'s point order, every kept hour (Loading and comparing). c26's two receipts share an instant at one gateway; both are direct hops, so Q2 changes nothing there.
 
+Casey's answer to PR #72's Q3 (issue #55 comment 6995037213, item 3), as ADR 0003 records it at bfe51aa, maps as follows: the late edge of a stationary end's 7-day look-back, c52; the fallback's late edge, c53; the late edge of the union an hour box is chosen from, c54; the fallback's early edge, c55 (c55-ra, the broadcast cannot be chosen; c55-rb, it is still read for the precise flag). In c52, c53, c54 and c55-ra, timing the broadcast by a later copy, or reading each copy as its own position, gives a different expected row; each case's reasoning says which.
+
 ## Not covered
 
 - A delivery present in two snapshots (`ing_01`): the fixture is one snapshot, as the Python side reads one; B3's `stg_packet` test covers it.
@@ -142,3 +150,6 @@ Casey's answers to the PR #66 questions (PR #66 comment 6968763406, items 2 and 
 - Validation's 3 km filter (`lnk_05`, marts) and `link_source` in `int_link_window`.
 - On the gateway side, an end with no position and an end on an hour box chosen over a finer cell: c15, c26 and c21 test those steps on the relayer side, and c42 tests a moved gateway on the fallback and the one-box test for the gateway.
 - A gateway's own NeighborInfo report uplinked by another gateway: the possible sixth question in PR #66 comment 6967160985, which Casey has not answered. Every report in the fixture is uplinked by the node that sent it.
+- A broadcast's copies at the early edge of the 7-day look-back, which is also the early edge of the hour box's union: staging case s12 (PR #72) pins it; no case here does.
+- The gateway side of c52 to c55: each pins a relayer, and the gateway's positions go through the same steps.
+- Copies of one broadcast that differ in stored values, which the link rules do not match as one position (ADR 0003): every broadcast in the fixture has copies with equal stored values.
