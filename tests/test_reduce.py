@@ -351,3 +351,16 @@ def test_a_broker_list_without_one_host_per_broker_is_refused_before_any_folder(
 def test_the_real_hosts_are_matched_to_brokers_in_broker_order() -> None:
     assert brokers_read(DEFAULT_INFO, ["meshstl"]) == ["mqtt.meshstl.org"]
     assert brokers_read(DEFAULT_INFO, ["public"]) == ["mqtt.meshtastic.org"]
+
+
+def test_a_broker_whose_records_all_fall_outside_its_window_is_still_listed(
+    tmp_path: Path,
+) -> None:
+    """A broker counts as read when one of its capture files was read (PR #81)."""
+    public, meshstl = write_archive(tmp_path / "archive")
+    later = (datetime(2030, 1, 1, tzinfo=UTC), datetime(2030, 1, 2, tzinfo=UTC))
+    sources = [public, replace(meshstl, start=later[0], end=later[1])]
+    folder = reduce_capture(sources, tmp_path / "snapshots", INFO, KEY, workers=1)
+    manifest = read_manifest(folder)
+    assert manifest["outside_window"]["meshstl"] > 0
+    assert manifest["brokers"] == [PUBLIC_HOST, REGIONAL_HOST]
