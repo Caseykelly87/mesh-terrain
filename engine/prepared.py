@@ -1,4 +1,4 @@
-"""Which point layers may reach the engine: synthetic ones, and real ones engine.prepare wrote.
+"""Which point layers may reach the engine: synthetic ones, and real ones a `prepared.json` lists.
 
 engine.prepare checks the real layers it reads (every real row has its box,
 ADR 0008). So that a layer reaches the engine only through those checks
@@ -12,7 +12,8 @@ holds names and hashes only, no coordinate.
 
 This stops accidents, not deliberate bypass (Casey, issue #55 comment
 7024307502, item 2, Q1 (a)). It does not prove who wrote a `prepared.json`:
-a hand-written one that lists a layer's name and sha256 is admitted, and so
+a hand-written one in prepare's format (`written_by` set to
+`engine.prepare`) that lists a layer's name and sha256 is admitted, and so
 is a real layer re-marked `synthetic`, since the marker is the caller's own
 statement.
 """
@@ -60,7 +61,9 @@ def require_admissible_layer(path: Path) -> None:
     Raises:
         ConfigError: for a layer without the positions marker, with a marker
             other than `real` or `synthetic`, or marked `real` without a
-            `prepared.json` beside it listing its name and current sha256.
+            `prepared.json` beside it listing its name and current sha256, or
+            beside one that cannot be read or whose `written_by` is not
+            `engine.prepare`.
     """
     marker = positions_marker(path)
     if marker == SYNTHETIC:

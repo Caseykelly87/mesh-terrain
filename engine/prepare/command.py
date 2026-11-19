@@ -295,12 +295,18 @@ def require_real_boxes(path: Path, endpoints: list[Endpoint]) -> None:
     """
     if layer_schema_version(path) == INPUT_SCHEMA_VERSION:
         unboxed = [e.endpoint_id for e in endpoints if not isinstance(e.box, EdgeBox)]
-        missing = "has no box edges; every row of a real layer with box edges needs its four edges"
+        missing = (
+            "has no box edges; every row of a real layer with box edges needs its four "
+            "edges (Casey, PR #73)"
+        )
     else:
         unboxed = [e.endpoint_id for e in endpoints if not e.box.has_area]
-        missing = "has a box half-width of 0; every row of a real square layer needs a box"
+        missing = (
+            "has a box half-width of 0; every row of a real square layer needs a box "
+            "(Casey, issue #55 comment 7024307502, item 2, Q3 (a))"
+        )
     if unboxed:
-        raise ConfigError(f"{path.name}: row {', '.join(unboxed)} {missing} (Casey, PR #73)")
+        raise ConfigError(f"{path.name}: row {', '.join(unboxed)} {missing}")
 
 
 def _input_marker(path: Path) -> str:

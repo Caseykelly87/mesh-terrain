@@ -10,8 +10,10 @@ in EPSG:26915 with the columns the lead agreed for the x72y429 run (issue
 node at the centre of the box its pairs' counted receipts used, with that
 box's smaller half-width (the inscribed square). Both files carry the
 key `mesh_terrain:positions` with the value `real` in their Parquet metadata
-(Casey, issue #44, 4 (a)); the engine admits a `real` layer only from
-engine.prepare's output (`engine.prepared`), never these files directly.
+(Casey, issue #44, 4 (a)); the engine admits a `real` layer only when a
+`prepared.json` beside it, in engine.prepare's format, lists its current
+sha256 (`engine.prepared`), which stops accidents, not deliberate bypass
+(Casey, issue #55 comment 7024307502, item 2, Q1 (a)).
 
 The sites are the in-tile gateway of every pair that touches the tile, as the
 2026-11-08 counts define touching, and the receiver is the relayer of the pair

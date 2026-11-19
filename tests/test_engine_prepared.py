@@ -1,12 +1,14 @@
-"""Which point layers may reach the engine: synthetic ones, and real ones engine.prepare wrote.
+"""Which point layers may reach the engine: synthetic ones, and real ones a `prepared.json` lists.
 
 Casey, issue #55 comment 7018724580: engine.prepare's checks bind only if
 "a hand-built layer cannot reach the engine". A layer marked `synthetic`
 passes. A layer marked `real` passes only when the `prepared.json` that
 engine.prepare writes beside it lists the layer's name with its sha256, so a
-real layer copied away from that file, or edited after it, is refused. A
-layer without the marker is refused: that is what a hand-built layer looks
-like. Every layer here is made up.
+real layer copied away from that file, or edited after it, is refused, and
+so is a layer without the marker. It stops accidents, not deliberate bypass:
+a hand-written `prepared.json` in prepare's format, or a real layer
+re-marked `synthetic`, still passes (Casey, issue #55 comment 7024307502,
+item 2, Q1 (a)). Every layer here is made up.
 """
 
 import json
