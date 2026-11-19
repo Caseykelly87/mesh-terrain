@@ -56,11 +56,13 @@ import structlog
 from ingester.link_cells import LinkBox
 from ingester.link_rules import KEPT, LinkHour, LinkRulesResult, apply_link_rules
 from ingester.msa import InArea, msa_contains
-from pipeline.common.snapshot import verified_manifest
+from pipeline.common.snapshot import SnapshotError, verified_manifest
 
 log = structlog.get_logger(component="ingester.link_pairs")
 
 DELIVERY_FOLDER = "mqtt_message/"
+# The brokers a merged capture snapshot's manifest lists (`ingester.reduce`).
+MERGED_BROKERS = frozenset({"mqtt.meshtastic.org", "mqtt.meshstl.org"})
 COLUMNS = [
     "delivery_key", "received_at", "gateway_pseudonym", "gateway_low_byte", "origin_pseudonym",
     "origin_low_byte", "packet_id", "relay_node", "via_mqtt", "rx_snr", "rx_rssi", "portnum",
@@ -214,10 +216,12 @@ def read_capture_rows(folder: Path) -> list[dict[str, Any]]:
         One dict per stored delivery, with the columns the link rules read.
 
     Raises:
-        SnapshotError: if the folder has no manifest or a file differs from it.
+        SnapshotError: if the folder has no manifest, a file differs from it,
+            or the manifest does not list both brokers.
     """
     started = time.monotonic()
     manifest = verified_manifest(folder)
+    require_merged(manifest)
     paths = sorted(
         entry["path"]
         for entry in manifest["files"]
@@ -231,6 +235,23 @@ def read_capture_rows(folder: Path) -> list[dict[str, Any]]:
         "capture_read", path=str(folder), files=len(paths), rows=len(rows), duration_s=duration_s
     )
     return rows
+
+
+def require_merged(manifest: dict[str, Any]) -> None:
+    """Refuse a capture snapshot that is not the single merged one.
+
+    `pos_04`'s MeshSTL flag reads every copy of a delivery in any snapshot
+    (Casey, issue #55 comment 6985802330, item 7), and the link rules read
+    one snapshot, so a broadcast's copies must all be in it: the snapshot
+    must merge both brokers (Casey, issue #55 comment 7016583529, item 4).
+
+    Raises:
+        SnapshotError: if the manifest's `brokers` does not list both brokers.
+    """
+    listed = set(manifest.get("brokers") or [])
+    if not MERGED_BROKERS <= listed:
+        missing = ", ".join(sorted(MERGED_BROKERS - listed))
+        raise SnapshotError(f"not a merged snapshot of both brokers; its manifest lacks {missing}")
 
 
 def capture_links(rows: Sequence[dict[str, Any]], inside: InArea | None = None) -> CaptureLinks:
