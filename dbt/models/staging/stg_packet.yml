@@ -71,8 +71,9 @@ models:
           2.2 (Dec 2024), section 13.5.3 GetPacketStatus, Table 13-79 (SnrPkt
           is one byte) and Table 13-80 Status Fields ("two's compliment format
           multiplied by 4", "Actual SNR in dB = SnrPkt/4"). SX1276/77/78/79
-          Data Sheet Rev. 7 (May 2020), section 6.4 LoRa Mode Register Map,
-          page 111, RegPktSnrValue (0x19), bits 7-0 ("In two's compliment
+          Data Sheet Rev. 7 (May 2020), section 6.4 LoRa Mode Register Map
+          (heading 4.4 in the body, page 108), page 112, RegPktSnrValue
+          (0x19), bits 7-0 ("In two's compliment
           format mutiplied by 4"). lnk_06 decides which receipts count:
           [-30, 20] dB in fct_rx_observation.
       - name: rx_rssi
@@ -84,10 +85,11 @@ models:
           2.2 (Dec 2024), section 13.5.3 GetPacketStatus, Table 13-79 (RssiPkt
           is one byte) and Table 13-80 Status Fields ("Actual signal power is
           -RssiPkt/2 (dBm)"), so -127.5 to 0 dBm. SX1276/77/78/79 Data Sheet
-          Rev. 7 (May 2020), section 6.4 LoRa Mode Register Map, page 111,
+          Rev. 7 (May 2020), section 6.4 LoRa Mode Register Map (heading 4.4
+          in the body, page 108), page 112,
           RegPktRssiValue (0x1A), bits 7-0 ("-157 + Rssi" on the HF port,
           "-164 + Rssi" on the LF port), and section 3.5.5 RSSI and SNR in
-          LoRa Mode, page 87, which adds "PacketSnr * 0.25" when SNR < 0 and
+          LoRa Mode (5.5.5 in the contents), page 87, which adds "PacketSnr * 0.25" when SNR < 0 and
           gives the slope correction "-157+16/15 * PacketRssi". The low edge is
           -164 + 0 - 32 = -196 (LF port, SNR -32 dB), the high edge
           -157 + 16/15 x 255 = +115 (HF port, slope correction). The same

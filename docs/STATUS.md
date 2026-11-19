@@ -222,7 +222,7 @@ Last unit: PR #72 (warehouse-eng, B4, branch `feat/link-rule-models`, in review)
 Also in review: PR #75 (warehouse-eng, branch `fix/target-schemas-pg-namespace`): `assert_target_schemas_exist` reads `pg_namespace` instead of `information_schema.schemata`, which hides a schema the role holds no privilege on, so PR #74's test role, which holds none on `raw_dev_wh` or `raw_dev_ta`, no longer sees them missing. The known issue PR #74 adds for this test closes when PR #74, rebased on this PR, passes its dbt-build job as the test role.
 
 Next, in order:
-1. B4, PR #72: Casey's answers are in code and tests, with the datasheet citations; a fixture build and `make -o env check` run in the lead's next slot; then Casey's merge approval with its table and column choices, after the counts-only check of the capture before the lead's real build.
+1. B4, PR #72: Casey's answers are in code and tests, with the datasheet citations; the fixture build and `make -o env check` passed at d016932; then Casey's merge approval with its table and column choices, after the counts-only check of the capture before the lead's real build.
 2. `analytics.mart_data_quality`, Phase 2's funnel, the next unit: the hours the one-box test drops (`lnk_02`) and the Q4 count `lnk_01_direct_hop_contradicted` as a row (Casey, PR #72, Q1), counts only on anything public; then the Phase 2 exit check, the link-hours of the capture in `int_link_window`, on the lead's real build.
 3. The Phase 2 Dagster dbt assets, where the target a lead run uses is settled (Casey, issue #55 comment 6960283869, item 11).
 
