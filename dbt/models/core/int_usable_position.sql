@@ -7,7 +7,9 @@
 -- first copy, and precise when any copy qualifies under pos_04 (Casey, PR
 -- #72, Q3: "(a). A broadcast's gateway copies count as one position, timed
 -- by the first copy, precise if any copy qualifies."). A position without a
--- packet_id stays one row per delivery.
+-- packet_id stays one row per delivery. Its delivery_key is its first
+-- copy's, which breaks a tie at one instant (Casey, PR #72, his answer to
+-- PR #79, Q1: "the broadcast whose first copy has the smaller delivery key").
 --
 -- Each carries its cell's half-open edges and next_conflict_at, the earliest
 -- received_at at or after its own of another position of the node that is
@@ -43,7 +45,7 @@ with deliveries as (
 
 broadcasts as (
     select
-        min(delivery_key) as delivery_key,
+        (array_agg(delivery_key order by received_at, delivery_key))[1] as delivery_key,
         node_pseudonym,
         min(received_at) as received_at,
         latitude_i,
