@@ -20,7 +20,10 @@ D1), the steps the conformance fixture's README numbers:
 3. `lnk_06`: RSSI in [-150, 0) dBm and SNR in [-30, 20] dB, both present.
 4. The positions a node reads: `precision_bits` 15 to 32, both coordinates,
    not 0, 0, stored value inside the MSA (`pos_01` to `pos_03`; Q3), either
-   broker and either source.
+   broker and either source. A broadcast's gateway copies, matched by node,
+   `packet_id` and stored values, are one position, timed by the first copy
+   and qualifying under `pos_04` when any copy does (ADR 0003; Casey, issue
+   #55 comment 6995037213, item 3).
 5. Each end at each receipt: stationary on its 7-day look-back, or the
    position nearest in time within 30 minutes (`ingester.link_cells`).
 6. Each end's box for the hour, over the receipts that passed 1 to 5, when it
@@ -44,14 +47,16 @@ readings ingest-eng proposed on PR #68: a receipt counts once, after
 would have done.
 
 Two readings the fixture does not pin. The copies `ing_06` drops are left
-out as receipts only, so every position delivery, including a later copy of
-one packet, counts for the precise flag; the flag is then true at least as
-often, which keeps more positions from full-precision export and, under
-`lnk_05`, admits more link-hours under 3 km to the validation marts. And a
-NeighborInfo report is the gateway's own when the gateway sent it, whichever
-gateway uplinked it, which is warehouse-eng's reading too (PR #66, comment
-6967498778). Rows with a null or zero `packet_id` are never
-treated as copies of each other.
+out as receipts only; as positions they are copies of their broadcast like
+any other, so a repeat at one gateway can make its broadcast precise but
+never moves its time. And a NeighborInfo report is the gateway's own when
+the gateway sent it, whichever gateway uplinked it, which is warehouse-eng's
+reading too (PR #66, comment 6967498778).
+
+Rows with a null or zero `packet_id` are never treated as copies of each
+other, as receipts or as positions. The SQL side matches a zero `packet_id`
+like any other; the decoder lands zero as null, so only a hand-built row
+can tell the two apart.
 """
 
 import math
@@ -158,7 +163,11 @@ class LinkRulesResult:
 
 @dataclass(frozen=True)
 class Position:
-    """A position `lnk_02` reads, with whether its delivery qualifies under `pos_04`."""
+    """A position `lnk_02` reads, with whether it qualifies under `pos_04`.
+
+    A broadcast's copies are one position at the first copy's time,
+    qualifying when any copy does (ADR 0003).
+    """
 
     received_at: datetime
     cell: Cell
