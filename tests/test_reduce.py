@@ -5,6 +5,7 @@ import json
 import re
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,12 +14,23 @@ import pyarrow.parquet as pq
 import pytest
 
 from ingester.allowlist import TABLES, arrow_schema
+from ingester.link_pairs import require_merged
 from ingester.parquet import content_hash
-from ingester.reduce import LICENCE, SnapshotInfo, Source, ordered_results, reduce_capture
+from ingester.reduce import (
+    DEFAULT_INFO,
+    LICENCE,
+    NothingToReduceError,
+    SnapshotInfo,
+    Source,
+    brokers_read,
+    ordered_results,
+    reduce_capture,
+)
 from ingester.sightings import Broker
 from pipeline.common.snapshot import (
     MANIFEST_NAME,
     PartialExistsError,
+    SnapshotError,
     SnapshotExistsError,
     read_manifest,
     verify_manifest,
@@ -314,22 +326,28 @@ def test_a_public_folder_with_no_file_leaves_its_broker_out(tmp_path: Path, stat
 
 
 def test_a_run_that_reads_no_capture_file_is_refused_before_any_folder(tmp_path: Path) -> None:
-    from ingester.reduce import NothingToReduceError
-
     with pytest.raises(NothingToReduceError):
         reduce_with(tmp_path, "missing", "empty")
     assert not (tmp_path / "snapshots").exists() or not any((tmp_path / "snapshots").iterdir())
 
 
 def test_engine_inputs_refuses_a_reduction_that_read_one_broker(tmp_path: Path) -> None:
-    from dataclasses import replace
-
-    from ingester.link_pairs import require_merged
-    from pipeline.common.snapshot import SnapshotError
-
     real = replace(INFO, brokers=REAL_HOSTS)
     both = reduce_with(tmp_path / "both", "kept", "kept", real)
     require_merged(read_manifest(both))
     one = reduce_with(tmp_path / "one", "kept", "missing", real)
     with pytest.raises(SnapshotError):
         require_merged(read_manifest(one))
+
+
+def test_a_broker_list_without_one_host_per_broker_is_refused_before_any_folder(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="one per broker"):
+        reduce_with(tmp_path, "kept", "kept", replace(INFO, brokers=[PUBLIC_HOST]))
+    assert not (tmp_path / "snapshots").exists() or not any((tmp_path / "snapshots").iterdir())
+
+
+def test_the_real_hosts_are_matched_to_brokers_in_broker_order() -> None:
+    assert brokers_read(DEFAULT_INFO, ["meshstl"]) == ["mqtt.meshstl.org"]
+    assert brokers_read(DEFAULT_INFO, ["public"]) == ["mqtt.meshtastic.org"]
