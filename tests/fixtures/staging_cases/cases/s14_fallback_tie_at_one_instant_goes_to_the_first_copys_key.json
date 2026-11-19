@@ -1,0 +1,34 @@
+{
+  "case_id": "s14_fallback_tie_at_one_instant_goes_to_the_first_copys_key",
+  "title": "Two broadcasts tie at one instant in the fallback: the one whose first copy has the smaller delivery key is taken",
+  "rules": ["lnk_02"],
+  "reasoning": [
+    "lnk_02's fallback takes the position nearest in time within 30 minutes, \"the earlier on a tie\". Casey, PR #72 (his answer to PR #79, Q1), verbatim: \"(a), the broadcast whose first copy has the smaller delivery key.\" A broadcast's copies count as one position timed by its first copy (Casey, PR #72, Q3).",
+    "s14-r sent two broadcasts. Packet 14005, its cell c20 about 1 km north, reached gateway s14-h1 at 23 10:20:00 (s14-m005, the first copy) and gateway s14-h2 at 10:20:02 (s14-m002). Packet 14004, its cell r20, reached s14-r's own uplink at 10:20:00 (s14-m004). Both broadcasts are timed 10:20:00.",
+    "The receipt at 10:30 (s14-m006, a direct hop at s14-g) reads both broadcasts in its 7-day look-back; c20 and r20 neither overlap nor lie within 40 m (their stored values are 1000.315 m apart): moved. The fallback finds both 10 minutes before the receipt, at the same instant, so the tie goes to the smaller delivery key of each broadcast's first copy: s14-m004 (r20) before s14-m005 (c20). Taking the smallest key over all copies instead would compare s14-m002 with s14-m004 and take c20.",
+    "The receipt uses r20 at 2745.603337 m from g16 and is counted. Its hour has 1 packet: dropped by lnk_04."
+  ],
+  "messages": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s14-m001", "received_at": "2026-10-22T09:00:00Z", "origin_pseudonym": "s14-g", "origin_low_byte": 10, "gateway_pseudonym": "s14-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 14001, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 385974272, "longitude_i": -903970816, "precision_bits": 16},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s14-m002", "received_at": "2026-10-23T10:20:02Z", "origin_pseudonym": "s14-r", "origin_low_byte": 20, "gateway_pseudonym": "s14-h2", "gateway_low_byte": 32, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 14005, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386091008, "longitude_i": -903657472, "precision_bits": 20},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s14-m004", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "s14-r", "origin_low_byte": 20, "gateway_pseudonym": "s14-r", "gateway_low_byte": 20, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 14004, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386000896, "longitude_i": -903657472, "precision_bits": 20},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s14-m005", "received_at": "2026-10-23T10:20:00Z", "origin_pseudonym": "s14-r", "origin_low_byte": 20, "gateway_pseudonym": "s14-h1", "gateway_low_byte": 31, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 14005, "relay_node": null, "portnum": 3, "position_source": "position", "latitude_i": 386091008, "longitude_i": -903657472, "precision_bits": 20},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s14-m006", "received_at": "2026-10-23T10:30:00Z", "origin_pseudonym": "s14-r", "origin_low_byte": 20, "gateway_pseudonym": "s14-g", "gateway_low_byte": 10, "via_mqtt": false, "seen_public": true, "seen_meshstl": false, "packet_id": 14006, "relay_node": 20, "portnum": 1, "rx_snr": 6.0, "rx_rssi": -95}
+  ],
+  "boxes": {
+    "r20": {"south_i": 385998848, "north_i": 386002944, "west_i": -903659520, "east_i": -903655424, "merged": false, "precision_bits": 20, "half_width_ns_m": 22.73441, "half_width_ew_m": 17.840521},
+    "g16": {"south_i": 385941504, "north_i": 386007040, "west_i": -904003584, "east_i": -903938048, "merged": false, "precision_bits": 16, "half_width_ns_m": 363.750397, "half_width_ew_m": 285.458876}
+  },
+  "expected_receipts": [
+    {"delivery_key": "s14-m006", "outcome": "counted", "relayer": "s14-r", "link_source": "relay_node", "relayer_box": "r20", "gateway_box": "g16", "distance_m": 2745.603337}
+  ],
+  "expected_link_hours": [
+    {"relayer": "s14-r", "gateway": "s14-g", "hour": "2026-10-23T10:00:00Z", "receipts": ["s14-m006"], "packets": 1, "outcome": "dropped", "rule": "lnk_04"}
+  ],
+  "expected_positions": [
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s14-m001", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s14-m002", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s14-m004", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false},
+    {"snapshot_id": "staging-fixture-a", "delivery_key": "s14-m005", "position_quality": "usable", "position_zero_mapped": false, "precise_source": false, "inside_msa": true, "in_core": true, "core_precise_source": false}
+  ]
+}
