@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ingester.link_cells import Cell
-from ingester.link_rules import Position, build_index
+from ingester.link_rules import Position, apply_link_rules, build_index
 from ingester.msa import msa_contains
 
 CELL = (386000896, -903657472, 20)
@@ -94,15 +94,33 @@ def test_a_repeat_at_one_gateway_is_a_copy_of_the_broadcast() -> None:
 
 
 def test_copies_without_a_packet_id_are_each_their_own_position() -> None:
-    for packet_id in (None, 0):
-        found = positions(
-            copy("b-1", at(40), "b-h1", packet_id=packet_id),
-            copy("b-2", at(40, 1), "b-h2", meshstl=True, packet_id=packet_id),
-        )
-        assert found == [
-            Position(at(40), Cell(*CELL), qualifies=False),
-            Position(at(40, 1), Cell(*CELL), qualifies=True),
-        ], f"packet_id {packet_id}"
+    found = positions(
+        copy("b-1", at(40), "b-h1", packet_id=None),
+        copy("b-2", at(40, 1), "b-h2", meshstl=True, packet_id=None),
+    )
+    assert found == [
+        Position(at(40), Cell(*CELL), qualifies=False),
+        Position(at(40, 1), Cell(*CELL), qualifies=True),
+    ]
+
+
+def test_a_zero_packet_id_is_an_id_like_any_other() -> None:
+    """Casey, PR #79, Q2 (a): only a missing id is no id, as in the SQL."""
+    found = positions(
+        copy("b-1", at(40), "b-h1", packet_id=0),
+        copy("b-2", at(40, 1), "b-h2", meshstl=True, packet_id=0),
+    )
+    assert found == [Position(at(40), Cell(*CELL), qualifies=True)]
+
+
+def test_ing_06_keeps_the_first_copy_of_a_zero_packet_id_at_one_gateway() -> None:
+    """Casey, PR #79, Q2 (a), for `ing_06` too, as `stg_packet` reads it."""
+    rows = [copy(key, when, "b-g", packet_id=0) for key, when in (("b-1", at(40)), ("b-2", at(41)))]
+    for row in rows:
+        row.update(relay_node=21, portnum=1, rx_snr=5.0, rx_rssi=-90, position_source=None)
+    result = apply_link_rules(rows, msa_contains())
+    assert result.receipts["b-1"].rule != "ing_06"
+    assert result.receipts["b-2"].rule == "ing_06"
 
 
 def test_copies_that_differ_in_stored_values_are_separate_positions() -> None:
