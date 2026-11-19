@@ -53,17 +53,18 @@ never moves its time. And a NeighborInfo report is the gateway's own when
 the gateway sent it, whichever gateway uplinked it, which is warehouse-eng's
 reading too (PR #66, comment 6967498778).
 
-Three readings differ from warehouse-eng's SQL on PR #72 (`docs/STATUS.md`,
-Known issues). A null or zero `packet_id` is no id here, both for `ing_06`
-(`later_copies`) and for a broadcast (`broadcast_key`), while the SQL treats
-only null as no id (`stg_packet`, `int_usable_position`); the decoder lands
-zero as null, so only a hand-built row can tell the two apart. When two of
-a node's positions at one instant tie for the fallback, the one whose first
-copy has the smaller `delivery_key` wins here, and in the SQL the one with
-the smallest `delivery_key` among all its copies; Casey is asked which. And
-this module groups a broadcast's copies within the one snapshot it reads,
-while the SQL groups them across every snapshot in core; with one capture
-snapshot, no row reaches that difference.
+Only a missing `packet_id` is no id, both for `ing_06` (`later_copies`) and
+for a broadcast (`broadcast_key`); a zero is an id like any other, as in the
+SQL (Casey, PR #79, Q2 (a)). When two of a node's positions at one instant
+tie for the fallback, the one whose first copy has the smaller
+`delivery_key` wins (Casey, PR #79, Q1 (a); fixture case c56).
+
+A broadcast's copies are grouped within the rows given, one snapshot.
+`pos_04`'s MeshSTL flag reads every copy of a delivery in any snapshot
+(Casey, issue #55 comment 6985802330, item 7), so `engine_inputs` gives
+these rules only a snapshot that merges both brokers
+(`ingester.link_pairs.require_merged`; Casey, issue #55 comment 7016583529,
+item 4). The SQL groups copies across every snapshot in core.
 """
 
 import math
@@ -463,7 +464,8 @@ def end_at(index: Index, node: str, when: datetime) -> EndAt | None:
     """An end's own box at a receipt: stationary on its 7-day look-back, else the fallback.
 
     The fallback takes the position nearest in time within 30 minutes either
-    side, the earlier on a tie; positions at one instant keep row order.
+    side, the earlier on a tie; positions at one instant come in order of
+    their first copy's `delivery_key` (`read_broadcasts`; Casey, PR #79, Q1 (a)).
     """
     timeline = index.positions.get(node)
     if timeline is None:

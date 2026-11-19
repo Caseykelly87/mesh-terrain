@@ -39,8 +39,11 @@ of its hours.
 
 What a position is follows the contract (`pos_01`, `pos_03`): the count of
 rows with one coordinate missing is reported. Every file read is listed in the
-snapshot's manifest and matches its sha256 (`snp_01`). Nothing here prints or
-logs a coordinate.
+snapshot's manifest and matches its sha256 (`snp_01`). The snapshot must be
+the single merged one, its manifest listing both brokers (`require_merged`),
+since the rules group a broadcast's copies within the rows they read and
+`pos_04`'s MeshSTL flag reads every copy in any snapshot (Casey, issue #55
+comment 7016583529, item 4). Nothing here prints or logs a coordinate.
 """
 
 import time
