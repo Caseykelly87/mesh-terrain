@@ -3,9 +3,11 @@
 Casey, issue #55 comment 7017280290, item 2: the values never appear in a
 transcript or log. `tests/conftest.py` keeps them in `tests/raw_schema.py`'s
 private holder and puts placeholders in the environment for the whole
-session; only the two modules whose dbt runs connect, `test_dbt_fixture_build`
-and `test_dbt_targets`, see the real values in the environment, while they
-run. So a test that copies `os.environ` holds no value.
+session; only the modules in its ROLE_IN_ENVIRONMENT, whose code under test
+connects with credentials from the environment (`test_dbt_fixture_build`,
+`test_dbt_targets`, `test_terrain_snapshots_registry`), see the real values
+there, while they run. So a test that copies `os.environ` elsewhere holds no
+value.
 
 A failure report could still show a value held elsewhere: the assertion
 explanation at `-vv`, the locals of each frame with `-l` or `--showlocals` (a
