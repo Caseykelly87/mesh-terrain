@@ -22,10 +22,11 @@
 -- content; every statement that uses them runs inside a DO block whose
 -- failure raises a fixed message naming the step and the SQLSTATE, never the
 -- statement or the server's text. psql shows no CONTEXT line, and the
--- transaction logs no statement text, CONTEXT or slow statement. What it
--- cannot keep out: while that set_config statement runs,
--- pg_stat_activity.query holds both values, visible to superusers (the owner,
--- Dagster's connection) for that moment; no log keeps it.
+-- transaction logs no statement text, CONTEXT, slow or sampled statement. What
+-- it cannot keep out: from the moment that set_config statement starts until
+-- the next statement starts, pg_stat_activity.query holds both values, visible
+-- to superusers (the owner, Dagster's connection) and to members of
+-- pg_read_all_stats or pg_monitor (none today); no log keeps it.
 
 \set ON_ERROR_STOP on
 \set VERBOSITY terse
@@ -35,15 +36,22 @@ set client_min_messages to warning;
 \getenv test_role WAREHOUSE_TEST_USER
 \getenv test_password WAREHOUSE_TEST_PASSWORD
 
+-- The server decides when a transaction starts whether to log all of its
+-- statements (log_transaction_sample_rate), so sampling is turned off for this
+-- session before the transaction begins; the session ends with this file.
+set log_transaction_sample_rate to 0;
+
 begin;
 
--- The server logs a failed statement's text, its CONTEXT, and with
--- log_min_duration_statement any slow statement, and a statement here can hold
--- the password, so none of these is logged in this transaction. Each setting
--- needs a superuser, which the owner is, and ends with the transaction.
+-- The server logs a failed statement's text, its CONTEXT, a slow statement
+-- (log_min_duration_statement) and a sampled one (log_min_duration_sample),
+-- and a statement here can hold the password, so none of these is logged in
+-- this transaction. Each setting needs a superuser, which the owner is, and
+-- ends with the transaction.
 set local log_statement to 'none';
 set local log_min_error_statement to panic;
 set local log_min_duration_statement to -1;
+set local log_min_duration_sample to -1;
 set local log_error_verbosity to terse;
 
 -- Two runs at once would fail on the role and database updates with "tuple
@@ -68,7 +76,7 @@ do $$
 declare
     test_role text := current_setting('mesh_terrain.test_role');
     step text := 'checking WAREHOUSE_TEST_USER';
-    parent text;
+    membership record;
 begin
     if test_role = '' or test_role = current_user then
         raise exception 'WAREHOUSE_TEST_USER must name a role other than the owner';
@@ -89,14 +97,20 @@ begin
         test_role, current_setting('mesh_terrain.test_password')
     );
 
+    -- Each membership is revoked as the role that granted it: a superuser's
+    -- plain revoke removes only its own grants and warns, naming the role,
+    -- about any other grantor's.
     step := 'revoking its memberships';
-    for parent in
-        select p.rolname
+    for membership in
+        select p.rolname as parent, pg_get_userbyid(m.grantor) as grantor
         from pg_auth_members as m
         join pg_roles as p on p.oid = m.roleid
         where m.member = (select oid from pg_roles where rolname = test_role)
     loop
-        execute format('revoke %I from %I cascade', parent, test_role);
+        execute format(
+            'revoke %I from %I granted by %I cascade',
+            membership.parent, test_role, membership.grantor
+        );
     end loop;
 
     step := 'granting connect and create on the database';
