@@ -37,6 +37,7 @@ from shapely.geometry import Point
 import engine.run
 from engine import ENGINE_VERSION, INPUT_SCHEMA_VERSION, MANIFEST_VERSION, SCHEMA_VERSION
 from engine.errors import ConfigError
+from engine.positions_marker import REAL, SYNTHETIC, stamp_positions
 from engine.run import run_engine
 from terrain.baselines import fspl_db
 
@@ -282,6 +283,14 @@ def site_east_xy_m() -> tuple[float, float]:
     return float(point.x), float(point.y)
 
 
+def write_synthetic(layer: gpd.GeoDataFrame, path: Path) -> Path:
+    """Write a made-up point layer marked `synthetic`, as every layer the engine admits
+    is either that or a real layer engine.prepare wrote (Casey, issue #55 comment 7018724580)."""
+    layer.to_parquet(path, index=False)
+    stamp_positions(path, SYNTHETIC)
+    return path
+
+
 def small_receivers(folder: Path, *, at_site: bool = False) -> Path:
     points = [Point(725_400.0, 4_285_300.0), Point(725_700.0, 4_285_800.0)]
     if at_site:
@@ -290,7 +299,7 @@ def small_receivers(folder: Path, *, at_site: bool = False) -> Path:
         {"rx_id": [f"rx-{i}" for i in range(len(points))]}, geometry=points, crs="EPSG:26915"
     )
     path = folder / ("receivers_at_site.parquet" if at_site else "receivers.parquet")
-    layer.to_parquet(path, index=False)
+    write_synthetic(layer, path)
     return path
 
 
@@ -437,7 +446,7 @@ def test_points_outside_the_dem_are_refused(tmp_path: Path) -> None:
         {"rx_id": ["far"]}, geometry=[Point(735_000.0, 4_285_300.0)], crs="EPSG:26915"
     )
     path = tmp_path / "far.parquet"
-    layer.to_parquet(path, index=False)
+    write_synthetic(layer, path)
     with pytest.raises(ConfigError, match="outside the DEM"):
         run_engine(small_config(tmp_path, rx_points=str(path)), fixture_settings())
     assert not (tmp_path / "out").exists()
@@ -685,7 +694,7 @@ def near_site_receivers(folder: Path, offset_m: float) -> Path:
         crs="EPSG:26915",
     )
     path = folder / "near.parquet"
-    layer.to_parquet(path, index=False)
+    write_synthetic(layer, path)
     return path
 
 
@@ -718,7 +727,7 @@ def test_building_draws_are_counted_on_a_1_m_dem_without_clutter_layers(tmp_path
         crs="EPSG:26915",
     )
     path = tmp_path / "buildings_rx.parquet"
-    layer.to_parquet(path, index=False)
+    write_synthetic(layer, path)
     snapshots = dict(fixture_fields()["snapshots"], dsm=None, canopy=None, p1812_maps=None)
     config = small_config(
         tmp_path, rx_points=str(path), models=["fspl", "hata"], snapshots=snapshots
@@ -923,7 +932,7 @@ def test_a_coverage_cell_at_a_receiver_holds_that_receivers_median(tmp_path: Pat
         crs="EPSG:26915",
     )
     path = tmp_path / "centres.parquet"
-    layer.to_parquet(path, index=False)
+    write_synthetic(layer, path)
     run = run_engine(small_config(tmp_path, rx_points=str(path)), fixture_settings())
     rows = gpd.read_parquet(run / "predictions.parquet").set_index(["site_id", "rx_id"])
     with rasterio.open(run / "coverage_site-east_fspl.tif") as coverage:
@@ -961,6 +970,7 @@ def edge_receivers(folder: Path) -> Path:
         values = [getattr(cell, name.removeprefix("box_")) for cell in cells]
         table = table.append_column(name, pa.array(values, type=pa.int64()))
     pq.write_table(table, path)
+    stamp_positions(path, SYNTHETIC)
     return path
 
 
@@ -989,3 +999,22 @@ def test_an_edge_box_run_reproduces_and_records_rectangles(tmp_path: Path) -> No
     )
     assert result.returncode == 0, result.stderr
     assert "EPSG:26915" in result.stdout
+
+
+# Casey, issue #55 comment 7018724580: a hand-built layer cannot reach the engine.
+
+
+@pytest.mark.parametrize("marker", [None, REAL], ids=["unmarked", "real without prepare"])
+def test_a_layer_engine_prepare_did_not_write_is_refused_before_any_write(
+    tmp_path: Path, marker: str | None
+) -> None:
+    path = tmp_path / "hand_built.parquet"
+    gpd.GeoDataFrame(
+        {"rx_id": ["a"]}, geometry=[Point(725_400.0, 4_285_300.0)], crs="EPSG:26915"
+    ).to_parquet(path, index=False)
+    if marker is not None:
+        stamp_positions(path, marker)
+
+    with pytest.raises(ConfigError, match="hand_built.parquet"):
+        run_engine(small_config(tmp_path, rx_points=str(path)), fixture_settings())
+    assert not (tmp_path / "out").exists()
