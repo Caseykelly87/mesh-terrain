@@ -979,3 +979,13 @@ def test_an_edge_box_run_reproduces_and_records_rectangles(tmp_path: Path) -> No
     assert layers["edge_receivers.parquet"]["input_schema_version"] == "1.1.0"
     rows = gpd.read_parquet(runs[0] / "predictions.parquet")
     assert (rows["endpoint_draws"] == fixture_fields()["endpoint_draws"]).all()
+    snippet = interface_snippet().replace('"out/test-tile"', repr(runs[0].as_posix()))
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", snippet],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "EPSG:26915" in result.stdout

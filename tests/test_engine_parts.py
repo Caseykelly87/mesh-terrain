@@ -395,7 +395,7 @@ def test_run_grid_covers_every_corner_of_an_edge_box_plus_the_margin() -> None:
     from test_terrain_edge_boxes import TX_CELL
 
     grid = run_grid([Endpoint(endpoint_id="cell", box=TX_CELL)], 1.0)
-    west, south, east, north = TX_CELL.extent_m
+    west, south, east, north = TX_CELL.extent_m()
 
     assert grid.west_m <= west - 50.0 < grid.west_m + 10.0
     assert grid.south_m <= south - 50.0 < grid.south_m + 10.0
@@ -412,3 +412,27 @@ def test_an_edge_box_takes_the_configured_number_of_draws() -> None:
     point = EndpointBox(centre_xy_m=(725_500.0, 4_285_000.0), half_width_m=0.0)
     assert draws_for(TX_CELL, point, 16) == 16
     assert draws_for(point, TX_CELL, 16) == 16
+
+
+def main_grid_west_m(x_m: float, half_width_m: float, margin_m: float = 50.0) -> float:
+    """The western edge as main computed it before ADR 0008: centre minus (half plus margin)."""
+    return math.floor((x_m - (half_width_m + margin_m)) / 10.0) * 10.0
+
+
+@pytest.mark.parametrize(
+    ("x_m", "half_width_m"),
+    [
+        # Centres where (centre - half) - margin rounds to the other side of a
+        # 10 m edge from centre - (half + margin).
+        (722785.2312240329, 235.23122403299206),
+        (728565.5000097427, 235.5000097427401),
+        (729190.6981243683, 480.6981243683841),
+        (727100.3197679977, 210.3197679977748),
+        (725103.2, 20.0),
+        (723456.7, 182.4),
+    ],
+)
+def test_a_square_box_grid_is_the_grid_main_built(x_m: float, half_width_m: float) -> None:
+    grid = run_grid([endpoint("a", x_m, 4_285_000.0, half_width_m)], 1.0)
+    assert grid.west_m == main_grid_west_m(x_m, half_width_m)
+    assert grid.east_m == math.ceil((x_m + (half_width_m + 50.0)) / 10.0) * 10.0

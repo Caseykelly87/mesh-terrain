@@ -87,7 +87,7 @@ def test_corners_are_south_west_south_east_north_east_north_west() -> None:
     ]
     for corner, want in zip(corners, expected, strict=True):
         assert corner == pytest.approx(want, abs=1e-6)
-    west, south, east, north = TX_CELL.extent_m
+    west, south, east, north = TX_CELL.extent_m()
     assert (west, south) == (min(c[0] for c in corners), min(c[1] for c in corners))
     assert (east, north) == (max(c[0] for c in corners), max(c[1] for c in corners))
 
@@ -213,3 +213,56 @@ def test_edges_are_checked(edges: tuple[object, ...], message: str) -> None:
     south, north, west, east = edges
     with pytest.raises(ValueError, match=message):
         EdgeBox(south_i=south, north_i=north, west_i=west, east_i=east)  # type: ignore[arg-type]
+
+
+def test_first_edge_box_draw_is_pinned_for_a_fixed_seed() -> None:
+    # The first of a box's two draw numbers moves longitude and the second
+    # latitude; swapping them moves every edge-box draw by hundreds of metres.
+    first = draw_endpoints(TX_CELL, RX_CELL, n_draws=16, seed=20261108)[0]
+
+    assert first[0] == pytest.approx((725456.6462583179, 4284488.885814736), abs=1e-6)
+    assert first[1] == pytest.approx((727655.2808909145, 4287941.279346285), abs=1e-6)
+
+
+def test_the_first_unit_moves_longitude_and_the_second_latitude() -> None:
+    south_west, south_east, _, north_west = TX_CELL.corners_xy_m
+    almost_one = math.nextafter(1.0, 0.0)
+    corners = TX_CELL.place(np.array([[-1.0, -1.0], [almost_one, -1.0], [-1.0, almost_one]]))
+
+    assert corners[0] == pytest.approx(south_west, abs=1e-6)
+    assert corners[1] == pytest.approx(south_east, abs=1e-3)
+    assert corners[2] == pytest.approx(north_west, abs=1e-3)
+
+
+@pytest.mark.parametrize(
+    "edges",
+    [
+        (899_999_000, 900_000_000, 1_799_999_000, 1_800_000_000),
+        (-900_000_000, -899_999_000, -1_800_000_000, -1_799_999_000),
+    ],
+    ids=["north and east limits", "south and west limits"],
+)
+def test_edges_on_the_limits_are_accepted(edges: tuple[int, int, int, int]) -> None:
+    south, north, west, east = edges
+    box = EdgeBox(south_i=south, north_i=north, west_i=west, east_i=east)
+    assert (box.south_i, box.north_i, box.west_i, box.east_i) == edges
+
+
+@pytest.mark.parametrize(
+    "edges",
+    [
+        (386_859_008, 386_793_472, -904_134_656, -904_069_120),
+        (386_793_472, 386_859_008, -904_069_120, -904_134_656),
+        (386_793_472.0, 386_859_008, -904_134_656, -904_069_120),
+    ],
+    ids=["south above north", "west above east", "not whole"],
+)
+def test_an_edge_error_names_the_rule_and_no_edge_value(edges: tuple[object, ...]) -> None:
+    # The message reaches the engine's and prepare's logs beside a pseudonym,
+    # so it must not hold a cell's edges.
+    south, north, west, east = edges
+    with pytest.raises(ValueError) as raised:
+        EdgeBox(south_i=south, north_i=north, west_i=west, east_i=east)  # type: ignore[arg-type]
+    message = str(raised.value)
+    for value in edges:
+        assert str(int(value)) not in message  # type: ignore[call-overload]
