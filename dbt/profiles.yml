@@ -23,7 +23,12 @@ mesh_terrain:
     # Track A's copy of dev_wh, so a Track A make check and a Track B one
     # running at once never build into the same schemas: staging_dev_ta,
     # core_dev_ta and analytics_dev_ta, reading raw_dev_ta. Track A runs
-    # make check DBT_DEV_TARGET=dev_ta.
+    # make check DBT_DEV_TARGET=dev_ta. Separate schemas do not make two
+    # checks safe at once: every make check, make dbt-build and make up, from
+    # any checkout, applies that checkout's docker/warehouse/test-role.sql to
+    # the one shared warehouse, takes ownership of what is in all six
+    # development build schemas and takes exclusive locks there, so the
+    # one-at-a-time check slot applies to these targets too (PR #74).
     dev_ta: *warehouse
     # The real raw, staging, core and analytics schemas. Only the lead runs it,
     # through make dbt-build-real.
