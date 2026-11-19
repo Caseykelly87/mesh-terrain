@@ -11,9 +11,9 @@
 -- then the delivery key that sort first, so a rebuild keeps the same row.
 -- A reading the radio chips cannot report lands as missing (lnk_06:
 -- impossible values are treated as missing): an SNR that is not a number or
--- outside -32 to 31.75 dB, an RSSI outside -189 to +98 dBm, both inclusive
--- (Casey, PR #72, Q2). Plausibility stays lnk_06's job, in
--- fct_rx_observation. Coordinates stay out: positions are
+-- outside -32 to 31.75 dB, an RSSI outside -196 to +115 dBm, both inclusive
+-- (Casey, PR #72; the datasheet sections are cited in stg_packet.yml).
+-- Plausibility stays lnk_06's job, in fct_rx_observation. Coordinates stay out: positions are
 -- stg_position's, and nothing leaves staging at 0, 0 (pos_03). hop_start and
 -- hop_limit stay out: no link rule reads either (lnk_01).
 
@@ -76,7 +76,7 @@ select
     via_mqtt,
     rx_time,
     case when rx_snr between -32 and 31.75 then rx_snr end as rx_snr,
-    case when rx_rssi between -189 and 98 then rx_rssi end as rx_rssi,
+    case when rx_rssi between -196 and 115 then rx_rssi end as rx_rssi,
     channel,
     portnum,
     payload_length,
