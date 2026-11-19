@@ -85,6 +85,8 @@ from pipeline.common import snapshot as common
 
 SNAPSHOT_ID = "capture-fixture-2026-10-22"
 DEM_SNAPSHOT_ID = "dem-fixture-x72y429"
+# The reduction writes both brokers into a merged snapshot's manifest.
+BOTH_BROKERS = ("mqtt.meshtastic.org", "mqtt.meshstl.org")
 # The real x72y429 DEM's bounds (issue #44, step 2), held by a 2 by 2 raster of
 # 5006 m pixels: the command reads only the bounds.
 DEM_BOUNDS_M = (719_994.0, 4_279_994.0, 730_006.0, 4_290_006.0)
@@ -417,6 +419,7 @@ def build_capture(
     nested_g3: bool = False,
     ignored_a: bool = False,
     moved_g3: bool = False,
+    brokers: tuple[str, ...] | None = BOTH_BROKERS,
 ) -> Path:
     """Write the synthetic capture snapshot under root and return its finished folder.
 
@@ -441,6 +444,7 @@ def build_capture(
         ignored_a: A also sends a box outside the MSA and a coarse box.
         moved_g3: G3 has a second place 2 km west inside the tile, in a
             second pair, so it used two boxes and does not straddle.
+        brokers: The manifest's `brokers`; None leaves the field out.
     """
     rows = RowMaker()
     _positions(rows, one_coordinate, g3_at_edge)
@@ -468,17 +472,21 @@ def build_capture(
     # The reproduction gate reads these two files; the command does not.
     for name in ("coverage.json", "coverage_roots.json"):
         (partial / name).write_text(json.dumps({}), encoding="utf-8")
-    return _finish(partial, SNAPSHOT_ID)
+    return _finish(partial, SNAPSHOT_ID, brokers)
 
 
-def _finish(partial: Path, snapshot_id: str) -> Path:
-    metadata = {
+def _finish(
+    partial: Path, snapshot_id: str, brokers: tuple[str, ...] | None = BOTH_BROKERS
+) -> Path:
+    metadata: dict[str, Any] = {
         "snapshot_id": snapshot_id,
         "capture_date": "2026-10-22",
         "source_url": "synthetic",
         "licence": "synthetic test data",
         "seeds": {},
     }
+    if brokers is not None:
+        metadata["brokers"] = list(brokers)
     common.write_manifest(partial, metadata, required=common.REQUIRED_METADATA)
     return common.finish_snapshot(partial)
 
@@ -506,4 +514,4 @@ def build_dem(root: Path, bounds_m: tuple[float, float, float, float] = DEM_BOUN
     }
     with rasterio.open(partial / "dem.tif", "w", **profile) as dataset:
         dataset.write(np.full((1, 2, 2), 150.0, dtype="float32"))
-    return _finish(partial, DEM_SNAPSHOT_ID)
+    return _finish(partial, DEM_SNAPSHOT_ID, brokers=None)

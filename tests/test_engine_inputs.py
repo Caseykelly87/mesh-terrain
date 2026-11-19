@@ -590,6 +590,25 @@ def test_command_refuses_a_changed_snapshot(tmp_path: Path, capture: Path) -> No
     assert run(tmp_path) == 2
 
 
+@pytest.mark.parametrize(
+    "brokers",
+    [("mqtt.meshtastic.org",), ("mqtt.meshstl.org",), None],
+    ids=["public", "meshstl", "none"],
+)
+@pytest.mark.parametrize("flags", [(), ("--sites-only",)])
+def test_command_refuses_a_snapshot_that_does_not_merge_both_brokers(
+    tmp_path: Path, brokers: tuple[str, ...] | None, flags: tuple[str, ...]
+) -> None:
+    """Item 7's MeshSTL flag reads every copy in any snapshot; the command reads one.
+
+    Casey, issue #55 comment 7016583529, item 4.
+    """
+    build_dem(tmp_path / "snapshots")
+    build_capture(tmp_path / "snapshots", brokers=brokers)
+    assert run(tmp_path, flags=flags) == 2
+    assert not (tmp_path / "configs").exists()
+
+
 def test_command_refuses_a_missing_dem_snapshot(tmp_path: Path) -> None:
     build_capture(tmp_path / "snapshots")
     assert run(tmp_path) == 2
