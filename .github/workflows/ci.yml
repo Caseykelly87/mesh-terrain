@@ -90,9 +90,8 @@ jobs:
       # SQL developers use, so CI checks the real artefact rather than a stock
       # service container without h3-pg.
       - run: docker compose up --build --detach --wait --wait-timeout 300 warehouse
-      # The development dbt targets connect as the test role, which make up
-      # creates; this job starts only the warehouse, so it creates it here.
-      - run: make test-role
+      # make dbt-build creates or refreshes the test role itself before dbt
+      # connects as it; dbt-debug connects as the owner.
       - run: make dbt-debug
       - run: make dbt-build
       - if: always()

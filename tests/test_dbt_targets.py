@@ -45,6 +45,8 @@ CREATED_SCHEMA = re.compile(r'create schema if not exists "([^"]+)"', re.IGNOREC
 REAL_SCHEMAS = {"raw", "staging", "core", "analytics"}
 REAL_BUILD_FLAG = "{real_build: true}"
 SQL_FOLDERS = ("models", "tests", "snapshots", "macros", "analyses")
+# Never the real values: a dry run needs only that the two are set.
+INVENTED_TEST_ROLE = {"WAREHOUSE_TEST_USER": "invented", "WAREHOUSE_TEST_PASSWORD": "invented"}
 JINJA = re.compile(r"\{\{.*?\}\}|\{%.*?%\}|\{#.*?#\}", re.DOTALL)
 SQL_COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
 SCHEMA_REFERENCE = re.compile(
@@ -140,13 +142,16 @@ def make_dry_run(
     a calling make passes down (MAKEFLAGS carries its command-line variables)
     and any DBT_DEV_TARGET, so `make check DBT_DEV_TARGET=dev_ta` running this
     test does not change what it sees; dbt_dev_target, when given, puts one
-    back in the environment.
+    back in the environment. make check and make dbt-build stop without the
+    test role's two values (PR #74), so the environment carries invented
+    ones in place of any the caller has; a dry run prints only their names.
     """
     make = shutil.which("make")
     if make is None:
         pytest.skip("make is not installed")
     passed_down = {"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "DBT_DEV_TARGET"}
     environment = {name: value for name, value in os.environ.items() if name not in passed_down}
+    environment.update(INVENTED_TEST_ROLE)
     if dbt_dev_target is not None:
         environment["DBT_DEV_TARGET"] = dbt_dev_target
     return subprocess.run(
