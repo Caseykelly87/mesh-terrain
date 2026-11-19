@@ -45,7 +45,14 @@ import psycopg
 import pytest
 from psycopg import errors, sql
 from raw_schema import REAL_SCHEMAS as WATCHED
-from raw_schema import SCHEMA_PREFIX, UNCONFIGURED_ROLE, connect_or_skip, server_refused_login
+from raw_schema import (
+    SCHEMA_PREFIX,
+    UNCONFIGURED_ROLE,
+    RoleForTests,
+    connect_or_skip,
+    server_refused_login,
+    session_credentials,
+)
 
 from ingester import load
 from pipeline.common.settings import get_settings
@@ -177,20 +184,20 @@ def send(session: RoleSession, schema: str, template: str) -> None:
         session.conn.execute(composed(template, session, schema))
 
 
+SERVER = 'connection to server at "127.0.0.1", port 5433 failed: '
+
+
 @pytest.mark.parametrize(
     ("message", "refused"),
     [
-        (
-            'connection to server at "127.0.0.1", port 5433 failed: FATAL:  password '
-            'authentication failed for user "mesh_test"',
-            True,
-        ),
-        (
-            'connection to server at "127.0.0.1", port 5433 failed: FATAL:  role "mesh_test" '
-            "does not exist",
-            True,
-        ),
-        ('connection to server at "127.0.0.1", port 5433 failed: Connection refused', False),
+        (SERVER + 'FATAL:  password authentication failed for user "mesh_test"', True),
+        (SERVER + 'FATAL:  role "test_role_not_configured" does not exist', True),
+        (SERVER + 'FATAL:  no pg_hba.conf entry for host "172.18.0.1", user "x"', True),
+        # The server answered but is not refusing this login; a later run may pass.
+        (SERVER + "FATAL:  the database system is starting up", False),
+        # libpq stops before the server can refuse: an empty password is none.
+        (SERVER + "fe_sendauth: no password supplied", False),
+        (SERVER + "Connection refused", False),
         ("connection timeout expired", False),
     ],
 )
@@ -198,6 +205,26 @@ def test_a_refused_login_is_told_apart_from_a_server_that_does_not_answer(
     message: str, refused: bool
 ) -> None:
     assert server_refused_login(psycopg.OperationalError(message)) is refused
+
+
+@pytest.mark.parametrize(
+    "error",
+    [errors.InvalidPassword("refused"), errors.InvalidAuthorizationSpecification("refused")],
+)
+def test_a_refusal_with_an_authentication_sqlstate_counts_whatever_its_text(
+    error: psycopg.Error,
+) -> None:
+    assert server_refused_login(error)
+
+
+def test_with_no_test_role_the_tests_log_in_with_a_password_the_server_will_refuse() -> None:
+    user, password = session_credentials(None)
+    assert user == UNCONFIGURED_ROLE
+    assert password != ""
+
+
+def test_a_configured_test_role_is_used_as_it_is() -> None:
+    assert session_credentials(RoleForTests("mesh_test", "secret")) == ("mesh_test", "secret")
 
 
 def test_the_tests_connect_as_the_test_role() -> None:
