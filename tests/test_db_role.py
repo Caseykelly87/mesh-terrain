@@ -43,6 +43,7 @@ from typing import NamedTuple
 
 import psycopg
 import pytest
+import raw_schema
 from psycopg import errors, sql
 from raw_schema import REAL_SCHEMAS as WATCHED
 from raw_schema import (
@@ -55,7 +56,6 @@ from raw_schema import (
 )
 
 from ingester import load
-from pipeline.common.settings import get_settings
 
 TABLE = "snapshot"
 OWN_ROW = sql.SQL(
@@ -226,14 +226,10 @@ def test_a_refused_login_fails_without_naming_the_role(monkeypatch: pytest.Monke
             f'failed: FATAL:  password authentication failed for user "{invented}"'
         )
 
-    monkeypatch.setenv("WAREHOUSE_USER", invented)
-    get_settings.cache_clear()
+    monkeypatch.setattr(raw_schema, "_role", [RoleForTests(invented, "invented_password")])
     monkeypatch.setattr(psycopg, "connect", refuse)
-    try:
-        with pytest.raises(pytest.fail.Exception) as failure:
-            connect_or_skip()
-    finally:
-        get_settings.cache_clear()
+    with pytest.raises(pytest.fail.Exception) as failure:
+        connect_or_skip()
     assert invented not in str(failure.value)
     # pytest reports a chained exception's text too, and the driver's names the role.
     assert failure.value.__context__ is None
@@ -251,22 +247,14 @@ def test_a_configured_test_role_is_used_as_it_is() -> None:
 
 
 def test_the_tests_connect_as_the_test_role() -> None:
-    settings = get_settings()
-    # Each check is reduced to a bool first, so a failure report shows no role
-    # name (Casey, issue #55 comment 7017280290, item 2).
-    configured = settings.warehouse_user != UNCONFIGURED_ROLE
-    assert configured, (
+    # Each check returns a bool, so a failure report holds no role name
+    # (Casey, issue #55 comment 7017280290, item 2).
+    assert raw_schema.role_configured(), (
         "no test role: export WAREHOUSE_TEST_USER and WAREHOUSE_TEST_PASSWORD (README, Test "
         "role), naming a role other than WAREHOUSE_USER, then run make test-role"
     )
-    in_use = settings.warehouse_user == settings.warehouse_test_user
-    assert in_use, "the tests' WAREHOUSE_USER is not the configured test role"
     with connect_or_skip() as conn:
-        row = conn.execute(
-            "select current_user = %s and session_user = %s",
-            (settings.warehouse_test_user, settings.warehouse_test_user),
-        ).fetchone()
-    assert row == (True,), "the session is not the configured test role"
+        assert raw_schema.session_is_the_test_role(conn), "the session is not the test role"
 
 
 def test_the_test_role_has_no_attribute_or_membership_that_passes_a_grant() -> None:
