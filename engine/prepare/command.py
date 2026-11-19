@@ -50,9 +50,10 @@ import structlog
 from pydantic import ValidationError
 from shapely.geometry import Point
 
+from engine import INPUT_SCHEMA_VERSION
 from engine.config import SnapshotIds, load_config
 from engine.errors import ConfigError
-from engine.points import BOX_COLUMN, EDGE_COLUMNS, Endpoint, read_points
+from engine.points import BOX_COLUMN, EDGE_COLUMNS, Endpoint, layer_schema_version, read_points
 from engine.positions_marker import (
     POSITIONS_KEY,
     REAL,
@@ -248,12 +249,15 @@ def _read_receivers(folder: Path, real_receivers: bool) -> tuple[list[Endpoint],
     if not real_receivers:
         return [], SYNTHETIC
     path = _agreed_layer(folder / REAL_RECEIVERS_FILE, RECEIVER_COLUMNS)
-    return read_points(path, "rx_id"), _input_marker(path)
+    receivers = read_points(path, "rx_id")
+    require_real_boxes(path, receivers)
+    return receivers, _input_marker(path)
 
 
 def _read_sites(path: Path) -> tuple[list[Endpoint], dict[str, str]]:
     """The real sites and each one's role, refusing a role or id the run cannot take."""
     sites = read_points(_agreed_layer(path, SITE_COLUMNS), "site_id")
+    require_real_boxes(path, sites)
     table = pq.read_table(path, columns=["site_id", "role"]).to_pydict()
     roles = dict(zip(table["site_id"], table["role"], strict=True))
     for site in sites:
@@ -267,6 +271,32 @@ def _read_sites(path: Path) -> tuple[list[Endpoint], dict[str, str]]:
                 f"{path.name}: site_id {site.endpoint_id!r} cannot name a coverage file"
             )
     return sites, roles
+
+
+def require_real_boxes(path: Path, endpoints: list[Endpoint]) -> None:
+    """Refuse a real layer with box edges in which a row has none (Casey, PR #73).
+
+    A real node always has a position box, so in a layer with the edge
+    columns a row with all four edges null would be drawn as an exact point
+    and the run's `box_form` would be false for it. Square layers keep their
+    own rules. The grid prepare adds is written after this check and never
+    read through it.
+
+    Args:
+        path: The real layer, `tx_sites_real.parquet` or `rx_real.parquet`.
+        endpoints: Its rows, as `read_points` returned them.
+
+    Raises:
+        ConfigError: naming the rows without edges.
+    """
+    if layer_schema_version(path) != INPUT_SCHEMA_VERSION:
+        return
+    unboxed = [e.endpoint_id for e in endpoints if not isinstance(e.box, EdgeBox)]
+    if unboxed:
+        raise ConfigError(
+            f"{path.name}: row {', '.join(unboxed)} has no box edges; every row of a real "
+            "layer with box edges needs its four edges (Casey, PR #73)"
+        )
 
 
 def _input_marker(path: Path) -> str:
