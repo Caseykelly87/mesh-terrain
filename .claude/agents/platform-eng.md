@@ -43,6 +43,8 @@ Push your branch after every commit (Casey, issue #55 comment 6966197127, item 5
 
 Add only your own lines to the shared sections of `docs/STATUS.md` and never edit another agent's lines; every comment you post on a PR, a run report included, follows the counts-only rule for real data and never includes ids, positions or outcomes (Casey, PR #64 comment 6968763718, item 5; Casey, issue #55 comment 6985802330, item 10).
 
+Never run warehouse tests with `-s`, `--capture=no`, `--capture=tee-sys`, `--pdb`, `--trace` or `--full-trace`: output they print is not a pytest report, so the test role's values are not scrubbed from it; a pytest INTERNALERROR stays the one case left (Casey, issue #55 comment 7025664165, item 2).
+
 ## Stop and ask
 
 - Before creating any cloud resource.
