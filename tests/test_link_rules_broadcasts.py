@@ -78,6 +78,11 @@ def test_the_first_copy_times_the_broadcast_whatever_the_row_order() -> None:
     assert found == [Position(at(40), Cell(*CELL), qualifies=True)]
 
 
+def test_a_qualifying_first_copy_keeps_the_broadcast_precise() -> None:
+    found = positions(copy("b-1", at(40), "b-h1", meshstl=True), copy("b-2", at(40, 1), "b-h2"))
+    assert found == [Position(at(40), Cell(*CELL), qualifies=True)]
+
+
 def test_a_broadcast_with_no_qualifying_copy_is_not_precise() -> None:
     found = positions(copy("b-1", at(40), "b-h1"), copy("b-2", at(40, 1), "b-h2"))
     assert found == [Position(at(40), Cell(*CELL), qualifies=False)]
@@ -107,6 +112,29 @@ def test_copies_that_differ_in_stored_values_are_separate_positions() -> None:
     assert found == [
         Position(at(40), Cell(*CELL), qualifies=False),
         Position(at(40, 1), Cell(*COARSER), qualifies=False),
+    ]
+
+
+def test_copies_that_differ_only_in_precision_bits_are_separate_positions() -> None:
+    # A 32-bit position at the 20-bit cell's stored value: the same integers.
+    finest = (CELL[0], CELL[1], 32)
+    found = positions(
+        copy("b-1", at(40), "b-h1"), copy("b-2", at(40, 1), "b-h2", cell=finest, meshstl=True)
+    )
+    assert found == [
+        Position(at(40), Cell(*CELL), qualifies=False),
+        Position(at(40, 1), Cell(*finest), qualifies=True),
+    ]
+
+
+def test_two_packets_of_one_node_at_one_place_are_two_positions() -> None:
+    found = positions(
+        copy("b-1", at(40), "b-h1", packet_id=7001),
+        copy("b-2", at(45), "b-h1", packet_id=7002, meshstl=True),
+    )
+    assert found == [
+        Position(at(40), Cell(*CELL), qualifies=False),
+        Position(at(45), Cell(*CELL), qualifies=True),
     ]
 
 
