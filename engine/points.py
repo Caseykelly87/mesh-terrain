@@ -36,6 +36,10 @@ EDGE_COLUMNS = ("box_south_i", "box_north_i", "box_west_i", "box_east_i")
 CENTRE_TOLERANCE_M = 0.001
 """How far a row's point may lie from its edge box's centre, metres."""
 
+POINT_SCHEMA_VERSIONS = ("1.0.0", "1.1.0")
+"""Point layer schemas: 1.0.0 is the id, the geometry and `box_half_width_m`;
+1.1.0 adds the four box edges (ADR 0008)."""
+
 BoxForm = Literal["rectangle", "square", "point"]
 
 
@@ -103,6 +107,19 @@ def box_form(endpoints: Sequence[Endpoint]) -> BoxForm:
     if any(e.box.has_area for e in endpoints):
         return "square"
     return "point"
+
+
+def layer_schema_version(path: Path) -> str:
+    """The point layer schema a layer's columns use, for the manifest (Casey, PR #73, Q2 (b)).
+
+    Args:
+        path: A GeoParquet point layer `read_points` has accepted.
+
+    Returns:
+        "1.1.0" when the layer carries the box edge columns, else "1.0.0".
+    """
+    names = set(pq.read_schema(path).names)
+    return POINT_SCHEMA_VERSIONS[1] if names & set(EDGE_COLUMNS) else POINT_SCHEMA_VERSIONS[0]
 
 
 def _check_layer(layer: gpd.GeoDataFrame, path: Path, id_column: str) -> None:
