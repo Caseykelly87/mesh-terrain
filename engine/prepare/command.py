@@ -44,6 +44,7 @@ from shutil import rmtree
 from typing import Any
 
 import geopandas as gpd
+import pandas as pd
 import pyarrow.parquet as pq
 import structlog
 from pydantic import ValidationError
@@ -51,7 +52,7 @@ from shapely.geometry import Point
 
 from engine.config import SnapshotIds, load_config
 from engine.errors import ConfigError
-from engine.points import Endpoint, read_points
+from engine.points import BOX_COLUMN, EDGE_COLUMNS, Endpoint, read_points
 from engine.positions_marker import (
     POSITIONS_KEY,
     REAL,
@@ -74,14 +75,15 @@ from engine.run import SITE_ID
 from engine.settings import EngineSettings
 from engine.snapshots import NamedSnapshot, resolve_snapshots
 from pipeline.common.logging import configure_logging
+from terrain.boxes import EdgeBox, EndpointBox
 
 log = structlog.get_logger(component="engine.prepare")
 
 REAL_SITES_FILE = "tx_sites_real.parquet"
 REAL_RECEIVERS_FILE = "rx_real.parquet"
 CROSSING_FILE = "crossing.md"
-SITE_COLUMNS = ("site_id", "geometry", "box_half_width_m", "role")
-RECEIVER_COLUMNS = ("rx_id", "geometry", "box_half_width_m")
+SITE_COLUMNS = ("site_id", "geometry", "role")
+RECEIVER_COLUMNS = ("rx_id", "geometry")
 SITE_ROLES = ("both_ends_gateway", "gateway_only_gateway")
 GRID_ONLY_TILES = ("x72y429",)
 """Tiles whose run may take the grid alone as receivers (Casey, engine_inputs (c), 2026-11-17)."""
@@ -229,6 +231,11 @@ def _agreed_layer(path: Path, columns: Sequence[str]) -> Path:
     missing = [name for name in columns if name not in names]
     if missing:
         raise ConfigError(f"{path.name} lacks the agreed column {', '.join(missing)}")
+    if BOX_COLUMN not in names and not any(name in names for name in EDGE_COLUMNS):
+        raise ConfigError(
+            f"{path.name} lacks a position box: the agreed column {BOX_COLUMN}, or the four "
+            f"box edges {', '.join(EDGE_COLUMNS)} (ADR 0008)"
+        )
     return path
 
 
@@ -343,12 +350,12 @@ def _crossing_report(
             Site(
                 site_id=s.endpoint_id,
                 role=roles[s.endpoint_id],
-                half_width_m=s.box.half_width_m,
+                reach_m=s.box.reach_m,
                 in_run=s.endpoint_id in run_ids,
             )
             for s in sites
         ],
-        receiver_half_widths={r.endpoint_id: r.box.half_width_m for r in receivers},
+        receiver_reaches={r.endpoint_id: r.box.reach_m for r in receivers},
         real=path_crossings(in_run, receivers, cells),
         grid=path_crossings(in_run, grid, cells),
         real_receivers=real_receivers,
@@ -356,16 +363,34 @@ def _crossing_report(
 
 
 def _layer(id_column: str, endpoints: list[Endpoint]) -> gpd.GeoDataFrame:
-    """A point layer in the column order the engine's INTERFACE lists."""
+    """A point layer in the column order the engine's INTERFACE lists.
+
+    Edge boxes keep their four edges, with all four null on an exact point
+    such as a grid receiver (ADR 0008); squares keep `box_half_width_m`.
+    """
     layer = gpd.GeoDataFrame(
-        {
-            id_column: [e.endpoint_id for e in endpoints],
-            "box_half_width_m": [float(e.box.half_width_m) for e in endpoints],
-        },
+        {id_column: [e.endpoint_id for e in endpoints], **_box_columns(endpoints)},
         geometry=[Point(e.box.centre_xy_m) for e in endpoints],
         crs=LAYER_CRS,
     )
-    return layer[[id_column, "geometry", "box_half_width_m"]]
+    return layer[
+        [id_column, "geometry", *(name for name in layer.columns if name.startswith("box_"))]
+    ]
+
+
+def _box_columns(endpoints: list[Endpoint]) -> dict[str, Any]:
+    """Each box in the form its layer gave it; one form per layer."""
+    boxes = [e.box for e in endpoints]
+    if any(isinstance(box, EdgeBox) for box in boxes):
+        edges = [
+            (box.south_i, box.north_i, box.west_i, box.east_i) if isinstance(box, EdgeBox) else None
+            for box in boxes
+        ]
+        return {
+            name: pd.array([None if e is None else e[index] for e in edges], dtype="Int64")
+            for index, name in enumerate(EDGE_COLUMNS)
+        }
+    return {BOX_COLUMN: [float(box.half_width_m) for box in boxes if isinstance(box, EndpointBox)]}
 
 
 def move_into_place(source: Path, target: Path) -> None:

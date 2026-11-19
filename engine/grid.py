@@ -1,10 +1,11 @@
 """The run's grid: the rectangle every terrain layer and coverage file is written on.
 
 The extent is the bounding box of every site and receiver box plus a margin,
-in EPSG:26915 metres, widened to eastings and northings that are multiples of
-10 m. Those edges are the edges of P.1812's 10 m cells (`terrain.cells`), so
-the terrain build's 1 m layers sit on whole metres as `FineLayers` requires,
-and a coverage file at 10 m has one cell per P.1812 cell. The margin keeps
+in EPSG:26915 metres (an `lnk_02` edge box by its four converted corners),
+widened to eastings and northings that are multiples of 10 m. Those edges are
+the edges of P.1812's 10 m cells (`terrain.cells`), so the terrain build's 1 m
+layers sit on whole metres as `FineLayers` requires, and a coverage file at
+10 m has one cell per P.1812 cell. The margin keeps
 every profile's bilinear reads and every cell window inside the build.
 """
 
@@ -90,12 +91,12 @@ def run_grid(
         raise ValueError("a run grid needs at least one endpoint")
     if not (ALIGN_M / resolution_m).is_integer():
         raise ValueError(f"a {resolution_m} m DEM does not divide the 10 m cell grid")
-    boxes = [(e.box.centre_xy_m, e.box.half_width_m + margin_m) for e in endpoints]
+    extents = [e.box.extent_m for e in endpoints]
     return RunGrid(
-        west_m=_down(min(xy[0] - reach for xy, reach in boxes)),
-        south_m=_down(min(xy[1] - reach for xy, reach in boxes)),
-        east_m=_up(max(xy[0] + reach for xy, reach in boxes)),
-        north_m=_up(max(xy[1] + reach for xy, reach in boxes)),
+        west_m=_down(min(extent[0] for extent in extents) - margin_m),
+        south_m=_down(min(extent[1] for extent in extents) - margin_m),
+        east_m=_up(max(extent[2] for extent in extents) + margin_m),
+        north_m=_up(max(extent[3] for extent in extents) + margin_m),
         resolution_m=resolution_m,
     )
 

@@ -2,11 +2,15 @@
 
 The fields of `docs/INTERFACE.md` (manifest_version 1.0.0) plus the six code
 provenance fields of `engine.provenance` (Casey, PR #32), which make it
-1.1.0. Every input and artifact carries its file sha256; every artifact also
-carries its `content_sha256` (`engine.hashing`), and Parquet artifacts their
-row count. Input paths are written as the config names them, and profile
-files as `profiles/<name>.yaml`. The manifest is the only file of a run that
-holds a time, so it is never content-hashed.
+1.1.0, and on the two point layers' input entries their `input_schema_version`
+and `box_form` (`rectangle`, `square` or `point`), which make it 1.2.0
+(ADR 0008, Casey's Q2 (b) on PR #73: a run's manifest says whether its draws
+used rectangles or squares without opening the layers). Every input and
+artifact carries its file sha256; every artifact also carries its
+`content_sha256` (`engine.hashing`), and Parquet artifacts their row count.
+Input paths are written as the config names them, and profile files as
+`profiles/<name>.yaml`. The manifest is the only file of a run that holds a
+time, so it is never content-hashed.
 """
 
 import json
@@ -17,9 +21,10 @@ from typing import Any
 
 import pyarrow.parquet as pq
 
-from engine import ENGINE_VERSION, MANIFEST_VERSION, SCHEMA_VERSION
+from engine import ENGINE_VERSION, INPUT_SCHEMA_VERSION, MANIFEST_VERSION, SCHEMA_VERSION
 from engine.config import RunConfig
 from engine.hashing import content_sha256
+from engine.points import BoxForm
 from engine.provenance import Provenance
 from engine.snapshots import NamedSnapshot
 from pipeline.common.snapshot import sha256_file
@@ -52,8 +57,13 @@ def artifact_entry(folder: Path, path: Path) -> dict[str, Any]:
     return entry
 
 
-def input_entries(config: RunConfig) -> list[dict[str, str]]:
-    """The run's input files: point layers as the config names them, then profiles."""
+def input_entries(config: RunConfig, box_forms: dict[str, BoxForm]) -> list[dict[str, str]]:
+    """The run's input files: point layers as the config names them, then profiles.
+
+    Args:
+        config: The run's config.
+        box_forms: The box form of the `tx_sites` and `rx_points` layers.
+    """
     paths = {"tx_sites": config.tx_sites, "rx_points": config.rx_points}
     if config.calibration is not None:
         paths["calibration"] = config.calibration
@@ -61,6 +71,10 @@ def input_entries(config: RunConfig) -> list[dict[str, str]]:
         {"path": config.input_names[field], "sha256": sha256_file(path)}
         for field, path in paths.items()
     ]
+    for field, entry in zip(paths, entries, strict=True):
+        if field in box_forms:
+            entry["input_schema_version"] = INPUT_SCHEMA_VERSION
+            entry["box_form"] = box_forms[field]
     entries += [
         {"path": f"profiles/{path.name}", "sha256": sha256_file(path)}
         for path in dict.fromkeys(config.profile_files)
@@ -74,6 +88,7 @@ def write_run_manifest(
     snapshots: dict[str, NamedSnapshot],
     provenance: Provenance,
     artifacts: list[Path],
+    box_forms: dict[str, BoxForm],
 ) -> Path:
     """Write `manifest.json` into the run's `.partial` folder, after every artifact.
 
@@ -83,6 +98,7 @@ def write_run_manifest(
         snapshots: The verified snapshots by role.
         provenance: The code provenance fields.
         artifacts: Every artifact written, in the order written.
+        box_forms: The box form of the `tx_sites` and `rx_points` layers.
 
     Returns:
         The manifest's path.
@@ -100,7 +116,7 @@ def write_run_manifest(
         "snapshots": [
             {"id": s.snapshot_id, "manifest_sha256": s.manifest_sha256} for s in snapshots.values()
         ],
-        "inputs": input_entries(config),
+        "inputs": input_entries(config, box_forms),
         "artifacts": [artifact_entry(folder, path) for path in artifacts],
     }
     path = folder / MANIFEST_NAME

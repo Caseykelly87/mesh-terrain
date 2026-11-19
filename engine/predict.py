@@ -36,7 +36,7 @@ from terrain.baselines import HataVariant, hata_variant
 from terrain.draws import (
     BuildingPixels,
     DrawSummary,
-    EndpointBox,
+    PositionBox,
     ProfileBuilder,
     draw_endpoints,
     draw_seed,
@@ -132,9 +132,9 @@ def link_id(site_id: str, rx_id: str) -> str:
     return json.dumps([site_id, rx_id], separators=(",", ":"))
 
 
-def draws_for(tx: EndpointBox, rx: EndpointBox, endpoint_draws: int) -> int:
+def draws_for(tx: PositionBox, rx: PositionBox, endpoint_draws: int) -> int:
     """Draws for a pair: the configured number when either end has a box, 1 for two points."""
-    return endpoint_draws if tx.half_width_m > 0.0 or rx.half_width_m > 0.0 else 1
+    return endpoint_draws if tx.has_area or rx.has_area else 1
 
 
 def predict_pairs(

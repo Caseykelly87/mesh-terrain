@@ -37,7 +37,7 @@ from engine.coverage import write_coverage
 from engine.errors import ConfigError
 from engine.grid import RunGrid, run_grid
 from engine.manifest import write_run_manifest
-from engine.points import Endpoint, read_points
+from engine.points import Endpoint, box_form, read_points
 from engine.predict import PairPrediction, RunModels, predict_pairs
 from engine.predictions import P1812_QUANTITIES, write_predictions
 from engine.provenance import Provenance, collect_provenance
@@ -99,7 +99,15 @@ def run_engine(config_path: Path, settings: EngineSettings) -> Path:
         artifacts = write_artifacts(inputs, partial)
         with _step("manifest_write", run_id):
             write_run_manifest(
-                partial, inputs.config, inputs.snapshots, inputs.provenance, artifacts
+                partial,
+                inputs.config,
+                inputs.snapshots,
+                inputs.provenance,
+                artifacts,
+                box_forms={
+                    "tx_sites": box_form(inputs.sites),
+                    "rx_points": box_form(inputs.receivers),
+                },
             )
         final = finish_run(partial)
     except Exception:

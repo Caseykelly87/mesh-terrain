@@ -943,9 +943,9 @@ def edge_receivers(folder: Path) -> Path:
     """Two made-up 20-bit cells inside the fixture sub-tile, as a GeoParquet layer."""
     import pyarrow as pa
     import pyarrow.parquet as pq
+    from test_terrain_edge_boxes import cell_box
 
     from engine.points import EDGE_COLUMNS
-    from test_terrain_edge_boxes import cell_box
 
     cells = [cell_box(725_400.0, 4_285_300.0, bits=20), cell_box(725_700.0, 4_285_800.0, bits=20)]
     layer = gpd.GeoDataFrame(
@@ -969,7 +969,7 @@ def test_an_edge_box_run_reproduces_and_records_rectangles(tmp_path: Path) -> No
     for name in ("first", "second"):
         folder = tmp_path / name
         folder.mkdir()
-        config = small_config(folder, rx_points=str(receivers), run_id=f"edges-{name}")
+        config = small_config(folder, rx_points=str(receivers), run_id="edges")
         runs.append(run_engine(config, fixture_settings()))
 
     assert content_hashes(runs[0]) == content_hashes(runs[1])
