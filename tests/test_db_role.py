@@ -217,6 +217,26 @@ def test_a_refusal_with_an_authentication_sqlstate_counts_whatever_its_text(
     assert server_refused_login(error)
 
 
+def test_a_refused_login_fails_without_naming_the_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Casey, issue #55 comment 7017280290, item 2: the values never appear in a transcript."""
+    invented = "invented_role_3b8a"
+
+    def refuse(**_: object) -> psycopg.Connection:
+        raise psycopg.OperationalError(
+            f'failed: FATAL:  password authentication failed for user "{invented}"'
+        )
+
+    monkeypatch.setenv("WAREHOUSE_USER", invented)
+    get_settings.cache_clear()
+    monkeypatch.setattr(psycopg, "connect", refuse)
+    try:
+        with pytest.raises(pytest.fail.Exception) as failure:
+            connect_or_skip()
+    finally:
+        get_settings.cache_clear()
+    assert invented not in str(failure.value)
+
+
 def test_with_no_test_role_the_tests_log_in_with_a_password_the_server_will_refuse() -> None:
     user, password = session_credentials(None)
     assert user == UNCONFIGURED_ROLE
