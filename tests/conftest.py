@@ -12,13 +12,19 @@ replaced in the environment before any test module is imported, so settings
 built later, and dbt's profile in a subprocess, see only the test role. With
 no test role configured they name a role that does not exist, with a
 placeholder password, so no test connects as the owner: where a warehouse
-answers, it refuses that login and each warehouse test fails, saying what to
-set (`tests/raw_schema.py`).
+answers, it refuses that login and each test that connects through
+`tests/raw_schema.py`'s `connect_or_skip` fails, saying what to set.
+
+Neither value reaches a test or collection report: both are replaced in its
+traceback, locals and captured output, at any verbosity (Casey, issue #55
+comment 7017280290, item 2; `tests/report_redaction.py`).
 """
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
+from typing import Any
 
 import pytest
+import report_redaction
 from raw_schema import role_for_tests, session_credentials
 
 from ingester.settings import IngesterSettings, get_ingester_settings
@@ -30,10 +36,27 @@ def pytest_configure(config: pytest.Config) -> None:
     patch = pytest.MonkeyPatch()
     config.add_cleanup(patch.undo)
     config.add_cleanup(get_settings.cache_clear)
-    user, password = session_credentials(role_for_tests())
+    config.add_cleanup(report_redaction.remember)
+    role = role_for_tests()
+    report_redaction.remember(*(role or ()))
+    user, password = session_credentials(role)
     patch.setenv("WAREHOUSE_USER", user)
     patch.setenv("WAREHOUSE_PASSWORD", password)
     get_settings.cache_clear()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport() -> Generator[None, Any, None]:
+    """Replace the test role's values in each setup, call and teardown report."""
+    outcome = yield
+    report_redaction.scrub(outcome.get_result())
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_make_collect_report() -> Generator[None, Any, None]:
+    """Replace the test role's values in each collection report, an import error's included."""
+    outcome = yield
+    report_redaction.scrub(outcome.get_result())
 
 
 @pytest.fixture(autouse=True)

@@ -61,10 +61,14 @@ def make_run(
     make = shutil.which("make")
     if make is None:
         pytest.skip("make is not installed")
+    # Under tests/conftest.py WAREHOUSE_USER and WAREHOUSE_PASSWORD hold the
+    # test role's values too; make needs neither here, so neither is copied.
     environment = {
         name: value
         for name, value in os.environ.items()
-        if name not in PASSED_DOWN and name not in NAMES
+        if name not in PASSED_DOWN
+        and name not in NAMES
+        and name not in ("WAREHOUSE_USER", "WAREHOUSE_PASSWORD")
     }
     environment.update(shell)
     return subprocess.run(
