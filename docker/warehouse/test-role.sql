@@ -16,14 +16,16 @@
 -- from the command line, so ps and the shell history never show them.
 --
 -- What this file keeps out of its output and the server log (Casey, issue
--- #55 comment 7017280290, item 2): it prints neither value on success, and
--- every statement that holds one runs inside a DO block whose failure raises
--- a fixed message naming the step and the SQLSTATE, never the statement or
--- the driver's text. psql shows no CONTEXT line and the transaction logs no
--- statement text, CONTEXT or slow statement. What it cannot keep out: while
--- the set_config statement that hands the password to the DO block runs,
--- pg_stat_activity.query holds the password text, visible to superusers (the
--- owner, Dagster's connection) for that moment; no log keeps it.
+-- #55 comment 7017280290, item 2): it prints neither value on success. The
+-- one statement outside a DO block that holds them is the set_config that
+-- hands them over, which stores two strings and does not fail on their
+-- content; every statement that uses them runs inside a DO block whose
+-- failure raises a fixed message naming the step and the SQLSTATE, never the
+-- statement or the server's text. psql shows no CONTEXT line, and the
+-- transaction logs no statement text, CONTEXT or slow statement. What it
+-- cannot keep out: while that set_config statement runs,
+-- pg_stat_activity.query holds both values, visible to superusers (the owner,
+-- Dagster's connection) for that moment; no log keeps it.
 
 \set ON_ERROR_STOP on
 \set VERBOSITY terse
