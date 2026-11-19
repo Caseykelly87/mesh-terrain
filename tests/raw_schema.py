@@ -125,13 +125,17 @@ def connect_or_skip() -> psycopg.Connection:
             connect_timeout=3,
         )
     except psycopg.OperationalError as err:
-        if server_refused_login(err):
-            pytest.fail(
-                f"the warehouse refused the login of {settings.warehouse_user!r}: set "
-                "WAREHOUSE_TEST_USER and WAREHOUSE_TEST_PASSWORD in .env as .env.example "
-                "does, then run make test-role"
-            )
-        pytest.skip(f"no local warehouse ({err.__class__.__name__}); run make up")
+        refused, kind = server_refused_login(err), err.__class__.__name__
+    # Outside the handler, so the report chains no driver message, whose text
+    # names the role: neither value appears in a transcript or log (Casey,
+    # issue #55 comment 7017280290, item 2).
+    if refused:
+        pytest.fail(
+            "the warehouse refused the test role's login: export WAREHOUSE_TEST_USER "
+            "and WAREHOUSE_TEST_PASSWORD (README, Test role), then run make test-role",
+            pytrace=False,
+        )
+    pytest.skip(f"no local warehouse ({kind}); run make up")
 
 
 def schema_exists(conn: psycopg.Connection, schema: str) -> bool:

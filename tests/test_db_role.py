@@ -249,14 +249,21 @@ def test_a_configured_test_role_is_used_as_it_is() -> None:
 
 def test_the_tests_connect_as_the_test_role() -> None:
     settings = get_settings()
-    assert settings.warehouse_user != UNCONFIGURED_ROLE, (
-        "no test role: set WAREHOUSE_TEST_USER and WAREHOUSE_TEST_PASSWORD in .env as "
-        ".env.example does, naming a role other than WAREHOUSE_USER, then run make test-role"
+    # Each check is reduced to a bool first, so a failure report shows no role
+    # name (Casey, issue #55 comment 7017280290, item 2).
+    configured = settings.warehouse_user != UNCONFIGURED_ROLE
+    assert configured, (
+        "no test role: export WAREHOUSE_TEST_USER and WAREHOUSE_TEST_PASSWORD (README, Test "
+        "role), naming a role other than WAREHOUSE_USER, then run make test-role"
     )
-    assert settings.warehouse_user == settings.warehouse_test_user
+    in_use = settings.warehouse_user == settings.warehouse_test_user
+    assert in_use, "the tests' WAREHOUSE_USER is not the configured test role"
     with connect_or_skip() as conn:
-        row = conn.execute("select current_user, session_user").fetchone()
-    assert row == (settings.warehouse_test_user, settings.warehouse_test_user)
+        row = conn.execute(
+            "select current_user = %s and session_user = %s",
+            (settings.warehouse_test_user, settings.warehouse_test_user),
+        ).fetchone()
+    assert row == (True,), "the session is not the configured test role"
 
 
 def test_the_test_role_has_no_attribute_or_membership_that_passes_a_grant() -> None:
@@ -317,8 +324,8 @@ def test_the_test_role_holds_no_privilege_on_a_raw_or_real_schema(schema: str) -
             "or has_any_column_privilege(c.oid, 'INSERT, UPDATE')) order by 1",
             (schema, WRITE_PRIVILEGES),
         ).fetchall()
-        user = conn.info.user
-    assert owner != user
+        owned_by_the_role = owner == conn.info.user
+    assert not owned_by_the_role, f"the test role owns {schema}"
     assert held == (False, False)
     assert writable == []
 
