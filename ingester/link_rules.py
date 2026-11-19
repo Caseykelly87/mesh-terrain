@@ -302,26 +302,30 @@ def read_broadcasts(rows: Iterable[Row], inside: InArea) -> dict[str, list[Posit
 
     Casey, issue #55 comment 6995037213, item 3: "A broadcast's gateway
     copies count as one position, timed by the first copy, precise if any
-    copy qualifies."
+    copy qualifies." Each node's positions come in order of their first
+    copy's (`received_at`, `delivery_key`), so a tie at one instant goes to
+    the broadcast whose first copy has the smaller key (Casey, PR #79, Q1 (a)).
     """
-    broadcasts: dict[tuple[Any, ...], tuple[str, Position]] = {}
+    broadcasts: dict[tuple[Any, ...], tuple[str, tuple[datetime, str], Position]] = {}
     for row in rows:
         position = read_position(row, inside)
         if position is None:
             continue
         key = broadcast_key(row)
+        first_copy = (position.received_at, str(row["delivery_key"]))
         if key in broadcasts:
-            first = broadcasts[key][1]
-            position = Position(
-                min(first.received_at, position.received_at),
-                first.cell,
-                first.qualifies or position.qualifies,
-            )
-        broadcasts[key] = (row["origin_pseudonym"], position)
-    per_node: dict[str, list[Position]] = {}
-    for node, position in broadcasts.values():
-        per_node.setdefault(node, []).append(position)
-    return per_node
+            _, earlier_copy, earlier = broadcasts[key]
+            first_copy = min(earlier_copy, first_copy)
+            qualifies = earlier.qualifies or position.qualifies
+            position = Position(first_copy[0], earlier.cell, qualifies)
+        broadcasts[key] = (row["origin_pseudonym"], first_copy, position)
+    per_node: dict[str, list[tuple[tuple[datetime, str], Position]]] = {}
+    for node, first_copy, position in broadcasts.values():
+        per_node.setdefault(node, []).append((first_copy, position))
+    return {
+        node: [position for _, position in sorted(found, key=lambda entry: entry[0])]
+        for node, found in per_node.items()
+    }
 
 
 def build_index(rows: Sequence[Row], inside: InArea) -> Index:
