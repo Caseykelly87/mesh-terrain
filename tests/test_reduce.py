@@ -276,3 +276,60 @@ def test_refuses_when_the_snapshot_or_a_partial_folder_exists(tmp_path: Path) ->
     with pytest.raises(PartialExistsError):
         reduce_capture(sources, other, INFO, KEY, workers=1)
     assert (folder / MANIFEST_NAME).exists()
+
+
+# The manifest's brokers are the brokers whose capture folders were read (Casey,
+# issue #55 comment 7017280290, item 1), so engine_inputs' refusal checks a fact.
+PUBLIC_HOST, REGIONAL_HOST = INFO.brokers
+REAL_HOSTS = ["mqtt.meshtastic.org", "mqtt.meshstl.org"]
+
+
+def reduce_with(tmp_path: Path, public: str, meshstl: str, info: SnapshotInfo = INFO) -> Path:
+    """Reduce the fixture archive with each broker's folder kept, emptied or missing."""
+    sources = write_archive(tmp_path / "archive")
+    for source, state in zip(sources, (public, meshstl), strict=True):
+        if state in ("empty", "missing"):
+            for path in source.directory.iterdir():
+                path.unlink()
+        if state == "missing":
+            source.directory.rmdir()
+    return reduce_capture(sources, tmp_path / "snapshots", info, KEY, workers=1)
+
+
+def test_both_folders_read_list_both_brokers(tmp_path: Path) -> None:
+    folder = reduce_with(tmp_path, "kept", "kept")
+    assert read_manifest(folder)["brokers"] == [PUBLIC_HOST, REGIONAL_HOST]
+
+
+@pytest.mark.parametrize("state", ["missing", "empty"])
+def test_a_meshstl_folder_with_no_file_leaves_its_broker_out(tmp_path: Path, state: str) -> None:
+    folder = reduce_with(tmp_path, "kept", state)
+    assert read_manifest(folder)["brokers"] == [PUBLIC_HOST]
+
+
+@pytest.mark.parametrize("state", ["missing", "empty"])
+def test_a_public_folder_with_no_file_leaves_its_broker_out(tmp_path: Path, state: str) -> None:
+    folder = reduce_with(tmp_path, state, "kept")
+    assert read_manifest(folder)["brokers"] == [REGIONAL_HOST]
+
+
+def test_a_run_that_reads_no_capture_file_is_refused_before_any_folder(tmp_path: Path) -> None:
+    from ingester.reduce import NothingToReduceError
+
+    with pytest.raises(NothingToReduceError):
+        reduce_with(tmp_path, "missing", "empty")
+    assert not (tmp_path / "snapshots").exists() or not any((tmp_path / "snapshots").iterdir())
+
+
+def test_engine_inputs_refuses_a_reduction_that_read_one_broker(tmp_path: Path) -> None:
+    from dataclasses import replace
+
+    from ingester.link_pairs import require_merged
+    from pipeline.common.snapshot import SnapshotError
+
+    real = replace(INFO, brokers=REAL_HOSTS)
+    both = reduce_with(tmp_path / "both", "kept", "kept", real)
+    require_merged(read_manifest(both))
+    one = reduce_with(tmp_path / "one", "kept", "missing", real)
+    with pytest.raises(SnapshotError):
+        require_merged(read_manifest(one))
