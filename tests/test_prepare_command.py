@@ -705,3 +705,26 @@ def test_edge_layers_are_carried_into_the_run_layers(tmp_path: Path) -> None:
     assert all(isinstance(s.box, EdgeBox) for s in sites)
     crossing = (folder / "crossing.md").read_text(encoding="utf-8")
     assert "box reach" in crossing
+
+
+@pytest.mark.usefixtures("env")
+def test_a_real_edge_layer_with_a_row_without_edges_is_refused_and_nothing_written(
+    tmp_path: Path,
+) -> None:
+    # Casey, PR #73: a layer mixing rows with edges and rows without is refused.
+    import pyarrow as pa
+
+    folder = write_edge_inputs(tmp_path / "x72y429")
+    path = folder / "tx_sites_real.parquet"
+    table = pq.read_table(path)
+    for name in ("box_south_i", "box_north_i", "box_west_i", "box_east_i"):
+        values = table.column(name).to_pylist()
+        values[1] = None
+        table = table.set_column(
+            table.schema.get_field_index(name), name, pa.array(values, pa.int64())
+        )
+    pq.write_table(table, path)
+    before = sorted(p.name for p in folder.iterdir())
+
+    assert "has no box edges" in refusal(folder)
+    assert sorted(p.name for p in folder.iterdir()) == before
