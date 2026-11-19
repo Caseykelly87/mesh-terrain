@@ -1,17 +1,22 @@
-"""The test role's two values never reach a pytest report, at any verbosity.
+"""The test role's two values stay out of the environment and out of every pytest report.
 
 Casey, issue #55 comment 7017280290, item 2: the values never appear in a
-transcript or log. `tests/conftest.py` puts them into the environment for
-every test, and a failure report can show them in several ways: the
-assertion explanation at `-vv`, the locals of each frame with `-l` or
-`--showlocals` (a psycopg connection's repr names its user), a chained
-exception, or captured output. So conftest replaces both values in every
-test and collection report (`tests/report_redaction.py`).
+transcript or log. `tests/conftest.py` keeps them in `tests/raw_schema.py`'s
+private holder and puts placeholders in the environment for the whole
+session; only the two modules whose dbt runs connect, `test_dbt_fixture_build`
+and `test_dbt_targets`, see the real values in the environment, while they
+run. So a test that copies `os.environ` holds no value.
 
-The probe runs pytest in a subprocess with invented values, through the real
-`tests/conftest.py` loaded as a plugin, on a failing test of its own and on
-`tests/test_dbt_targets.py`'s real test that once passed `os.environ` into
-an assert; no real value is read.
+A failure report could still show a value held elsewhere: the assertion
+explanation at `-vv`, the locals of each frame with `-l` or `--showlocals` (a
+psycopg connection's repr names its user), a chained exception, captured
+output or a warning. conftest replaces both values in every test and
+collection report and in every recorded warning (`tests/report_redaction.py`).
+
+The probes run pytest in a subprocess with invented values, through the real
+`tests/conftest.py` loaded as a plugin; no real value is read. Their first
+tests are this module's own unit tests, so a unit test that left the shared
+list empty would show in the failures after it.
 """
 
 import os
@@ -20,6 +25,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+import raw_schema
 import report_redaction
 
 TESTS = Path(__file__).resolve().parent
@@ -31,24 +38,40 @@ PROBE = """
 import inspect
 import os
 import subprocess
+import warnings
 
 import psycopg
+import raw_schema
 
 import test_dbt_targets as targets
+from test_report_redaction import (
+    test_a_text_report_and_its_sections_lose_both_values as test_a_unit_1,
+    test_a_skip_report_keeps_its_shape as test_a_unit_2,
+    test_a_longer_value_is_replaced_before_one_it_contains as test_a_unit_3,
+    test_nothing_is_replaced_when_no_role_is_configured as test_a_unit_4,
+)
 
 
-def test_a_failing_assert_with_the_password_in_a_local():
-    secret = os.environ["WAREHOUSE_PASSWORD"]
-    user = os.environ["WAREHOUSE_USER"]
+def test_b_no_environment_variable_holds_a_value():
+    assert not raw_schema.environment_holds_the_role()
+
+
+def test_c_a_failing_assert_with_the_password_in_a_local():
+    user, secret = raw_schema._role[0]
     assert (user, secret) == ("someone", "else")
 
 
-def test_a_driver_error_naming_the_role():
-    user = os.environ["WAREHOUSE_USER"]
+def test_c_an_environment_copy_like_the_engine_tests_make():
+    environment = dict(os.environ)
+    assert environment == {}
+
+
+def test_d_a_driver_error_naming_the_role():
+    user = raw_schema._role[0].user
     raise psycopg.OperationalError(f'FATAL:  password authentication failed for user "{user}"')
 
 
-def test_the_dbt_target_test_that_once_passed_the_environment(monkeypatch):
+def test_e_the_dbt_target_test_that_once_passed_the_environment(monkeypatch):
     def nothing_refused(*arguments, **keywords):
         return subprocess.CompletedProcess([], 0, "", "")
 
@@ -56,6 +79,12 @@ def test_the_dbt_target_test_that_once_passed_the_environment(monkeypatch):
     test = targets.test_dbt_target_in_the_environment_cannot_start_a_real_build
     wants = inspect.signature(test).parameters
     test(**({"monkeypatch": monkeypatch} if "monkeypatch" in wants else {}))
+
+
+def test_f_warnings_naming_the_role():
+    role = raw_schema._role[0]
+    warnings.warn(UserWarning(f"connected as {role.user}"))
+    warnings.warn(ResourceWarning(f"<psycopg.Connection [IDLE] (user={role.user}) at 0x0>"))
 """
 
 
@@ -77,17 +106,14 @@ def run_probe(tmp_path: Path, *options: str) -> str:
             "PYTHONPATH": str(TESTS),
         }
     )
+    command = [sys.executable, "-m", "pytest", "-p", "conftest", "-p", "no:cacheprovider"]
     result = subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-p",
-            "conftest",
-            "-p",
-            "no:cacheprovider",
+            *command,
             "--rootdir",
             str(tmp_path),
+            "-W",
+            "default::ResourceWarning",
             *options,
             str(probe),
         ],
@@ -100,55 +126,85 @@ def run_probe(tmp_path: Path, *options: str) -> str:
     return result.stdout + result.stderr
 
 
-def test_neither_value_appears_in_a_report_at_the_highest_verbosity(tmp_path: Path) -> None:
-    output = run_probe(tmp_path, "-vv", "-l", "-rA")
+def assert_probe_ran_and_shows_no_value(output: str) -> None:
     leaked = [value for value in (INVENTED_USER, INVENTED_PASSWORD) if value in output]
     assert leaked == [], "a probe report shows a test role value"
-    assert "3 failed" in output
+    assert "4 failed" in output, "the probe did not run its failing tests"
+    assert "6 passed" in output, "the probe's unit tests or environment test did not pass"
     assert report_redaction.PLACEHOLDER in output
 
 
+def test_neither_value_appears_in_a_report_at_the_highest_verbosity(tmp_path: Path) -> None:
+    output = run_probe(tmp_path, "-vv", "-l", "-rA")
+    assert_probe_ran_and_shows_no_value(output)
+    assert "connected as" in output, "the warnings summary did not run"
+
+
 def test_neither_value_appears_with_long_tracebacks_and_showlocals(tmp_path: Path) -> None:
-    output = run_probe(tmp_path, "--tb=long", "--showlocals", "-vv")
-    assert INVENTED_USER not in output
-    assert INVENTED_PASSWORD not in output
+    assert_probe_ran_and_shows_no_value(run_probe(tmp_path, "--tb=long", "--showlocals", "-vv"))
+
+
+def test_neither_value_appears_with_locals_at_default_verbosity(tmp_path: Path) -> None:
+    """Default verbosity shortens a long repr by cutting out its middle."""
+    assert_probe_ran_and_shows_no_value(run_probe(tmp_path, "-l", "-rf"))
+
+
+def test_the_short_summary_keeps_each_failure_message(tmp_path: Path) -> None:
+    output = run_probe(tmp_path, "-rf")
+    line = next(line for line in output.splitlines() if "test_c_a_failing_assert" in line)
+    assert line.startswith("FAILED") and " - " in line, line
 
 
 def report(longrepr: object, sections: list[tuple[str, str]]) -> SimpleNamespace:
     return SimpleNamespace(longrepr=longrepr, sections=sections)
 
 
-def test_a_text_report_and_its_sections_lose_both_values() -> None:
+def test_a_text_report_and_its_sections_lose_both_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(report_redaction, "_values", [])
     report_redaction.remember("role_a", "secret_b")
-    try:
-        scrubbed = report("x role_a y secret_b", [("Captured stdout", "secret_b and role_a")])
-        report_redaction.scrub(scrubbed)
-    finally:
-        report_redaction.remember()
+    scrubbed = report("x role_a y secret_b", [("Captured stdout", "secret_b and role_a")])
+    report_redaction.scrub(scrubbed)
     placeholder = report_redaction.PLACEHOLDER
     assert scrubbed.longrepr == f"x {placeholder} y {placeholder}"
     assert scrubbed.sections == [("Captured stdout", f"{placeholder} and {placeholder}")]
 
 
-def test_a_skip_report_keeps_its_shape() -> None:
+def test_a_skip_report_keeps_its_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(report_redaction, "_values", [])
     report_redaction.remember("role_a", "secret_b")
-    try:
-        scrubbed = report(("file.py", 3, "Skipped: role_a"), [])
-        report_redaction.scrub(scrubbed)
-    finally:
-        report_redaction.remember()
+    scrubbed = report(("file.py", 3, "Skipped: role_a"), [])
+    report_redaction.scrub(scrubbed)
     assert scrubbed.longrepr == ("file.py", 3, f"Skipped: {report_redaction.PLACEHOLDER}")
 
 
-def test_a_longer_value_is_replaced_before_one_it_contains() -> None:
+def test_a_longer_value_is_replaced_before_one_it_contains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(report_redaction, "_values", [])
     report_redaction.remember("abc", "abcdef")
-    try:
-        text = report_redaction.redacted("abcdef abc")
-    finally:
-        report_redaction.remember()
+    text = report_redaction.redacted("abcdef abc")
     assert text == f"{report_redaction.PLACEHOLDER} {report_redaction.PLACEHOLDER}"
 
 
-def test_nothing_is_replaced_when_no_role_is_configured() -> None:
+def test_nothing_is_replaced_when_no_role_is_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(report_redaction, "_values", [])
     report_redaction.remember()
     assert report_redaction.redacted("anything at all") == "anything at all"
+
+
+def test_a_warning_naming_a_value_is_replaced(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(report_redaction, "_values", [])
+    report_redaction.remember("role_a")
+    record = SimpleNamespace(message=ResourceWarning("unclosed (user=role_a)"))
+    report_redaction.scrub_warning(record)
+    assert isinstance(record.message, ResourceWarning)
+    assert str(record.message) == f"unclosed (user={report_redaction.PLACEHOLDER})"
+
+
+def test_this_session_still_scrubs_after_the_unit_tests() -> None:
+    """Runs after the unit tests above: they must leave conftest's list as it was."""
+    assert raw_schema.redaction_covers_the_role()
+
+
+def test_this_test_sees_no_test_role_value_in_the_environment() -> None:
+    assert not raw_schema.environment_holds_the_role()
