@@ -11,7 +11,8 @@ is made as the test role, which cannot write `raw`, `raw_dev_wh` or
 replaced in the environment before any test module is imported, so settings
 built later, and dbt's profile in a subprocess, see only the test role. With
 no test role configured they name a role that does not exist, so no test
-connects as the owner; `tests/test_db_role.py` then fails and says what to set.
+connects as the owner: where a warehouse answers, it refuses that login and
+each warehouse test fails, saying what to set (`tests/raw_schema.py`).
 """
 
 from collections.abc import Iterator
