@@ -277,29 +277,30 @@ def _read_sites(path: Path) -> tuple[list[Endpoint], dict[str, str]]:
 
 
 def require_real_boxes(path: Path, endpoints: list[Endpoint]) -> None:
-    """Refuse a real layer with box edges in which a row has none (Casey, PR #73).
+    """Refuse a real layer in which a row has no box (Casey, PR #73).
 
-    A real node always has a position box, so in a layer with the edge
-    columns a row with all four edges null would be drawn as an exact point
-    and the run's `box_form` would be false for it. Square layers keep their
-    own rules. The grid prepare adds is written after this check and never
-    read through it.
+    A real node always has a position box. In a layer with the edge columns a
+    row with all four edges null (Casey, PR #73), and in a square layer a row
+    with half-width 0 (Casey, issue #55 comment 7024307502, item 2, Q3 (a)),
+    would be drawn as an exact point and the run's `box_form` would be false
+    for it. The grid prepare adds is written after this check and never read
+    through it.
 
     Args:
         path: The real layer, `tx_sites_real.parquet` or `rx_real.parquet`.
         endpoints: Its rows, as `read_points` returned them.
 
     Raises:
-        ConfigError: naming the rows without edges.
+        ConfigError: naming the rows without a box.
     """
-    if layer_schema_version(path) != INPUT_SCHEMA_VERSION:
-        return
-    unboxed = [e.endpoint_id for e in endpoints if not isinstance(e.box, EdgeBox)]
+    if layer_schema_version(path) == INPUT_SCHEMA_VERSION:
+        unboxed = [e.endpoint_id for e in endpoints if not isinstance(e.box, EdgeBox)]
+        missing = "has no box edges; every row of a real layer with box edges needs its four edges"
+    else:
+        unboxed = [e.endpoint_id for e in endpoints if not e.box.has_area]
+        missing = "has a box half-width of 0; every row of a real square layer needs a box"
     if unboxed:
-        raise ConfigError(
-            f"{path.name}: row {', '.join(unboxed)} has no box edges; every row of a real "
-            "layer with box edges needs its four edges (Casey, PR #73)"
-        )
+        raise ConfigError(f"{path.name}: row {', '.join(unboxed)} {missing} (Casey, PR #73)")
 
 
 def _input_marker(path: Path) -> str:
