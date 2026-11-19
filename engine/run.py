@@ -3,7 +3,8 @@
 The order is the contract of `docs/INTERFACE.md`:
 
 1. Check, writing nothing: the config and profiles, every named snapshot
-   against its manifest, the point layers, the observations, the run grid
+   against its manifest, the point layers (each `synthetic`, or `real` and
+   written by engine.prepare, `engine.prepared`), the observations, the run grid
    against the DEM, the code provenance, that neither `<run_id>/` nor
    `<run_id>.partial/` exists, and the ITM library and P.1812 maps when the
    run lists them. Any refusal is a ConfigError, so the command exits 2.
@@ -40,6 +41,7 @@ from engine.manifest import write_run_manifest
 from engine.points import Endpoint, box_form, read_points
 from engine.predict import PairPrediction, RunModels, predict_pairs
 from engine.predictions import P1812_QUANTITIES, write_predictions
+from engine.prepared import require_admissible_layer
 from engine.provenance import Provenance, collect_provenance
 from engine.report import report_markdown
 from engine.settings import EngineSettings
@@ -133,8 +135,10 @@ def prepare_run(config_path: Path, settings: EngineSettings) -> RunInputs:
     config = load_config(config_path)
     snapshots = resolve_snapshots(config.snapshots, settings.snapshots_dir)
     sites = read_points(config.tx_sites, "site_id")
+    require_admissible_layer(config.tx_sites)
     _check_site_ids(sites)
     receivers = read_points(config.rx_points, "rx_id")
+    require_admissible_layer(config.rx_points)
     observations = None if config.calibration is None else read_observations(config.calibration)
     grid = _grid(sites + receivers, snapshots)
     check_sources(snapshots, grid)
