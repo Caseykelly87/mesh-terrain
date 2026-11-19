@@ -64,7 +64,12 @@ def test_c_a_failing_assert_with_the_password_in_a_local():
 
 
 def test_c_an_environment_copy_like_the_engine_tests_make():
-    environment = dict(os.environ)
+    # Only the four names, padded past the 240 characters at which pytest
+    # shortens a repr, so the probe's output holds no other variable.
+    names = ("WAREHOUSE_USER", "WAREHOUSE_PASSWORD")
+    names += ("WAREHOUSE_TEST_USER", "WAREHOUSE_TEST_PASSWORD")
+    environment = {name: os.environ.get(name, "") for name in names}
+    environment["padding"] = "x" * 300
     assert environment == {}
 
 
@@ -152,10 +157,20 @@ def test_neither_value_appears_with_locals_at_default_verbosity(tmp_path: Path) 
 
 
 def test_the_short_summary_keeps_each_failure_message(tmp_path: Path) -> None:
-    output = run_probe(tmp_path, "-rf")
+    output = run_probe(tmp_path, "-rf", "-vv")
+    assert_probe_ran_and_shows_no_value(output)
     lines = output.splitlines()
     line = next(line for line in lines if line.startswith("FAILED") and "test_c_a_failing" in line)
-    assert " - " in line, "the short summary lost the failure's message"
+    assert "AssertionError" in line, "the short summary lost the failure's message"
+
+
+def test_a_one_line_traceback_names_the_crash_location(tmp_path: Path) -> None:
+    output = run_probe(tmp_path, "--tb=line")
+    assert_probe_ran_and_shows_no_value(output)
+    assert "namespace(" not in output
+    assert any(
+        "test_probe.py:" in line and "AssertionError" in line for line in output.splitlines()
+    )
 
 
 def report(longrepr: object, sections: list[tuple[str, str]]) -> SimpleNamespace:
