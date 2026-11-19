@@ -36,6 +36,10 @@ PASSED_DOWN = {"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "DBT_DEV_TAR
 # The main checkout's .env as the README recipe names it, in Git Bash form.
 MAIN_DOTENV = "/c/Users/Casey/Desktop/GEO/mesh-terrain/.env"
 RECIPE_START = "while IFS= read -r line; do "
+RECIPE_END = "| tr -d '\\r')"
+# Each agent tool call is a new shell, so every copy shows the export joined
+# to the make command that needs it.
+JOINED = re.compile(rf"{re.escape(RECIPE_START)}.+?{re.escape(RECIPE_END)} && make \w")
 # Shell words that would print a value or the environment, or trace commands.
 # A command word counts only on its own, so the `env` in `.env` does not.
 PRINTING = re.compile(
@@ -44,8 +48,10 @@ PRINTING = re.compile(
 )
 INVENTED_USER = "invented_user_7c1f"
 INVENTED_PASSWORD = "invented_password_9d2e"
-# The goals that connect as the role and so need both values.
-NEEDS_THE_ROLE = ("check", "dbt-build", "test-role", "up")
+# The goals that connect as the role and so need both values. make up does
+# not: a new checkout starts the stack before anyone sets them.
+NEEDS_THE_ROLE = ("check", "dbt-build", "test-role")
+SQL = REPO_ROOT / "docker" / "warehouse" / "test-role.sql"
 
 
 def make_run(
@@ -84,7 +90,7 @@ def recipe_lines() -> dict[str, list[str]]:
     found = {}
     for name in ("README.md", ".env.example", "docs/STATUS.md"):
         text = (REPO_ROOT / name).read_text(encoding="utf-8")
-        found[name] = re.findall(rf"{re.escape(RECIPE_START)}[^`\n]+", text)
+        found[name] = re.findall(rf"{re.escape(RECIPE_START)}[^`\n]+?{re.escape(RECIPE_END)}", text)
     return found
 
 
@@ -107,7 +113,32 @@ def test_a_goal_that_connects_as_the_role_stops_without_it(
     assert result.stdout == ""
 
 
-@pytest.mark.parametrize("goal", [*NEEDS_THE_ROLE, "dbt-debug", "dbt-build-real", "help"])
+def test_make_up_starts_the_stack_without_the_role_and_says_so(tmp_path: Path) -> None:
+    """A new checkout runs make up first; the role waits until both values are set."""
+    result = make_run("-n", "up", directory=tmp_path, shell={})
+    assert result.returncode == 0, result.stderr
+    assert "up --build --detach" in result.stdout
+    assert "test role was not created" in result.stdout
+    assert "docker compose exec" not in result.stdout
+
+
+def test_make_up_creates_the_role_when_both_values_are_set(tmp_path: Path) -> None:
+    shell = {"WAREHOUSE_TEST_USER": INVENTED_USER, "WAREHOUSE_TEST_PASSWORD": INVENTED_PASSWORD}
+    result = make_run("-n", "up", directory=tmp_path, shell=shell)
+    assert result.returncode == 0, result.stderr
+    assert "docker/warehouse/test-role.sql" in result.stdout
+
+
+def test_dbt_build_creates_or_refreshes_the_role_before_dbt_connects(tmp_path: Path) -> None:
+    """So dbt never logs in with a stale password, whose refusal names the role."""
+    shell = {"WAREHOUSE_TEST_USER": INVENTED_USER, "WAREHOUSE_TEST_PASSWORD": INVENTED_PASSWORD}
+    lines = make_run("-n", "dbt-build", directory=tmp_path, shell=shell).stdout.splitlines()
+    role = next(i for i, line in enumerate(lines) if "test-role.sql" in line)
+    build = next(i for i, line in enumerate(lines) if "dbt build" in line)
+    assert role < build
+
+
+@pytest.mark.parametrize("goal", [*NEEDS_THE_ROLE, "up", "dbt-debug", "dbt-build-real", "help"])
 def test_no_goal_shows_either_value_in_make_output(goal: str, tmp_path: Path) -> None:
     shell = {"WAREHOUSE_TEST_USER": INVENTED_USER, "WAREHOUSE_TEST_PASSWORD": INVENTED_PASSWORD}
     result = make_run("-n", goal, directory=tmp_path, shell=shell)
@@ -211,3 +242,41 @@ def test_the_recipe_exports_only_the_two_lines_and_prints_nothing(tmp_path: Path
     assert result.returncode == 0
     assert result.stdout == ""
     assert result.stderr == ""
+
+
+@pytest.mark.parametrize("name", ["README.md", ".env.example", "docs/STATUS.md"])
+def test_each_copy_joins_the_export_to_the_make_command(name: str) -> None:
+    """Each agent tool call is a new shell, so an export in one call is gone by the next."""
+    assert JOINED.search((REPO_ROOT / name).read_text(encoding="utf-8")), name
+
+
+def test_the_role_file_runs_no_statement_psql_could_echo_with_the_role() -> None:
+    """Only DO blocks hold the role: a failure there raises a fixed message, not the statement."""
+    text = SQL.read_text(encoding="utf-8")
+    assert "\\gexec" not in text
+    assert "\\set SHOW_CONTEXT never" in text
+    assert "\\set VERBOSITY terse" in text
+    blocks = re.findall(r"do \$\$(.*?)\$\$;", text, re.DOTALL)
+    assert len(blocks) >= 3
+    for block in blocks:
+        assert "when others then" in block
+        assert re.search(r"raise exception '[^']*', step, sqlstate", block)
+
+
+def test_no_raised_message_carries_the_role() -> None:
+    raises = re.findall(r"raise exception ([^;]*);", SQL.read_text(encoding="utf-8"))
+    assert raises
+    assert [r for r in raises if "test_role" in r or "test_password" in r] == []
+
+
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "log_statement to 'none'",
+        "log_min_error_statement to panic",
+        "log_min_duration_statement to -1",
+        "log_error_verbosity to terse",
+    ],
+)
+def test_the_role_transaction_turns_statement_logging_off(setting: str) -> None:
+    assert f"set local {setting};" in SQL.read_text(encoding="utf-8")
