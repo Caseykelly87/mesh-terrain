@@ -83,6 +83,24 @@ def test_a_qualifying_first_copy_keeps_the_broadcast_precise() -> None:
     assert found == [Position(at(40), Cell(*CELL), qualifies=True)]
 
 
+def test_broadcasts_at_one_instant_are_ordered_by_their_first_copys_key() -> None:
+    """Casey, PR #79, Q1 (a): a tie goes to the broadcast whose first copy has the smaller key.
+
+    Broadcast 7001's first copy is b-3 at 10:40 and a later copy is b-1;
+    broadcast 7002's only copy is b-2 at 10:40. Ordered by first copy, 7002
+    comes first, whatever the row order.
+    """
+    found = positions(
+        copy("b-1", at(45), "b-h2"),
+        copy("b-3", at(40), "b-h1"),
+        copy("b-2", at(40), "b-h1", packet_id=7002, cell=COARSER),
+    )
+    assert found == [
+        Position(at(40), Cell(*COARSER), qualifies=False),
+        Position(at(40), Cell(*CELL), qualifies=False),
+    ]
+
+
 def test_a_broadcast_with_no_qualifying_copy_is_not_precise() -> None:
     found = positions(copy("b-1", at(40), "b-h1"), copy("b-2", at(40, 1), "b-h2"))
     assert found == [Position(at(40), Cell(*CELL), qualifies=False)]
