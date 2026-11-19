@@ -64,14 +64,16 @@ unexport DBT_DEV_TARGET_GUARD DBT_DEV_TARGETS DBT_DEV_TARGET_REFUSAL
 $(if $(filter check dbt-build,$(MAKECMDGOALS)),$(DBT_DEV_TARGET_GUARD))
 
 # The goals that connect as the test role stop before any recipe runs when
-# either value is missing, so make up starts nothing and make check lints
-# nothing first. Unexported for the reason the guard above is.
+# either value is missing, so make check lints nothing first. make up is not
+# one of them: a new checkout starts the stack before anyone sets the values,
+# and up creates the role only once both are set. Unexported for the reason
+# the guard above is.
 TEST_ROLE_MISSING = set $(1): in a worktree, export it from the main checkout's .env \
     (README, Test role); in the main checkout, set it in .env as .env.example shows
 TEST_ROLE_GUARD = $(foreach name,$(TEST_ROLE_VARIABLES),$(if $($(name)),, \
     $(error $(call TEST_ROLE_MISSING,$(name)))))
 unexport TEST_ROLE_MISSING TEST_ROLE_GUARD
-$(if $(filter check dbt-build test-role up,$(MAKECMDGOALS)),$(TEST_ROLE_GUARD))
+$(if $(filter check dbt-build test-role,$(MAKECMDGOALS)),$(TEST_ROLE_GUARD))
 
 .PHONY: help env up down nuke rotate-owner-password check-credentials check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test test-role
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
@@ -155,14 +157,23 @@ check-credentials: env
 	env -u BASH_ENV -u SHELLOPTS bash docker/check-credentials.sh
 
 # Health waiting is a script rather than compose --wait; the script says why.
+# The test role follows only when both values are set; the note names the
+# variables, never their values. The sub-make names this Makefile so it also
+# works when make was started with -f from another folder.
 up: check-credentials
 	$(COMPOSE) up --build --detach
 	bash docker/wait-for-stack.sh
-	$(MAKE) --no-print-directory test-role
+	@if [ -n "$${WAREHOUSE_TEST_USER:-}" ] && [ -n "$${WAREHOUSE_TEST_PASSWORD:-}" ]; then \
+	    $(MAKE) --no-print-directory -f '$(firstword $(MAKEFILE_LIST))' test-role; \
+	else \
+	    echo "make up: the test role was not created: WAREHOUSE_TEST_USER or"; \
+	    echo "WAREHOUSE_TEST_PASSWORD is not set; make check creates it once both are (README, Test role)"; \
+	fi
 
 # The database role the tests and the development dbt builds connect as
 # (docker/warehouse/test-role.sql says what it may and may not do). It is
-# applied here, on every make up and make check, and not from initdb/, which
+# applied here, on every make check and make dbt-build, and on make up once
+# both values are set, and not from initdb/, which
 # runs only on a fresh volume, so an existing warehouse gets it too. The bare
 # -e names pass the name and password from make's environment into the
 # container, where psql reads them, so the password is on no command line.
@@ -245,8 +256,10 @@ dbt-debug: dbt-deps
 # (dbt/macros/target_schemas.sql). dev_wh is also the profile's default;
 # naming the target here keeps make check off the real schemas if the default
 # ever changes. The guard repeats the check above for a run that reaches this
-# recipe from another goal.
-dbt-build: dbt-deps
+# recipe from another goal. test-role runs first so dbt never logs in with a
+# stale password: the server's refusal would carry the role's name into dbt's
+# output and the server log.
+dbt-build: dbt-deps test-role
 	$(DBT_DEV_TARGET_GUARD)$(DBT_AS_TEST_ROLE) $(DBT) build $(DBT_ARGS) --target $(DBT_DEV_TARGET)
 
 # The real raw, staging, core and analytics schemas. The lead's target only

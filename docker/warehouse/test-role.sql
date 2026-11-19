@@ -7,15 +7,27 @@
 -- development build schemas.
 --
 -- `make test-role` pipes this file to psql inside the warehouse container as
--- the owner role, on every `make up` and `make check`, so it reaches an
--- existing volume as well as a fresh one; it is not in initdb/, which runs
--- only on a fresh volume. A second run leaves the same grants, owners and
--- memberships; only the stored password hash differs, since setting a
--- password picks a new salt. The name and password come from the container
--- environment through \getenv, never from the command line, so ps and the
--- shell history never show the password.
+-- the owner role, on every `make check` and `make dbt-build`, and on `make up`
+-- once both values are set, so it reaches an existing volume as well as a
+-- fresh one; it is not in initdb/, which runs only on a fresh volume. A second
+-- run leaves the same grants, owners and memberships; only the stored
+-- password hash differs, since setting a password picks a new salt. The name
+-- and password come from the container environment through \getenv, never
+-- from the command line, so ps and the shell history never show them.
+--
+-- What this file keeps out of its output and the server log (Casey, issue
+-- #55 comment 7017280290, item 2): it prints neither value on success, and
+-- every statement that holds one runs inside a DO block whose failure raises
+-- a fixed message naming the step and the SQLSTATE, never the statement or
+-- the driver's text. psql shows no CONTEXT line and the transaction logs no
+-- statement text, CONTEXT or slow statement. What it cannot keep out: while
+-- the set_config statement that hands the password to the DO block runs,
+-- pg_stat_activity.query holds the password text, visible to superusers (the
+-- owner, Dagster's connection) for that moment; no log keeps it.
 
 \set ON_ERROR_STOP on
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
 -- The notices say only that an existing schema was kept.
 set client_min_messages to warning;
 \getenv test_role WAREHOUSE_TEST_USER
@@ -23,86 +35,102 @@ set client_min_messages to warning;
 
 begin;
 
--- The alter role statement below holds the password, and the server logs the
--- text of a statement that fails, so this transaction logs no statement text
--- at all: neither value appears in a transcript or log (Casey, issue #55
--- comment 7017280290, item 2). Both settings need a superuser, which the
--- owner is, and end with the transaction.
+-- The server logs a failed statement's text, its CONTEXT, and with
+-- log_min_duration_statement any slow statement, and a statement here can hold
+-- the password, so none of these is logged in this transaction. Each setting
+-- needs a superuser, which the owner is, and ends with the transaction.
 set local log_statement to 'none';
 set local log_min_error_statement to panic;
+set local log_min_duration_statement to -1;
+set local log_error_verbosity to terse;
 
 -- Two runs at once would fail on the role and database updates with "tuple
 -- concurrently updated"; the second waits here for the first to commit.
 select pg_advisory_xact_lock(hashtext('mesh_terrain.test_role')) as locked \gset
 
--- The DO blocks below cannot read psql variables, so the name goes through a
--- setting that lasts until the commit.
-select set_config('mesh_terrain.test_role', :'test_role', true) as test_role_setting \gset
+-- The DO blocks below cannot read psql variables, so the two values go
+-- through settings that last until the commit.
+select
+    set_config('mesh_terrain.test_role', :'test_role', true) as role_setting,
+    set_config('mesh_terrain.test_password', :'test_password', true) as password_setting
+\gset
 
 -- A test role equal to the owner, or one that is already a superuser, would
--- turn every refusal below into a no-op while the tests still pass.
+-- turn every refusal below into a no-op while the tests still pass. A
+-- membership would hand the role its parent's privileges, such as
+-- pg_write_all_data or the owner's, so the role is a member of nothing.
+-- CREATE on the database lets the role make its throwaway schemas and lets
+-- dbt's on-run-start hook run `create schema if not exists`, which checks this
+-- privilege even when the schema exists.
 do $$
 declare
     test_role text := current_setting('mesh_terrain.test_role');
+    step text := 'checking WAREHOUSE_TEST_USER';
+    parent text;
 begin
     if test_role = '' or test_role = current_user then
-        raise exception 'WAREHOUSE_TEST_USER must name a role other than the owner %', current_user;
+        raise exception 'WAREHOUSE_TEST_USER must name a role other than the owner';
     end if;
-    -- No message names the role: neither value appears in a transcript or
-    -- log (Casey, issue #55 comment 7017280290, item 2).
     if exists (select from pg_roles where rolname = test_role and rolsuper) then
         raise exception 'WAREHOUSE_TEST_USER names a superuser; the test role never is one';
     end if;
+
+    step := 'creating the role';
+    if not exists (select from pg_roles where rolname = test_role) then
+        execute format('create role %I', test_role);
+    end if;
+
+    step := 'setting its attributes and password';
+    execute format(
+        'alter role %I with login nosuperuser nocreatedb nocreaterole noreplication nobypassrls '
+        'password %L',
+        test_role, current_setting('mesh_terrain.test_password')
+    );
+
+    step := 'revoking its memberships';
+    for parent in
+        select p.rolname
+        from pg_auth_members as m
+        join pg_roles as p on p.oid = m.roleid
+        where m.member = (select oid from pg_roles where rolname = test_role)
+    loop
+        execute format('revoke %I from %I cascade', parent, test_role);
+    end loop;
+
+    step := 'granting connect and create on the database';
+    execute format('grant connect, create on database %I to %I', current_database(), test_role);
+exception
+    when raise_exception then
+        raise;
+    when others then
+        raise exception 'make test-role stopped while %: SQLSTATE %', step, sqlstate;
 end
 $$;
 
-select format('create role %I', :'test_role')
-where not exists (select from pg_roles where rolname = :'test_role')
-\gexec
-
-select format(
-    'alter role %I with login nosuperuser nocreatedb nocreaterole noreplication nobypassrls password %L',
-    :'test_role',
-    :'test_password'
-)
-\gexec
-
--- A membership would hand the role its parent's privileges, such as
--- pg_write_all_data or the owner's, so the role is a member of nothing.
-select format('revoke %I from %I cascade', parent.rolname, :'test_role')
-from pg_auth_members as membership
-join pg_roles as parent on parent.oid = membership.roleid
-where membership.member = (select oid from pg_roles where rolname = :'test_role')
-\gexec
-
--- CREATE on the database lets the role make its throwaway schemas and lets
--- dbt's on-run-start hook run `create schema if not exists`, which checks
--- this privilege even when the schema exists.
-select format('grant connect, create on database %I to %I', current_database(), :'test_role')
-\gexec
-
+-- The guarded schemas: the three raw schemas and the four real built ones.
 -- The development raw schemas are created here by the owner, so the dbt hook
 -- running as the test role never creates one and so never owns one: a
 -- schema's owner can create tables in it and drop any table in it. raw and
--- the real built schemas come from initdb.
-create schema if not exists raw_dev_wh;
-create schema if not exists raw_dev_ta;
-
--- The guarded schemas: the three raw schemas and the four real built ones.
--- Anything the test role owns there means the guard was already breached, so
--- the run stops and says so rather than repairing it; only a schema the role
--- itself owns is handed back. A grant or default privilege the role holds is
--- revoked; one it does not hold is left alone, since revoking from an object
--- with the default privileges would rewrite its ACL to an explicit copy of
--- the same thing. REVOKE ALL on a table also revokes every column grant on it.
+-- the real built schemas come from initdb. Anything the test role owns in a
+-- guarded schema means the guard was already breached, so the run stops and
+-- says so rather than repairing it; only a schema the role itself owns is
+-- handed back. A grant or default privilege the role holds is revoked; one it
+-- does not hold is left alone, since revoking from an object with the default
+-- privileges would rewrite its ACL to an explicit copy of the same thing.
+-- REVOKE ALL on a table also revokes every column grant on it.
 do $$
 declare
     test_role text := current_setting('mesh_terrain.test_role');
     test_oid oid := (select oid from pg_roles where rolname = current_setting('mesh_terrain.test_role'));
     guarded text[] := array['raw', 'raw_dev_wh', 'raw_dev_ta', 'staging', 'core', 'analytics', 'features'];
+    step text := 'creating raw_dev_wh and raw_dev_ta';
     owned bigint;
     item record;
 begin
+    create schema if not exists raw_dev_wh;
+    create schema if not exists raw_dev_ta;
+
+    step := 'counting what the role owns in the guarded schemas';
     select count(*) into owned
     from (
         select c.oid from pg_class as c join pg_namespace as n on n.oid = c.relnamespace
@@ -116,6 +144,7 @@ begin
             'the guard was breached, so nothing is repaired: look at them first', owned;
     end if;
 
+    step := 'handing back a guarded schema the role owns';
     for item in
         select n.nspname from pg_namespace as n
         where n.nspname = any(guarded) and n.nspowner = test_oid
@@ -123,6 +152,7 @@ begin
         execute format('alter schema %I owner to %I', item.nspname, current_user);
     end loop;
 
+    step := 'revoking schema grants';
     for item in
         select n.nspname from pg_namespace as n, aclexplode(n.nspacl) as acl
         where n.nspname = any(guarded) and acl.grantee = test_oid
@@ -130,6 +160,7 @@ begin
         execute format('revoke all on schema %I from %I', item.nspname, test_role);
     end loop;
 
+    step := 'revoking table, sequence and column grants';
     for item in
         select distinct n.nspname, c.relname, c.relkind
         from pg_class as c
@@ -149,6 +180,7 @@ begin
         );
     end loop;
 
+    step := 'revoking routine grants';
     for item in
         select p.oid::regprocedure as signature
         from pg_proc as p
@@ -161,6 +193,7 @@ begin
 
     -- A default privilege, per guarded schema or for every schema, would grant
     -- the role an object created there later.
+    step := 'revoking default privileges';
     for item in
         select distinct pg_get_userbyid(d.defaclrole) as creator, n.nspname,
             case d.defaclobjtype when 'r' then 'tables' when 'S' then 'sequences'
@@ -177,6 +210,11 @@ begin
             item.kind, test_role
         );
     end loop;
+exception
+    when raise_exception then
+        raise;
+    when others then
+        raise exception 'make test-role stopped while %: SQLSTATE %', step, sqlstate;
 end
 $$;
 
@@ -193,6 +231,7 @@ declare
         'staging_dev_wh', 'core_dev_wh', 'analytics_dev_wh',
         'staging_dev_ta', 'core_dev_ta', 'analytics_dev_ta'
     ];
+    step text := 'handing the development build schemas to the role';
     schema_name text;
     relation record;
 begin
@@ -215,6 +254,11 @@ begin
             );
         end loop;
     end loop;
+exception
+    when raise_exception then
+        raise;
+    when others then
+        raise exception 'make test-role stopped while %: SQLSTATE %', step, sqlstate;
 end
 $$;
 
