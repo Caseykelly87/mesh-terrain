@@ -1,15 +1,20 @@
 """Which point layers may reach the engine: synthetic ones, and real ones engine.prepare wrote.
 
-engine.prepare checks the real layers it reads (every row of a real edge
-layer has its box, ADR 0008), and those checks bind only if a hand-built
-layer cannot reach the engine (Casey, issue #55 comment 7018724580). So
-prepare writes `prepared.json` beside the layers it writes, naming each with
-its sha256, and the engine admits a point layer only when its positions
-marker (`engine.positions_marker`) is `synthetic`, or `real` with that file
-listing the layer's name and current sha256. A real layer copied away from
-its `prepared.json`, or changed after prepare wrote it, is refused, and so is
-a layer without the marker, which is what a hand-built layer looks like. The
-file holds names and hashes only, no coordinate.
+engine.prepare checks the real layers it reads (every real row has its box,
+ADR 0008). So that a layer reaches the engine only through those checks
+(Casey, issue #55 comment 7018724580), prepare writes `prepared.json` beside
+the layers it writes, naming each with its sha256, and the engine admits a
+point layer only when its positions marker (`engine.positions_marker`) is
+`synthetic`, or `real` with that file listing the layer's name and current
+sha256. A real layer copied away from its `prepared.json`, or changed after
+prepare wrote it, is refused, and so is a layer without the marker. The file
+holds names and hashes only, no coordinate.
+
+This stops accidents, not deliberate bypass (Casey, issue #55 comment
+7024307502, item 2, Q1 (a)). It does not prove who wrote a `prepared.json`:
+a hand-written one that lists a layer's name and sha256 is admitted, and so
+is a real layer re-marked `synthetic`, since the marker is the caller's own
+statement.
 """
 
 import json

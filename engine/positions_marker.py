@@ -7,6 +7,9 @@ Capture-derived layers are stamped `real` and the committed fixtures
 `synthetic`; a prepared receiver layer that adds the made-up grid to one real
 receiver is `real`. The engine admits a layer marked `synthetic`, or one
 marked `real` and listed in the `prepared.json` beside it (`engine.prepared`).
+That stops accidents, not deliberate bypass: nothing here stops a caller
+re-marking a real layer `synthetic` (Casey, issue #55 comment 7024307502,
+item 2, Q1 (a)).
 The export rule queued after the x72y429 run records the marker in the run
 manifest, and the export asset refuses a run that lacks it. Stamping rewrites
 the file with the same rows and GeoParquet metadata.
