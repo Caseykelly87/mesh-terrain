@@ -73,8 +73,10 @@ from pipeline.common.snapshot import sha256_file, start_snapshot
 __all__ = [
     "DEFAULT_INFO",
     "LICENCE",
+    "NothingToReduceError",
     "SnapshotInfo",
     "Source",
+    "brokers_read",
     "ordered_results",
     "reduce_capture",
 ]
@@ -125,8 +127,21 @@ class NothingToReduceError(Exception):
     """No source folder holds a capture file, so there is nothing to reduce."""
 
 
+def check_broker_hosts(info: SnapshotInfo) -> None:
+    """Refuse an `info.brokers` that does not name one host per broker.
+
+    Raises:
+        ValueError: if `info.brokers` does not name one host per broker.
+    """
+    if len(info.brokers) != len(Broker):
+        raise ValueError(f"info.brokers names {len(info.brokers)} hosts, not one per broker")
+
+
 def brokers_read(info: SnapshotInfo, read: Iterable[str]) -> list[str]:
     """The hosts of the brokers with at least one capture file read, in `Broker` order.
+
+    A broker counts as read when one of its capture files was read, even when
+    none of its records falls inside the window.
 
     Args:
         info: Its `brokers` names each broker's host, public first, then MeshSTL.
@@ -135,8 +150,7 @@ def brokers_read(info: SnapshotInfo, read: Iterable[str]) -> list[str]:
     Raises:
         ValueError: if `info.brokers` does not name one host per broker.
     """
-    if len(info.brokers) != len(Broker):
-        raise ValueError(f"info.brokers names {len(info.brokers)} hosts, not one per broker")
+    check_broker_hosts(info)
     hosts = dict(zip(Broker, info.brokers, strict=True))
     found = set(read)
     return [hosts[broker] for broker in Broker if broker.value in found]
@@ -452,7 +466,7 @@ def reduce_capture(
         SnapshotExistsError: if the snapshot exists.
         PartialExistsError: if `<id>.partial/` exists from an earlier run.
     """
-    brokers_read(info, [])
+    check_broker_hosts(info)
     groups = _tasks(sources)
     if not groups:
         raise NothingToReduceError("no source folder holds a capture file")
