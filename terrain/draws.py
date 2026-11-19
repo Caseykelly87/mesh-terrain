@@ -1,9 +1,10 @@
 """Endpoint draws: one link's quantities over positions drawn inside its two boxes.
 
-A node's reported position is only known to a box (`box_half_width_m` from its
-`precision_bits`), so each link-hour is computed N times, 16 by default, each
-time with both endpoints placed uniformly at random inside their boxes in
-EPSG:26915 (UTM zone 15N, metres). One placement is a draw. The draws are seeded
+A node's reported position is only known to a box (`terrain.boxes`: a grid
+square, or the `lnk_02` rectangle in latitude and longitude, ADR 0008), so each
+link-hour is computed N times, 16 by default, each time with both endpoints
+placed uniformly at random inside their boxes and converted to EPSG:26915 (UTM
+zone 15N, metres). One placement is a draw. The draws are seeded
 from the run seed and the link id, so a rerun reproduces them (`snp_01`); with
 one draw the endpoints are the box centres, the single-draw mode for tests and
 the cut-list fallback.
@@ -32,6 +33,10 @@ import structlog
 from affine import Affine
 from rasterio.io import DatasetReader
 
+from terrain.boxes import GEOGRAPHIC_TO_UTM as GEOGRAPHIC_TO_UTM
+from terrain.boxes import EdgeBox as EdgeBox
+from terrain.boxes import EndpointBox as EndpointBox
+from terrain.boxes import PositionBox as PositionBox
 from terrain.cells import CELL_STEP_M, FineLayers, cell_profile
 from terrain.clutter import BoolArray
 from terrain.errors import OutOfExtentError, RefusalReason, RefusedDrawError
@@ -42,28 +47,6 @@ METRO_STEP_M = 10.0
 FINE_STEP_M = 1.0
 
 log = structlog.get_logger(component="terrain.draws")
-
-
-@dataclass(frozen=True, kw_only=True)
-class EndpointBox:
-    """The square an endpoint is known to lie in.
-
-    Attributes:
-        centre_xy_m: Box centre, easting and northing in EPSG:26915, metres.
-        half_width_m: Half the side of the box in metres; 0 for a known point.
-    """
-
-    centre_xy_m: XY
-    half_width_m: float
-
-    def __post_init__(self) -> None:
-        """Check the half-width.
-
-        Raises:
-            ValueError: if the half-width is negative or not finite.
-        """
-        if not (math.isfinite(self.half_width_m) and self.half_width_m >= 0.0):
-            raise ValueError(f"half_width_m must be finite and at least 0, got {self.half_width_m}")
 
 
 @dataclass(frozen=True, eq=False)
@@ -328,17 +311,19 @@ def draw_seed(run_seed: int, link_id: str) -> int:
 
 
 def draw_endpoints(
-    tx: EndpointBox, rx: EndpointBox, n_draws: int, seed: int
+    tx: PositionBox, rx: PositionBox, n_draws: int, seed: int
 ) -> list[tuple[XY, XY]]:
     """Endpoint pairs drawn uniformly inside the two boxes.
 
-    Each draw takes four numbers in the order tx easting, tx northing, rx
-    easting, rx northing from numpy's default generator seeded with `seed`.
-    With one draw the pair is the two box centres.
+    Each draw takes four numbers from -1 to 1 from numpy's default generator
+    seeded with `seed`, in the order tx easting, tx northing, rx easting, rx
+    northing; an edge box reads the first of its two as longitude and the
+    second as latitude (`terrain.boxes`). With one draw the pair is the two
+    box centres.
 
     Args:
-        tx: Transmitter box in EPSG:26915.
-        rx: Receiver box in EPSG:26915.
+        tx: Transmitter box.
+        rx: Receiver box.
         n_draws: Number of pairs, at least 1.
         seed: Generator seed (`draw_seed`).
 
@@ -353,13 +338,13 @@ def draw_endpoints(
     if n_draws == 1:
         return [(tx.centre_xy_m, rx.centre_xy_m)]
     unit = np.random.default_rng(seed).uniform(-1.0, 1.0, size=(n_draws, 4))
-    return [(_offset(tx, u[0], u[1]), _offset(rx, u[2], u[3])) for u in unit]
+    return list(zip(tx.place(unit[:, 0:2]), rx.place(unit[:, 2:4]), strict=True))
 
 
 def sample_link(
     link_id: str,
-    tx: EndpointBox,
-    rx: EndpointBox,
+    tx: PositionBox,
+    rx: PositionBox,
     builder: ProfileBuilder,
     quantities: QuantityFunction,
     *,
@@ -371,8 +356,8 @@ def sample_link(
 
     Args:
         link_id: The link's key, which with `run_seed` seeds the draws.
-        tx: Transmitter box in EPSG:26915.
-        rx: Receiver box in EPSG:26915.
+        tx: Transmitter box.
+        rx: Receiver box.
         builder: Builds a draw's profiles from its two points.
         quantities: Runs the models on a draw's profiles.
         run_seed: The run's seed.
@@ -421,13 +406,6 @@ def sample_link(
         tx_building_draws=tx_on,
         rx_building_draws=rx_on,
         dsm_filled_pixels_median=_filled_median([draw for draw, _ in kept]),
-    )
-
-
-def _offset(box: EndpointBox, unit_x: float, unit_y: float) -> XY:
-    return (
-        box.centre_xy_m[0] + box.half_width_m * float(unit_x),
-        box.centre_xy_m[1] + box.half_width_m * float(unit_y),
     )
 
 

@@ -13,12 +13,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from shapely.geometry import Point
+from test_terrain_edge_boxes import TX_CELL
 
 from engine.errors import ConfigError
 from engine.points import EDGE_COLUMNS, box_form, read_points
 from terrain.draws import EdgeBox, EndpointBox
-from test_terrain_edge_boxes import TX_CELL
 
+INT64 = pa.int64()
 EDGES = (TX_CELL.south_i, TX_CELL.north_i, TX_CELL.west_i, TX_CELL.east_i)
 
 
@@ -27,7 +28,7 @@ def write_edge_layer(
     rows: list[tuple[str, tuple[float, float], tuple[int | None, ...]]],
     *,
     crs: str = "EPSG:26915",
-    edge_type: pa.DataType = pa.int64(),
+    edge_type: pa.DataType = INT64,
 ) -> Path:
     """An `rx_id` layer with the four edges; geometry in EPSG:26915 unless crs says 4326."""
     frame = gpd.GeoDataFrame(

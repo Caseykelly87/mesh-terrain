@@ -3,9 +3,10 @@
 Paths between real endpoints are listed one by one with the site's role,
 yes or no and the distance from the path to the nearest tall cell, or the
 section says the run has no real receiver; grid paths are counted per site.
-The file holds no coordinate of any node, real or made up. Box half-widths
-are listed because the engine's draws move each end inside its box; they
-come from position precision, so the file and the printed summary are read
+The file holds no coordinate of any node, real or made up. Box reaches (the
+distance from a box's centre to its farthest corner) are listed because the
+engine's draws move each end inside its box; they come from position
+precision, so the file and the printed summary are read
 locally only and never posted, and issue #44 gets counts only (the lead's
 rule; the repository is public).
 """
@@ -32,13 +33,13 @@ class Site:
     Attributes:
         site_id: Pseudonym.
         role: `both_ends_gateway` or `gateway_only_gateway`.
-        half_width_m: Position box half-width in metres.
+        reach_m: Distance from the box centre to its farthest corner, metres.
         in_run: Whether its box plus 50 m lies inside the DEM.
     """
 
     site_id: str
     role: str
-    half_width_m: float
+    reach_m: float
     in_run: bool
 
 
@@ -54,8 +55,8 @@ class CrossingReport:
         within_m: Crossing distance, metres.
         tall_cells: Number of tall cells found.
         sites: Every real site, in or out of the run.
-        receiver_half_widths: Real receiver pseudonym to box half-width, metres;
-            empty for a run whose receivers are the grid alone.
+        receiver_reaches: Real receiver pseudonym to box reach, metres; empty
+            for a run whose receivers are the grid alone.
         real: Crossings of the paths from sites in the run to real receivers.
         grid: Crossings of the paths from sites in the run to grid receivers.
         real_receivers: False when the run was prepared with
@@ -70,7 +71,7 @@ class CrossingReport:
     within_m: float
     tall_cells: int
     sites: Sequence[Site]
-    receiver_half_widths: dict[str, float]
+    receiver_reaches: dict[str, float]
     real: Sequence[PathCrossing]
     grid: Sequence[PathCrossing]
     real_receivers: bool
@@ -87,7 +88,8 @@ def crossing_markdown(report: CrossingReport) -> str:
         f"same place. A path crosses when the straight line between its site's and its "
         f"receiver's box centres passes within {report.within_m:g} m of a tall cell's square. "
         "The engine draws each end anywhere inside its box, so a drawn path can lie up to the "
-        "larger box half-width either side of the centre line.",
+        "larger box reach, the distance from a box's centre to its farthest corner, either "
+        "side of the centre line.",
         "",
         "| DEM snapshot | DSM snapshot | tall cells |",
         "| --- | --- | --- |",
@@ -135,16 +137,16 @@ def _real_lines(report: CrossingReport) -> list[str]:
     rows = []
     for c in report.real:
         site = sites[c.site_id]
-        half_width_m = max(site.half_width_m, report.receiver_half_widths[c.rx_id])
+        reach_m = max(site.reach_m, report.receiver_reaches[c.rx_id])
         rows.append(
             f"| {c.site_id} | {site.role} | {c.rx_id} | {_yes_no(c)} | {_distance(c.distance_m)} "
-            f"| {half_width_m:.1f} |"
+            f"| {reach_m:.1f} |"
         )
     return [
         "## Paths between real endpoints",
         "",
         f"| site_id | role | rx_id | within {report.within_m:g} m | closest distance (m) "
-        "| larger box half-width (m) |",
+        "| larger box reach (m) |",
         "| --- | --- | --- | --- | --- | --- |",
         *rows,
     ]

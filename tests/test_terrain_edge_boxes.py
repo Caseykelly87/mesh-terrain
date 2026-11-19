@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 from pyproj import Proj, Transformer
 from scipy import stats
+from test_terrain_draws import FREQUENCY_MHZ, RUN_SEED, flat_profiles, free_space
 
 from terrain.baselines import fspl_db
 from terrain.draws import (
@@ -23,7 +24,6 @@ from terrain.draws import (
     sample_link,
 )
 from terrain.profile import XY
-from test_terrain_draws import FREQUENCY_MHZ, RUN_SEED, flat_profiles, free_space
 
 TO_GEOGRAPHIC = Transformer.from_crs(26915, 4326, always_xy=True)
 UNIT_DEG = 1e-7

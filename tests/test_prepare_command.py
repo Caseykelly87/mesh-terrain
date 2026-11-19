@@ -651,9 +651,9 @@ def test_a_move_never_replaces_a_file_that_appeared_meanwhile(tmp_path: Path) ->
 def write_edge_inputs(folder: Path) -> Path:
     """The same made-up nodes, each as the 16-bit cell holding it, edges and centre."""
     import pyarrow as pa
+    from test_terrain_edge_boxes import cell_box
 
     from engine.points import EDGE_COLUMNS
-    from test_terrain_edge_boxes import cell_box
 
     folder.mkdir(parents=True, exist_ok=True)
     for name, id_column, rows, roles in (
@@ -679,9 +679,10 @@ def write_edge_inputs(folder: Path) -> Path:
 
 @pytest.mark.usefixtures("env")
 def test_edge_layers_are_carried_into_the_run_layers(tmp_path: Path) -> None:
+    from test_terrain_edge_boxes import cell_box
+
     from engine.points import EDGE_COLUMNS
     from terrain.draws import EdgeBox, EndpointBox
-    from test_terrain_edge_boxes import cell_box
 
     folder = write_edge_inputs(tmp_path / "x72y429")
     assert run(folder) == 0
