@@ -8,9 +8,12 @@ Parquet file per table and hour, `coverage.json` (the first and last receipt
 of every minute per broker, from which observed hours are computed),
 `coverage_roots.json` (the same per regional topic root), a README
 and the sha256 manifest, then renames the folder. It refuses when `<id>/` or
-`<id>.partial/` exists. It has no END_AT or MAX_RAW_BYTES: those are capture
+`<id>.partial/` exists, and before writing anything when no source folder holds a
+capture file. It has no END_AT or MAX_RAW_BYTES: those are capture
 parameters, and the manifest records them as null with the stop reason
-`reduction_complete`.
+`reduction_complete`. The manifest's `brokers` lists only the brokers whose
+folders held a capture file that was read, so a missing or empty folder leaves its
+broker out (Casey, issue #55 comment 7017280290, item 1).
 
 Rows whose key MeshSTL also delivered are held back until every file is read,
 so their broker flags are final before they are written; every other row is
@@ -31,7 +34,7 @@ import json
 from collections import Counter, deque
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import Executor, Future, ProcessPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from itertools import islice
 from pathlib import Path
@@ -116,6 +119,27 @@ class Source:
             path.name.removeprefix("capture-").split(".")[0]: path
             for path in sorted(self.directory.glob(pattern))
         }
+
+
+class NothingToReduceError(Exception):
+    """No source folder holds a capture file, so there is nothing to reduce."""
+
+
+def brokers_read(info: SnapshotInfo, read: Iterable[str]) -> list[str]:
+    """The hosts of the brokers with at least one capture file read, in `Broker` order.
+
+    Args:
+        info: Its `brokers` names each broker's host, public first, then MeshSTL.
+        read: The `Broker` values of the files read.
+
+    Raises:
+        ValueError: if `info.brokers` does not name one host per broker.
+    """
+    if len(info.brokers) != len(Broker):
+        raise ValueError(f"info.brokers names {len(info.brokers)} hosts, not one per broker")
+    hosts = dict(zip(Broker, info.brokers, strict=True))
+    found = set(read)
+    return [hosts[broker] for broker in Broker if broker.value in found]
 
 
 DEFAULT_INFO = SnapshotInfo(
@@ -357,9 +381,8 @@ def write_reduction_metadata(
         "source_files": reduction.sources,
         "decrypt_failed_portnum_rule": reduction.portnum_rule.manifest(list(Broker)),
     }
-    return write_metadata(
-        reduction.partial, reduction.info, reduction.deliveries.rows(), hours, run
-    )
+    info = replace(reduction.info, brokers=brokers_read(reduction.info, reduction.sources))
+    return write_metadata(reduction.partial, info, reduction.deliveries.rows(), hours, run)
 
 
 def _tasks(sources: list[Source]) -> list[list[tuple[str, Source, Path]]]:
@@ -423,12 +446,19 @@ def reduce_capture(
         The final snapshot folder.
 
     Raises:
+        NothingToReduceError: if no source folder holds a capture file; nothing
+            is written.
+        ValueError: if `info.brokers` does not name one host per broker.
         SnapshotExistsError: if the snapshot exists.
         PartialExistsError: if `<id>.partial/` exists from an earlier run.
     """
+    brokers_read(info, [])
+    groups = _tasks(sources)
+    if not groups:
+        raise NothingToReduceError("no source folder holds a capture file")
     partial = start_snapshot(root, info.snapshot_id)
     reduction = Reduction(partial, info, meshstl_keys(sources, key))
-    for results in _results(_tasks(sources), key, workers):
+    for results in _results(groups, key, workers):
         reduction.take(results)
     reduction.finish_rows()
     write_count_tables(reduction)
