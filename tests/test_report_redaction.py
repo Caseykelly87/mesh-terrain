@@ -151,8 +151,9 @@ def test_neither_value_appears_with_locals_at_default_verbosity(tmp_path: Path) 
 
 def test_the_short_summary_keeps_each_failure_message(tmp_path: Path) -> None:
     output = run_probe(tmp_path, "-rf")
-    line = next(line for line in output.splitlines() if "test_c_a_failing_assert" in line)
-    assert line.startswith("FAILED") and " - " in line, line
+    lines = output.splitlines()
+    line = next(line for line in lines if line.startswith("FAILED") and "test_c_a_failing" in line)
+    assert " - " in line, "the short summary lost the failure's message"
 
 
 def report(longrepr: object, sections: list[tuple[str, str]]) -> SimpleNamespace:

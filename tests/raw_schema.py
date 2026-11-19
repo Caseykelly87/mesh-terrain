@@ -22,6 +22,7 @@ or `raw_dev_ta` (`docker/warehouse/test-role.sql`), so a write that gets past
 both checks above still fails (`tests/test_db_role.py`).
 """
 
+import os
 import re
 import secrets
 from collections.abc import Iterator
@@ -30,6 +31,7 @@ from typing import NamedTuple
 
 import psycopg
 import pytest
+import report_redaction
 from psycopg import sql
 from pydantic import ValidationError
 
@@ -68,8 +70,8 @@ class RoleForTests(NamedTuple):
 def role_for_tests() -> RoleForTests | None:
     """The configured test role, or None when it is unset or names the owner.
 
-    Read before tests/conftest.py replaces WAREHOUSE_USER and WAREHOUSE_PASSWORD
-    with it, so warehouse_user is still the owner here.
+    tests/conftest.py reads it once, before it puts placeholders in the
+    environment, so warehouse_user is still the owner here.
     """
     try:
         settings = get_settings()
@@ -95,6 +97,77 @@ def session_credentials(role: RoleForTests | None) -> tuple[str, str]:
     return role.user, role.password
 
 
+# The configured test role, held only here: tests/conftest.py sets it once and
+# puts placeholders in the environment, so a test that copies os.environ holds
+# no test role value (Casey, issue #55 comment 7017280290, item 2). Only the
+# modules whose dbt runs connect put the values in the environment, through
+# role_environment, while they run.
+_role: list[RoleForTests] = []
+ROLE_VARIABLES = ("WAREHOUSE_USER", "WAREHOUSE_PASSWORD")
+TEST_ROLE_VARIABLES = ("WAREHOUSE_TEST_USER", "WAREHOUSE_TEST_PASSWORD")
+
+
+def use_role(role: RoleForTests | None = None) -> None:
+    """Hold the configured test role for connect_or_skip and role_environment; None for none."""
+    _role[:] = [role] if role else []
+
+
+def role_configured() -> bool:
+    return bool(_role)
+
+
+def placeholder_environment(patch: pytest.MonkeyPatch) -> None:
+    """Put placeholders in all four variables, so the environment holds no test role value.
+
+    The test role's own two variables get them too, since the settings would
+    otherwise read the real ones from the checkout's .env.
+    """
+    for name in (*ROLE_VARIABLES, *TEST_ROLE_VARIABLES):
+        patch.setenv(
+            name, UNCONFIGURED_PASSWORD if name.endswith("PASSWORD") else UNCONFIGURED_ROLE
+        )
+
+
+def role_environment(patch: pytest.MonkeyPatch) -> None:
+    """Put the test role in WAREHOUSE_USER and WAREHOUSE_PASSWORD, for a dbt that connects."""
+    for name, value in zip(
+        ROLE_VARIABLES, session_credentials(_role[0] if _role else None), strict=True
+    ):
+        patch.setenv(name, value)
+
+
+def environment_holds_the_role() -> bool:
+    """Whether any environment variable holds either test role value."""
+    return any(
+        value in entry for value in (_role[0] if _role else ()) for entry in os.environ.values()
+    )
+
+
+def redaction_covers_the_role() -> bool:
+    """Whether pytest reports are still scrubbed of both test role values."""
+    return not _role or report_redaction.covers(*_role[0])
+
+
+def session_is_the_test_role(conn: psycopg.Connection) -> bool:
+    """Whether the connection's current and session user are the configured test role."""
+    user = _role[0].user if _role else UNCONFIGURED_ROLE
+    row = conn.execute("select current_user = %s and session_user = %s", (user, user)).fetchone()
+    return row == (True,)
+
+
+def _connection_keywords() -> dict[str, object]:
+    """Where and as whom connect_or_skip connects; the role comes from _role, not os.environ."""
+    settings = get_settings()
+    user, password = session_credentials(_role[0] if _role else None)
+    return {
+        "host": settings.warehouse_host,
+        "port": settings.warehouse_port,
+        "user": user,
+        "password": password,
+        "dbname": settings.warehouse_db,
+    }
+
+
 def server_refused_login(err: psycopg.Error) -> bool:
     """Whether the server answered and refused the login, rather than not answering.
 
@@ -114,16 +187,8 @@ def connect_or_skip() -> psycopg.Connection:
     instead: the role is missing, its password differs, or no test role is
     configured, and a run that skipped every warehouse test would pass.
     """
-    settings = get_settings()
     try:
-        return psycopg.connect(
-            host=settings.warehouse_host,
-            port=settings.warehouse_port,
-            user=settings.warehouse_user,
-            password=settings.warehouse_password.get_secret_value(),
-            dbname=settings.warehouse_db,
-            connect_timeout=3,
-        )
+        return psycopg.connect(**_connection_keywords(), connect_timeout=3)
     except psycopg.OperationalError as err:
         refused, kind = server_refused_login(err), err.__class__.__name__
     # Outside the handler, so the report chains no driver message, whose text
