@@ -58,7 +58,7 @@ Casey asked that the two values never appear in a transcript or log (issue #55 c
 2. both values in `pg_stat_activity`, which holds the text of the statement that hands them to `test-role.sql`'s DO blocks from the moment it starts until the next statement starts, visible to superusers (`mesh`, Dagster's connection) and to members of `pg_read_all_stats` or `pg_monitor` (none today); no log keeps it;
 3. both values in Docker's daemon log, which records what `docker compose exec -e` sends only when daemon debug logging is on (it is off here);
 4. CI's own fixed values for its throwaway warehouse, visible in `.github/workflows/ci.yml` and CI's logs; the real password is generated and used nowhere else (Casey, issue #55 comment 7018635302, item 4);
-5. anything a warehouse test or a debugger prints straight to the terminal, which is not a pytest report and so is not scrubbed: never run warehouse tests with `-s` or `--pdb`.
+5. for Casey to decide: anything printed outside a test report, a collection report or the warnings summary is not scrubbed. That happens with `-s`, `--capture=no`, `--capture=tee-sys`, `--pdb`, `--trace`, a Ctrl-C under `--full-trace` (it prints each frame's arguments, `connect_or_skip`'s connection keywords included) and an INTERNALERROR (it prints arguments, and locals with `-l`). Never run warehouse tests with `-s`, `--capture=no`, `--capture=tee-sys`, `--pdb`, `--trace` or `--full-trace`.
 
 Every occurrence of either value in a pytest report is replaced, wherever it appears, so a short or common role name would also be replaced inside unrelated text such as paths and column names; choose a distinctive role name, eight characters or more.
 
