@@ -13,8 +13,9 @@ which `connect_or_skip` connects with. The environment gets placeholders in
 WAREHOUSE_USER, WAREHOUSE_PASSWORD and the role's own two variables for the
 whole session, so settings built later hold no test role value, and a test
 that copies `os.environ` holds none either (Casey, issue #55 comment
-7017280290, item 2). Only the modules in DBT_CONNECTS, whose dbt runs connect
-and read the role from the environment, get its values there, while they run.
+7017280290, item 2). Only the modules in ROLE_IN_ENVIRONMENT, whose code
+under test connects with credentials it reads from the environment, get the
+values there, while they run.
 
 With no test role configured, `connect_or_skip` logs in as a role that does
 not exist, with a placeholder password, so no test connects as the owner:
@@ -37,9 +38,14 @@ import report_redaction
 from ingester.settings import IngesterSettings, get_ingester_settings
 from pipeline.common.settings import get_settings
 
-# The test modules whose dbt runs connect to the warehouse; dbt reads the
-# role from WAREHOUSE_USER and WAREHOUSE_PASSWORD.
-DBT_CONNECTS = frozenset({"test_dbt_fixture_build", "test_dbt_targets"})
+# The test modules whose code under test connects with WAREHOUSE_USER and
+# WAREHOUSE_PASSWORD from the environment: dbt runs in the first two, and the
+# terrain registry's lookup opens its own connection from the settings in the
+# third. A new module like these fails its warehouse tests with a refused
+# login until it is added here.
+ROLE_IN_ENVIRONMENT = frozenset(
+    {"test_dbt_fixture_build", "test_dbt_targets", "test_terrain_snapshots_registry"}
+)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -56,9 +62,9 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.fixture(autouse=True, scope="module")
-def role_for_dbt(request: pytest.FixtureRequest) -> Iterator[None]:
-    """Give the modules whose dbt connects the test role in the environment, while they run."""
-    if request.module.__name__ not in DBT_CONNECTS:
+def role_in_environment(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Give the modules in ROLE_IN_ENVIRONMENT the test role in the environment, while they run."""
+    if request.module.__name__ not in ROLE_IN_ENVIRONMENT:
         yield
         return
     with pytest.MonkeyPatch.context() as patch:
