@@ -7,8 +7,21 @@ SHELL := bash
 # .env is exported into every recipe, except NODE_ID_HMAC_KEY, so dbt and pytest
 # on the host see the same variables Compose uses. The file is created from
 # .env.example by `make up`.
+#
+# The test role's name and password are the exception: a worktree gets them
+# from the shell, which exports only those two lines of the main checkout's
+# .env (README, Test role), and never a copy of that file (Casey, PR #74). A
+# value from the shell wins over the included .env, so a worktree .env copied
+# from an older .env.example cannot replace it; the main checkout's .env still
+# supplies them when the shell does not.
+TEST_ROLE_VARIABLES := WAREHOUSE_TEST_USER WAREHOUSE_TEST_PASSWORD
+$(foreach name,$(TEST_ROLE_VARIABLES),$(if $(filter environment,$(origin $(name))), \
+    $(eval FROM_SHELL_$(name) := $$($(name)))))
 -include .env
+$(foreach name,$(TEST_ROLE_VARIABLES),$(if $(filter file,$(origin FROM_SHELL_$(name))), \
+    $(eval $(name) := $$(FROM_SHELL_$(name)))))
 export
+unexport TEST_ROLE_VARIABLES $(foreach name,$(TEST_ROLE_VARIABLES),FROM_SHELL_$(name))
 # The HMAC key is the one secret no recipe needs from the environment: the
 # commands that pseudonymise read it from .env through their settings, and the
 # tests must never see it (Casey, 2026-11-13).
@@ -49,6 +62,16 @@ DBT_DEV_TARGET_GUARD = $(if $(filter-out 1,$(words $(DBT_DEV_TARGET)))$(filter-o
     $(DBT_DEV_TARGETS),$(DBT_DEV_TARGET)),$(error $(DBT_DEV_TARGET_REFUSAL)))
 unexport DBT_DEV_TARGET_GUARD DBT_DEV_TARGETS DBT_DEV_TARGET_REFUSAL
 $(if $(filter check dbt-build,$(MAKECMDGOALS)),$(DBT_DEV_TARGET_GUARD))
+
+# The goals that connect as the test role stop before any recipe runs when
+# either value is missing, so make up starts nothing and make check lints
+# nothing first. Unexported for the reason the guard above is.
+TEST_ROLE_MISSING = set $(1): in a worktree, export it from the main checkout's .env \
+    (README, Test role); in the main checkout, set it in .env as .env.example shows
+TEST_ROLE_GUARD = $(foreach name,$(TEST_ROLE_VARIABLES),$(if $($(name)),, \
+    $(error $(call TEST_ROLE_MISSING,$(name)))))
+unexport TEST_ROLE_MISSING TEST_ROLE_GUARD
+$(if $(filter check dbt-build dbt-debug test-role up,$(MAKECMDGOALS)),$(TEST_ROLE_GUARD))
 
 .PHONY: help env up down nuke rotate-owner-password check-credentials check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test test-role
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
@@ -141,7 +164,7 @@ up: check-credentials
 # (docker/warehouse/test-role.sql says what it may and may not do). It is
 # applied here, on every make up and make check, and not from initdb/, which
 # runs only on a fresh volume, so an existing warehouse gets it too. The bare
-# -e names pass the name and password from the exported .env into the
+# -e names pass the name and password from make's environment into the
 # container, where psql reads them, so the password is on no command line.
 # pg_isready waits on TCP because the server listens there only once the init
 # scripts of a fresh volume are done; until then the health check can pass
@@ -149,14 +172,14 @@ up: check-credentials
 TEST_ROLE_PSQL = tries=0; until pg_isready -q -h 127.0.0.1; do \
     tries=$$((tries + 1)); [ $$tries -lt 60 ] || exit 1; sleep 1; done; \
     psql -X -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f -
-TEST_ROLE_REQUIRED = : "$${WAREHOUSE_TEST_USER:?set WAREHOUSE_TEST_USER in .env, see .env.example}" \
-    "$${WAREHOUSE_TEST_PASSWORD:?set WAREHOUSE_TEST_PASSWORD in .env, see .env.example}"
+TEST_ROLE_REQUIRED = : "$${WAREHOUSE_TEST_USER:?set WAREHOUSE_TEST_USER, see README, Test role}" \
+    "$${WAREHOUSE_TEST_PASSWORD:?set WAREHOUSE_TEST_PASSWORD, see README, Test role}"
 # The development dbt targets run as the test role: dbt replaces a view or
 # table only as its owner, and the fixture build in the tests builds into the
-# same schemas as that role. The shell reads the values from the exported
-# .env, so the recipe text holds only their names.
-DBT_AS_TEST_ROLE = WAREHOUSE_USER="$${WAREHOUSE_TEST_USER:?set WAREHOUSE_TEST_USER in .env, see .env.example}" \
-    WAREHOUSE_PASSWORD="$${WAREHOUSE_TEST_PASSWORD:?set WAREHOUSE_TEST_PASSWORD in .env, see .env.example}"
+# same schemas as that role. The shell reads the values from make's
+# environment, so the recipe text holds only their names.
+DBT_AS_TEST_ROLE = WAREHOUSE_USER="$${WAREHOUSE_TEST_USER:?set WAREHOUSE_TEST_USER, see README, Test role}" \
+    WAREHOUSE_PASSWORD="$${WAREHOUSE_TEST_PASSWORD:?set WAREHOUSE_TEST_PASSWORD, see README, Test role}"
 unexport TEST_ROLE_PSQL TEST_ROLE_REQUIRED DBT_AS_TEST_ROLE
 
 test-role: env

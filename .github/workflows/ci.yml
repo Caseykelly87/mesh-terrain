@@ -12,6 +12,11 @@ concurrency:
 
 env:
   UV_VERSION: "0.13.4"
+  # .env.example names the test role's two variables only in comments, so a
+  # copied .env sets neither, as in a worktree; CI's warehouse is created and
+  # deleted inside each job, so fixed values here guard nothing real.
+  WAREHOUSE_TEST_USER: mesh_test
+  WAREHOUSE_TEST_PASSWORD: mesh_test
 
 jobs:
   lint-and-types:
