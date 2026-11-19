@@ -74,12 +74,18 @@ class EndpointBox:
         """Whether a drawn point can differ from the centre."""
         return self.half_width_m > 0.0
 
-    @property
-    def extent_m(self) -> Extent:
-        """The box's west, south, east and north edges, EPSG:26915 metres."""
+    def extent_m(self, margin_m: float = 0.0) -> Extent:
+        """The box's west, south, east and north edges plus a margin, EPSG:26915 metres.
+
+        The half-width and the margin are added first, as the run grid has
+        always done, so a square gives the same grid edges to the last bit.
+
+        Args:
+            margin_m: Metres added on every side.
+        """
         x_m, y_m = self.centre_xy_m
-        half_m = self.half_width_m
-        return x_m - half_m, y_m - half_m, x_m + half_m, y_m + half_m
+        reach_m = self.half_width_m + margin_m
+        return x_m - reach_m, y_m - reach_m, x_m + reach_m, y_m + reach_m
 
     @property
     def reach_m(self) -> float:
@@ -127,15 +133,17 @@ class EdgeBox:
         Raises:
             ValueError: if an edge is not a whole number, south is not below
                 north or west not below east, or an edge lies outside -90 to
-                90 degrees of latitude or -180 to 180 of longitude.
+                90 degrees of latitude or -180 to 180 of longitude. The
+                message names the rule and never an edge value: it can reach
+                a log beside a node's pseudonym.
         """
         edges = (self.south_i, self.north_i, self.west_i, self.east_i)
         if not all(isinstance(edge, int) and not isinstance(edge, bool) for edge in edges):
-            raise ValueError(f"box edges must be whole numbers of 1e-7 degrees, got {edges}")
+            raise ValueError("box edges must be whole numbers of 1e-7 degrees")
         if self.south_i >= self.north_i:
-            raise ValueError(f"south_i {self.south_i} must be below north_i {self.north_i}")
+            raise ValueError("south_i must be below north_i")
         if self.west_i >= self.east_i:
-            raise ValueError(f"west_i {self.west_i} must be below east_i {self.east_i}")
+            raise ValueError("west_i must be below east_i")
         if self.south_i < -LATITUDE_LIMIT_I or self.north_i > LATITUDE_LIMIT_I:
             raise ValueError("the box's latitude lies outside -90 to 90 degrees")
         if self.west_i < -LONGITUDE_LIMIT_I or self.east_i > LONGITUDE_LIMIT_I:
@@ -165,16 +173,23 @@ class EdgeBox:
         )
         return south_west, south_east, north_east, north_west
 
-    @property
-    def extent_m(self) -> Extent:
-        """West, south, east and north of the four corners, EPSG:26915 metres.
+    def extent_m(self, margin_m: float = 0.0) -> Extent:
+        """West, south, east and north of the four corners plus a margin, EPSG:26915 metres.
 
         The converted edges bow by millimetres (5 mm on a 16-bit cell), which
         the run grid's 50 m margin covers.
+
+        Args:
+            margin_m: Metres added on every side.
         """
         eastings_m = [corner[0] for corner in self.corners_xy_m]
         northings_m = [corner[1] for corner in self.corners_xy_m]
-        return min(eastings_m), min(northings_m), max(eastings_m), max(northings_m)
+        return (
+            min(eastings_m) - margin_m,
+            min(northings_m) - margin_m,
+            max(eastings_m) + margin_m,
+            max(northings_m) + margin_m,
+        )
 
     @property
     def reach_m(self) -> float:
