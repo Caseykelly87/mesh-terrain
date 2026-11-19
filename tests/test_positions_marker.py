@@ -2,8 +2,9 @@
 
 The key `mesh_terrain:positions` in a Parquet file's key-value metadata is
 `real` or `synthetic` (Casey, issue #44, item 4 (a)); a layer is `synthetic`
-only when every row is made up. The engine does not read it yet; the export
-rule queued after the x72y429 run will.
+only when every row is made up. The engine admits a `synthetic` layer, or a
+`real` one listed in the `prepared.json` beside it (`engine.prepared`), and the
+export rule queued after the x72y429 run will record it.
 """
 
 from pathlib import Path
