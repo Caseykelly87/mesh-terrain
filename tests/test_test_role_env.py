@@ -279,8 +279,22 @@ def test_no_raised_message_carries_the_role() -> None:
         "log_statement to 'none'",
         "log_min_error_statement to panic",
         "log_min_duration_statement to -1",
+        "log_min_duration_sample to -1",
         "log_error_verbosity to terse",
     ],
 )
 def test_the_role_transaction_turns_statement_logging_off(setting: str) -> None:
     assert f"set local {setting};" in SQL.read_text(encoding="utf-8")
+
+
+def test_transaction_sampling_is_off_before_the_transaction_starts() -> None:
+    """The server decides whether to log a transaction's statements when it begins."""
+    text = SQL.read_text(encoding="utf-8")
+    assert text.index("set log_transaction_sample_rate to 0;") < text.index("\nbegin;")
+
+
+def test_a_membership_is_revoked_as_the_role_that_granted_it() -> None:
+    """A superuser's plain revoke leaves another grantor's membership and warns, naming the role."""
+    text = SQL.read_text(encoding="utf-8")
+    assert "revoke %I from %I granted by %I cascade" in text
+    assert "m.grantor" in text
