@@ -56,8 +56,8 @@ Question 2 is option 2, not the recommended option 1.
 
 ## Consequences
 
-- PR #73 builds the engine side: `terrain.boxes.EdgeBox` (centre, corners, extent, draws), read by `engine.points` with either box form and checked to 1 mm against its centre, used by `engine.grid` and `engine.prepare`; manifest 1.2.0 records each point layer's `input_schema_version` (1.0.0 without the edges, 1.1.0 with them) and `box_form` (`rectangle`, `square` or `point`); engine 0.2.0. Square layers draw as before, so the committed fixture run's content hashes do not change.
-- PR #73 carries Casey's INTERFACE and PLAN wording; `pos_01` and `lnk_02` need no change.
+- PR #73 builds the engine side: `terrain.boxes.EdgeBox` (centre, corners, extent, draws), read by `engine.points` with either box form and checked to 1 mm against its centre, used by `engine.grid` and `engine.prepare`; manifest 1.2.0 records each point layer's `input_schema_version` (1.0.0 without the edges, 1.1.0 with them) and `box_form` (`rectangle`, `square` or `point`); the calibration observations layer has no box and no point schema, so it records neither; engine 0.2.0. Square layers draw as before, so the committed fixture run's content hashes do not change.
+- PR #73 carries Casey's INTERFACE and PLAN wording and the interim `lnk_05` clause, "until the `position_uncertainty_m` unit (ADR 0008, question 3)", as the proposal he answered set out; the lead co-assigned these lead-only edits to terrain-rf-eng for PR #73. `pos_01` and `lnk_02` need no change.
 - ingest-eng, after PR #73 merges: `engine_inputs` writes the four edges, takes its geometry from `EdgeBox.centre_xy_m`, and checks the DEM edge with the engine's `run_grid`. The `docs/STATUS.md` deviation on `box_half_width_m` closes then.
-- Question 3 is its own unit: `lnk_05`'s wording, including its "until the rectangle-draws unit" clause, one line in `ingester/link_rules.py`, and the 40 fixture values, reviewed by ingest-eng and warehouse-eng.
+- Question 3 is its own unit: `lnk_05`'s final wording with Casey's item 6 sentence, one line in `ingester/link_rules.py`, and the 40 fixture values, reviewed by ingest-eng and warehouse-eng.
 - The export-rule unit takes manifest 1.3.0.
