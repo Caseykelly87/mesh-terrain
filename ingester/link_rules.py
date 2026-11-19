@@ -289,9 +289,9 @@ def read_position(row: Row, inside: InArea) -> Position | None:
 def broadcast_key(row: Row) -> tuple[Any, ...]:
     """What a broadcast's copies share: node, `packet_id` and stored values (ADR 0003).
 
-    A row with a null or zero `packet_id` is a position on its own.
+    A row with a null `packet_id` is a position on its own; a zero is an id.
     """
-    if not row["packet_id"]:
+    if row["packet_id"] is None:
         return (row["delivery_key"],)
     stored = (row["latitude_i"], row["longitude_i"], row["precision_bits"])
     return (row["origin_pseudonym"], row["packet_id"], *stored)
@@ -367,7 +367,7 @@ def later_copies(rows: Sequence[Row]) -> set[str]:
     first: set[tuple[str, int, str]] = set()
     later: set[str] = set()
     for row in rows:
-        if not row["packet_id"]:
+        if row["packet_id"] is None:
             continue
         packet = (row["origin_pseudonym"], row["packet_id"], row["gateway_pseudonym"])
         if packet in first:
