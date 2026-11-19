@@ -225,7 +225,8 @@ def test_the_manifest_records_versions_seed_snapshots_inputs_and_code(
     assert set(layers) == {"two_sites.parquet", "receivers_500.parquet"}
     assert layers["two_sites.parquet"]["box_form"] == "point"
     assert layers["receivers_500.parquet"]["box_form"] == "square"
-    assert {i["input_schema_version"] for i in layers.values()} == {INPUT_SCHEMA_VERSION}
+    # Each layer records the point layer schema its columns use: 1.0.0 without edges.
+    assert {i["input_schema_version"] for i in layers.values()} == {"1.0.0"}
     assert INPUT_SCHEMA_VERSION == "1.1.0"
     assert re.fullmatch(r"[0-9a-f]{40}", manifest["engine_git_commit"])
     assert isinstance(manifest["engine_git_dirty"], bool)
@@ -975,5 +976,6 @@ def test_an_edge_box_run_reproduces_and_records_rectangles(tmp_path: Path) -> No
     assert content_hashes(runs[0]) == content_hashes(runs[1])
     layers = {Path(i["path"]).name: i for i in manifest_of(runs[0])["inputs"] if "box_form" in i}
     assert layers["edge_receivers.parquet"]["box_form"] == "rectangle"
+    assert layers["edge_receivers.parquet"]["input_schema_version"] == "1.1.0"
     rows = gpd.read_parquet(runs[0] / "predictions.parquet")
     assert (rows["endpoint_draws"] == fixture_fields()["endpoint_draws"]).all()
