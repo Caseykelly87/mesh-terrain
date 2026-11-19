@@ -10,8 +10,9 @@ transaction's repr names its user), in a chained exception or in captured
 output, and pytest's warnings summary can show a warning's text, such as an
 unclosed connection's ResourceWarning, which holds the connection's repr.
 conftest remembers the two values once and scrubs every test and collection
-report and every recorded warning with this module; the values live only in
-this module's list, never in a test's locals.
+report and every recorded warning with this module. For the whole session
+the values sit in this module's list and in `tests/raw_schema.py`'s holder,
+never in a test's locals.
 
 Every occurrence of a remembered value is replaced, whatever surrounds it, so
 a short or common role name would also be replaced inside unrelated text,
@@ -19,17 +20,33 @@ such as a path or a column name, and those reports would be harder to read:
 the README asks for a distinctive role name.
 """
 
-from types import SimpleNamespace
 from typing import Any
+
+from _pytest._code.code import ReprFileLocation
 
 PLACEHOLDER = "<test role value>"
 _values: list[str] = []
 
 
-class ScrubbedText(str):
-    """A rendered traceback with the values replaced, keeping the crash line `-rf` prints."""
+class ScrubbedRepr:
+    """A rendered traceback with the values replaced, printed as pytest prints its own.
 
-    reprcrash: Any = None
+    Not a str: pytest's short summary prints a str longrepr as it is, so
+    `-rf` would show the traceback's first line, and only a non-str one has
+    its `reprcrash.message` read. `--tb=line` prints `str(reprcrash)`, which a
+    ReprFileLocation renders as `path:line: message`.
+    """
+
+    def __init__(self, text: str, reprcrash: ReprFileLocation | None) -> None:
+        self.text = text
+        self.reprcrash = reprcrash
+
+    def toterminal(self, out: Any) -> None:
+        for line in self.text.splitlines():
+            out.line(line)
+
+    def __str__(self) -> str:
+        return self.text
 
 
 def remember(*values: str) -> None:
@@ -49,15 +66,15 @@ def redacted(text: str) -> str:
     return text
 
 
-def _scrubbed_text(longrepr: Any) -> str:
+def _scrubbed_repr(longrepr: Any) -> ScrubbedRepr:
     """The rendered traceback, scrubbed, with a scrubbed copy of its crash line when it has one."""
-    text = ScrubbedText(redacted(str(longrepr)))
     crash = getattr(longrepr, "reprcrash", None)
-    if crash is not None:
-        text.reprcrash = SimpleNamespace(
-            path=crash.path, lineno=crash.lineno, message=redacted(crash.message)
-        )
-    return text
+    scrubbed_crash = (
+        None
+        if crash is None
+        else ReprFileLocation(redacted(str(crash.path)), crash.lineno, redacted(crash.message))
+    )
+    return ScrubbedRepr(redacted(str(longrepr)), scrubbed_crash)
 
 
 def scrub(report: Any) -> None:
@@ -73,7 +90,7 @@ def scrub(report: Any) -> None:
     if isinstance(longrepr, tuple):
         report.longrepr = (*longrepr[:-1], redacted(str(longrepr[-1])))
     elif longrepr is not None and redacted(str(longrepr)) != str(longrepr):
-        report.longrepr = _scrubbed_text(longrepr)
+        report.longrepr = _scrubbed_repr(longrepr)
     report.sections = [(title, redacted(content)) for title, content in report.sections]
 
 
