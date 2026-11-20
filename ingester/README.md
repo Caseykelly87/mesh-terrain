@@ -57,8 +57,10 @@ Run:
   UV_SYSTEM_CERTS=true uv run --frozen python -I -m ingester.engine_inputs \
     --snapshot meshtastic-capture-2026-10-22 --tile x72y429 \
     --dem-snapshot 3dep-1m-mo-saintlouis-2017-x72y429 --expect-pairs <n> \
-    --out C:/Users/Casey/mesh-terrain-data/configs/x72y429
+    --out <data folder>/configs/x72y429
   ```
+
+  `<data folder>` is the host folder outside the repository that `SNAPSHOTS_HOST_DIR`, `SNAPSHOTS_DIR` and `RUNS_HOST_DIR` in `.env` point into; the output folder must be outside every git checkout.
 
   `<n>` is the pair count the contract's rules give on the snapshot (Casey: `--expect-pairs` is set to the count the contract gives). It was 8 under the spike's rules; the lead's real run sets it, and no figure from real data is in this repository.
 
