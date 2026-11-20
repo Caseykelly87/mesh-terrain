@@ -45,12 +45,13 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       # A check in a worktree may run with no .env at all: .env.example sourced
-      # into the shell and make told to skip its env step (docs/STATUS.md), and
-      # the test role's two lines exported from the main checkout's .env by the
-      # README recipe. The redaction probes failed there while passing below,
-      # so they also run that way, before this job writes its .env, with
-      # invented values in a stand-in for the main checkout's .env.
-      - name: redaction tests as a worktree check with no .env runs them
+      # into the shell (docs/STATUS.md), and the test role's two lines exported
+      # from the main checkout's .env by the README recipe. The redaction probes
+      # failed there while passing below, so they also run that way, before
+      # this job writes its .env, with invented values in a stand-in for the
+      # main checkout's .env. -o env only mirrors the route's command: test does
+      # not depend on env. The check-no-env job runs the whole check this way.
+      - name: run the redaction tests with no .env, as a worktree check can
         run: |
           test ! -e .env
           stand_in="$RUNNER_TEMP/main-checkout.env"
@@ -112,6 +113,45 @@ jobs:
       # connects as it; dbt-debug connects as the owner.
       - run: make dbt-debug
       - run: make dbt-build
+      - if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  # make check as a worktree can run it, with no .env (docs/STATUS.md):
+  # .env.example sourced into the shell, and the test role's two lines exported
+  # by the README recipe from a stand-in for the main checkout's .env, holding
+  # invented values. Every other job writes a .env first, so a test that needs
+  # one would pass there and fail in a worktree, as the redaction probes did
+  # (Casey, PR #88). The whole check runs against a throwaway warehouse, so
+  # the warehouse tests run rather than skip. A job of its own, so it adds no
+  # wall time.
+  check-no-env:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen
+      # The warehouse takes its settings from the shell, as no .env exists; the
+      # .env.example placeholders are fine for a warehouse that lives only
+      # inside this job. Here -o env skips check's env step, which would write
+      # a .env, as the worktree route does.
+      - name: run make check with no .env, as a worktree check can
+        run: |
+          test ! -e .env
+          stand_in="$RUNNER_TEMP/main-checkout.env"
+          for name in WAREHOUSE_TEST_USER WAREHOUSE_TEST_PASSWORD; do
+            value=$(openssl rand -hex 12)
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$name" "$value" >> "$stand_in"
+          done
+          unset WAREHOUSE_TEST_USER WAREHOUSE_TEST_PASSWORD
+          set -a; . ./.env.example; set +a; unset NODE_ID_HMAC_KEY
+          docker compose up --build --detach --wait --wait-timeout 300 warehouse
+          while IFS= read -r line; do export "$line"; done < <(grep -E '^WAREHOUSE_TEST_(USER|PASSWORD)=' "$stand_in" | tr -d '\r') && make -o env check DBT_DEV_TARGET=dev_ta
+          test ! -e .env
       - if: always()
         run: docker compose down --volumes --remove-orphans
 
