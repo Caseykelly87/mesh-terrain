@@ -152,6 +152,17 @@ def test_no_goal_shows_either_value_in_make_output(goal: str, tmp_path: Path) ->
     assert shown == [], f"make -n {goal} shows a test role value"
 
 
+def test_make_test_role_waits_with_a_message_and_logs_in_over_the_socket(tmp_path: Path) -> None:
+    """The wait and login make test-role shares with make rotate-owner-password (WAREHOUSE_PSQL)."""
+    shell = {"WAREHOUSE_TEST_USER": INVENTED_USER, "WAREHOUSE_TEST_PASSWORD": INVENTED_PASSWORD}
+    result = make_run("-n", "test-role", directory=tmp_path, shell=shell)
+    assert result.returncode == 0, result.stderr
+    line = next(line for line in result.stdout.splitlines() if "test-role.sql" in line)
+    assert "-lt 150 ]" in line
+    assert "make test-role: the warehouse did not listen on TCP within 150 s" in line
+    assert " -h " not in line[line.index("psql") :]
+
+
 def test_dbt_debug_runs_as_the_owner_because_dbt_debug_prints_the_user(tmp_path: Path) -> None:
     result = make_run("-n", "dbt-debug", directory=tmp_path, shell={})
     assert result.returncode == 0, result.stderr
