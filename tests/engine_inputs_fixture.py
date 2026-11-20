@@ -93,6 +93,11 @@ DEM_BOUNDS_M = (719_994.0, 4_279_994.0, 730_006.0, 4_290_006.0)
 # A square DEM whose east edge lies 36 m east of G3's own box: G3 is inside the
 # tile but its box plus the engine's 50 m margin is not inside the DEM.
 NARROW_DEM_BOUNDS_M = (719_774.0, 4_280_000.0, 729_780.0, 4_290_006.0)
+# A square DEM whose north edge, 4 288 190 m, lies between the engine's run grid
+# north for G3's inscribed square (4 288 180 m) and for G3's whole lnk_02 box
+# (4 288 200 m): the square passes the DEM edge check, the box does not (ADR 0008,
+# the stricter check). Every other node's box plus 50 m lies inside it.
+RECTANGLE_DEM_BOUNDS_M = (719_994.0, 4_278_178.0, 730_006.0, 4_288_190.0)
 TELEMETRY_APP = 67
 POSITION_APP = 3
 NEIGHBORINFO_APP = 71

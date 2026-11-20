@@ -9,6 +9,7 @@ is judged at the tile edge by its own rows (Casey, issue #55 comment
 No test reads the real snapshot.
 """
 
+import math
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,7 @@ from engine.points import Endpoint
 from engine.snapshots import resolve_snapshots
 from engine.terrain_build import check_covers
 from ingester import tile_selection
-from ingester.link_cells import Cell, box_around, cell_of
+from ingester.link_cells import Cell, LinkBox, box_around, cell_of
 from ingester.link_pairs import (
     USABLE_BITS,
     CaptureLinks,
@@ -67,6 +68,7 @@ from ingester.tile_selection import (
     straddle_drops,
     tile_counts,
 )
+from terrain.boxes import EdgeBox
 from terrain.draws import EndpointBox
 
 FIXTURE_SNAPSHOTS = Path(__file__).resolve().parent / "fixtures" / "snapshots"
@@ -546,7 +548,7 @@ def test_pairs_whose_kinds_agree_have_no_conflict() -> None:
 
 def test_layers_without_a_receiver_row_give_the_sites_and_no_receiver() -> None:
     """Casey (PR #70 comment 6992903491), (b): the sites are written with no receiver layer."""
-    site = PlacedNode(pseudonym("G1"), "both_ends_gateway", 724_000.0, 4_285_000.0, 17.8, False)
+    site = PlacedNode(pseudonym("G1"), "both_ends_gateway", cell_of(*NODES["G1"].box()), False)
     selection = Selection(placed=(site,), dem_check={pseudonym("G1"): True}, dropped=())
     assert selection.layers() == ([site], None)
 
@@ -599,15 +601,21 @@ def test_the_counts_check_runs_before_a_two_box_pair_is_dropped() -> None:
         selection.layers()
 
 
-def test_a_node_is_placed_at_its_one_box_with_the_inscribed_half_width() -> None:
+def edge_box_of(box: LinkBox) -> EdgeBox:
+    return EdgeBox(south_i=box.south_i, north_i=box.north_i, west_i=box.west_i, east_i=box.east_i)
+
+
+def test_a_node_is_placed_at_its_one_box_with_its_edges() -> None:
+    """ADR 0008: the row carries the lnk_02 box; its point is the engine's centre of it."""
     box = cell_of(*NODES["G1"].box())
     selection = select(links(*SELECTED), 3)
     sites, _ = selection.layers()
     assert sites[0].pseudonym == pseudonym("G1")
-    assert (sites[0].easting_m, sites[0].northing_m) == pytest.approx(
-        box_centre_m(NODES["G1"].box()), abs=1e-3
-    )
-    assert sites[0].half_width_m == box.smaller_half_width_m == box.half_width_ew_m
+    assert sites[0].box == box
+    assert sites[0].edge_box == edge_box_of(box)
+    centre = (sites[0].easting_m, sites[0].northing_m)
+    assert math.dist(centre, edge_box_of(box).centre_xy_m) <= 1e-3
+    assert centre == pytest.approx(box_centre_m(NODES["G1"].box()), abs=1e-3)
 
 
 def test_a_merged_box_is_placed_at_its_midpoint() -> None:
@@ -620,7 +628,7 @@ def test_a_merged_box_is_placed_at_its_midpoint() -> None:
     assert merged.merged
     midpoint = box_centre_m((latitude_i, longitude_i + 460, 32))
     assert (g1.easting_m, g1.northing_m) == pytest.approx(midpoint, abs=0.01)
-    assert g1.half_width_m == merged.smaller_half_width_m
+    assert g1.box == merged
     assert g1.precise_source
 
 
@@ -723,10 +731,29 @@ def test_extent_check_gives_the_engines_verdict(easting_m: float, expected: bool
     dem = resolve_snapshots(ids, FIXTURE_SNAPSHOTS)["dem"]
     centre_xy_m, half_m = (easting_m, 4_285_500.0), 100.0
     extent = dem_extent(FIXTURE_SNAPSHOTS, SUBTILE_DEM)
-    assert inside_dem(centre_xy_m, half_m, extent) is expected
+    box = EndpointBox(centre_xy_m=centre_xy_m, half_width_m=half_m)
+    assert inside_dem(box, extent) is expected
     assert _engine_covers(dem, centre_xy_m, half_m) is expected
 
 
 def test_dem_extent_refuses_a_missing_snapshot(tmp_path: Path) -> None:
     with pytest.raises(SelectionError, match="no finished folder"):
         dem_extent(tmp_path, "no-such-dem")
+
+
+def test_the_dem_edge_check_reads_the_whole_box_not_its_inscribed_square() -> None:
+    """ADR 0008, the stricter check: a box whose square fits can still fail on its long side.
+
+    The DEM's north edge sits between the run grid north of G1's inscribed
+    square and that of G1's whole lnk_02 box, which is taller than it is wide.
+    """
+    box = cell_of(*NODES["G1"].box())
+    edges = edge_box_of(box)
+    square = EndpointBox(centre_xy_m=edges.centre_xy_m, half_width_m=box.smaller_half_width_m)
+    grid = [run_grid([Endpoint(endpoint_id="x", box=b)], resolution_m=1.0) for b in (square, edges)]
+    assert grid[0].north_m < grid[1].north_m
+    extent = (grid[1].west_m, grid[1].south_m, grid[1].east_m, grid[0].north_m)
+    assert inside_dem(square, extent)
+    assert not inside_dem(edges, extent)
+    placed = PlacedNode(pseudonym("G1"), "both_ends_gateway", box, False)
+    assert not inside_dem(placed.edge_box, extent)
