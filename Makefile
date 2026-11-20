@@ -197,8 +197,8 @@ test-role: env
 # Postgres reads POSTGRES_PASSWORD only when it creates a fresh volume, so a
 # new WAREHOUSE_PASSWORD in .env reaches an existing warehouse only through
 # this target (README, Credentials). It starts the warehouse alone, so Dagster
-# does not try the new password first, waits until the server listens on TCP
-# (only the final server does, after any init scripts), and runs
+# does not try the new password first, waits for the server (WAREHOUSE_PSQL,
+# below, says how and why), and runs
 # docker/warehouse/rotate-owner-password.sql through psql over the
 # container's local socket, which the image trusts without a password, as the
 # healthcheck's own login does; so the old password is never needed and the
