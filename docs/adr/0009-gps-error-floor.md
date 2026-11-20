@@ -19,7 +19,7 @@ The proposal on issue #55 gave four questions with options; the record of each i
 2. Where the setting lives: a required run-config field; an engine constant recorded in the manifest; or an environment setting. Recommended the config field: INTERFACE hides no default in code, and the sensitivity table can vary it.
 3. Versions: manifest 1.3.0 recording the floor, with the export-rule unit moving to 1.4.0; or folding the field into the export-rule unit. Recommended the first.
 4. Widening an edge box: (A) in latitude and longitude with `pos_01`'s WGS84 radii at the box centre, then converted as every edge-box draw is; or (B) in metres on the UTM grid, mixing two frames in one draw. Recommended (A).
-5. Exact points (half-width 0, or all four edges null), raised by the reviewer of PR #89: (a) they stay exact, since they are model points such as a prepared run's grid receivers, not fixes; or (b) the floor applies to them too, moving every site-to-grid pair's receiver end by up to 5 m. Recommended (a).
+5. Exact points (half-width 0, or all four edges null), raised by the reviewer of PR #89: (a) they stay exact, since they are model points such as a prepared run's grid receivers, not fixes; or (b) the floor applies to them too, moving every site-to-grid pair's receiver end by up to 5 m on each axis. Recommended (a).
 
 ## Decision
 
