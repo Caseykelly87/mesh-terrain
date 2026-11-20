@@ -19,6 +19,7 @@ The proposal on issue #55 gave four questions with options; the record of each i
 2. Where the setting lives: a required run-config field; an engine constant recorded in the manifest; or an environment setting. Recommended the config field: INTERFACE hides no default in code, and the sensitivity table can vary it.
 3. Versions: manifest 1.3.0 recording the floor, with the export-rule unit moving to 1.4.0; or folding the field into the export-rule unit. Recommended the first.
 4. Widening an edge box: (A) in latitude and longitude with `pos_01`'s WGS84 radii at the box centre, then converted as every edge-box draw is; or (B) in metres on the UTM grid, mixing two frames in one draw. Recommended (A).
+5. Exact points (half-width 0, or all four edges null), raised by the reviewer of PR #89: (a) they stay exact, since they are model points such as a prepared run's grid receivers, not fixes; or (b) the floor applies to them too, moving every site-to-grid pair's receiver end by up to 5 m. Recommended (a).
 
 ## Decision
 
@@ -31,12 +32,14 @@ Casey, issue #55 comment 7042577618, verbatim:
 > 4. (A), widen in latitude and longitude with pos_01's WGS84 radii at the box centre; I extend the narrow exception for degree arithmetic in draws to this.
 > Note in the ADR that any future drive-test data uses this same floor value, not a separate one.
 
+Casey, issue #55 comment 7043900875, item 1, verbatim: "#89 exact points: (a). Exact points stay exact; the floor applies to boxes, which every real position has. Word it in ADR 0009 and INTERFACE as my decision. Then the reviewer's re-check and the slot rerun."
+
 The figure in the data sheet matched the proposal, 2.5 m CEP, so the build went ahead.
 
 ## Consequences
 
 - 5 m is a minimum covering about 95 percent of open-sky fixes of an M8-class receiver; it is not an estimate of a node's error, which in town is usually larger.
-- The draws never use a half-width below `position_floor_m`. A square box (`box_half_width_m` above 0) draws with max(half-width, floor). An edge box is widened about its centre on each axis whose half-width, in metres by `pos_01`'s radii at the centre latitude, is below the floor; the other axis keeps its edges, and the draw is uniform in latitude and longitude and converted to EPSG:26915 as before. An exact point (half-width 0, or all four edges null) stays exact: a model point such as a grid receiver, not a fix. Casey, issue #55 comment 7043900875, item 1, verbatim: "Exact points stay exact; the floor applies to boxes, which every real position has." Draws can therefore fall outside an `lnk_02` box smaller than the floor, by design. Public 15-bit and 16-bit cells (half-widths of 285 m and more) and the committed fixture's 20 m boxes draw as before.
+- The draws never use a half-width below `position_floor_m`. A square box (`box_half_width_m` above 0) draws with max(half-width, floor). An edge box is widened about its centre on each axis whose half-width, in metres by `pos_01`'s radii at the centre latitude, is below the floor; the other axis keeps its edges, and the draw is uniform in latitude and longitude and converted to EPSG:26915 as before. An exact point (half-width 0, or all four edges null) stays exact: a model point such as a grid receiver, not a fix. (Decision, question 5.) Draws can therefore fall outside an `lnk_02` box smaller than the floor, by design. Public 15-bit and 16-bit cells (half-widths of 285 m and more) and the committed fixture's 20 m boxes draw as before.
 - `position_floor_m` is a required run-config field, a finite number of at least 0; 0 turns the floor off. engine.prepare's template and the committed fixture configs write 5.0, and prepare's extent check uses the floored boxes. A run folder prepared before this ADR lacks the field and is refused until it is prepared again.
 - Manifest 1.3.0 records `position_floor_m`; engine 0.3.0; `schema_version` and the point layers' `input_schema_version` are unchanged. The export-rule unit takes manifest 1.4.0.
 - `pos_01`, `lnk_05`'s `position_uncertainty_m` and the `int_link_window` box columns are unchanged, as Casey said.
