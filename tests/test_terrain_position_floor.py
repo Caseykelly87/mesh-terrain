@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 import pytest
-from pyproj import Transformer
+from pyproj import Geod, Transformer
 from test_terrain_draws import RUN_SEED
 from test_terrain_edge_boxes import TX_CELL, cell_box
 
@@ -24,8 +24,6 @@ from terrain.profile import XY
 TO_GEOGRAPHIC = Transformer.from_crs(26915, 4326, always_xy=True)
 FLOOR_M = 5.0
 MANY = 10_000
-WGS84_A_M = 6_378_137.0
-WGS84_E2 = (1 / 298.257223563) * (2 - 1 / 298.257223563)
 
 
 def tx_points(box: EdgeBox | EndpointBox, floor_m: float, n: int = MANY) -> list[XY]:
@@ -61,19 +59,22 @@ def test_a_16_bit_cell_draws_as_before() -> None:
     assert tx_points(TX_CELL, FLOOR_M, n=16) == tx_points(TX_CELL, 0.0, n=16)
 
 
-def test_the_floor_in_edge_units_is_pos_01s_radii_at_the_latitude() -> None:
-    latitude_deg = 38.69
-    ns_units, ew_units = floor_units(latitude_deg, FLOOR_M)
-    phi = math.radians(latitude_deg)
-    sin2 = math.sin(phi) ** 2
-    meridional_m = WGS84_A_M * (1 - WGS84_E2) / (1 - WGS84_E2 * sin2) ** 1.5
-    normal_m = WGS84_A_M / math.sqrt(1 - WGS84_E2 * sin2)
-    metres_per_unit = 1e-7 * math.pi / 180
-
-    assert ns_units * metres_per_unit * meridional_m == pytest.approx(FLOOR_M, rel=1e-12)
-    assert ew_units * metres_per_unit * normal_m * math.cos(phi) == pytest.approx(
-        FLOOR_M, rel=1e-12
+def test_the_floor_in_edge_units_spans_twice_the_floor_on_the_ellipsoid() -> None:
+    # An independent check: pyproj's WGS84 geodesic across the centre plus and
+    # minus the floor, rather than pos_01's formula the code itself uses.
+    latitude_deg, longitude_deg = 38.69, -90.41
+    ns_units_i, ew_units_i = floor_units(latitude_deg, FLOOR_M)
+    geod = Geod(ellps="WGS84")
+    half_ns_deg, half_ew_deg = ns_units_i * 1e-7, ew_units_i * 1e-7
+    _, _, ns_m = geod.inv(
+        longitude_deg, latitude_deg - half_ns_deg, longitude_deg, latitude_deg + half_ns_deg
     )
+    _, _, ew_m = geod.inv(
+        longitude_deg - half_ew_deg, latitude_deg, longitude_deg + half_ew_deg, latitude_deg
+    )
+
+    assert ns_m == pytest.approx(2 * FLOOR_M, abs=1e-6)
+    assert ew_m == pytest.approx(2 * FLOOR_M, abs=1e-6)
 
 
 def test_a_32_bit_cell_is_widened_to_the_floor_on_both_axes() -> None:
@@ -124,3 +125,14 @@ def test_the_extent_with_the_floor_holds_every_floored_draw() -> None:
 def test_a_floor_must_be_a_finite_number_of_at_least_0(floor_m: float) -> None:
     with pytest.raises(ValueError, match="floor_m"):
         tx_points(TX_CELL, floor_m, n=16)
+
+
+def test_the_drawn_reach_is_the_reach_of_the_floored_box() -> None:
+    # crossing.md compares this with the distance to the nearest tall cell.
+    cell = cell_box(725_000.0, 4_285_000.0, bits=32)
+    assert cell.drawn_reach_m(FLOOR_M) == pytest.approx(FLOOR_M * math.sqrt(2), abs=0.01)
+    assert TX_CELL.drawn_reach_m(FLOOR_M) == TX_CELL.reach_m
+    small = EndpointBox(centre_xy_m=(725_000.0, 4_285_000.0), half_width_m=1.0)
+    assert small.drawn_reach_m(FLOOR_M) == pytest.approx(FLOOR_M * math.sqrt(2))
+    point = EndpointBox(centre_xy_m=(725_000.0, 4_285_000.0), half_width_m=0.0)
+    assert point.drawn_reach_m(FLOOR_M) == 0.0
