@@ -312,10 +312,12 @@ def test_the_yaml_holds_only_interface_fields(tmp_path: Path, env: None) -> None
         "rx_points",
         "snapshots",
         "endpoint_draws",
+        "position_floor_m",
         "seed",
         "calibration",
         "output_dir",
     ]
+    assert fields["position_floor_m"] == 5.0
 
 
 @pytest.mark.usefixtures("env")

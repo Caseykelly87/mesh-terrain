@@ -436,3 +436,19 @@ def test_a_square_box_grid_is_the_grid_main_built(x_m: float, half_width_m: floa
     grid = run_grid([endpoint("a", x_m, 4_285_000.0, half_width_m)], 1.0)
     assert grid.west_m == main_grid_west_m(x_m, half_width_m)
     assert grid.east_m == math.ceil((x_m + (half_width_m + 50.0)) / 10.0) * 10.0
+
+
+def test_run_grid_covers_every_floored_box_plus_the_margin() -> None:
+    from test_terrain_edge_boxes import cell_box
+
+    cell = cell_box(725_000.0, 4_285_000.0, bits=32)
+    grid = run_grid([Endpoint(endpoint_id="cell", box=cell)], 1.0, floor_m=5.0)
+    west, south, east, north = cell.extent_m(floor_m=5.0)
+
+    assert grid.west_m <= west - 50.0 and grid.south_m <= south - 50.0
+    assert grid.east_m >= east + 50.0 and grid.north_m >= north + 50.0
+    square = Endpoint(
+        endpoint_id="square",
+        box=EndpointBox(centre_xy_m=(725_103.2, 4_285_207.9), half_width_m=1.0),
+    )
+    assert run_grid([square], 1.0, floor_m=5.0).west_m == main_grid_west_m(725_103.2, 5.0)

@@ -43,6 +43,14 @@ def test_the_committed_fixture_config_loads() -> None:
     assert config.snapshots.dem == "dem-1m-synthetic-subtile"
     assert config.output_dir == Path("/runs")
     assert len(config.config_sha256) == 64
+    assert config.position_floor_m == 5.0
+
+
+@pytest.mark.parametrize("floor_m", [0, 0.0, 5, 12.5])
+def test_a_position_floor_of_0_or_more_is_accepted(tmp_path: Path, floor_m: float) -> None:
+    # Casey, issue #55 comment 7042577618, item 2: 0 turns the floor off.
+    config = write_config(tmp_path, {**fixture_fields(), "position_floor_m": floor_m})
+    assert load_config(config).position_floor_m == float(floor_m)
 
 
 def test_shipped_profiles_hold_the_interface_values() -> None:
@@ -87,6 +95,11 @@ def test_every_field_is_required(tmp_path: Path, field: str) -> None:
         ({"endpoint_draws": 0}, "endpoint_draws"),
         ({"endpoint_draws": 2.5}, "endpoint_draws"),
         ({"endpoint_draws": True}, "endpoint_draws"),
+        ({"position_floor_m": -1.0}, "position_floor_m"),
+        ({"position_floor_m": float("nan")}, "position_floor_m"),
+        ({"position_floor_m": float("inf")}, "position_floor_m"),
+        ({"position_floor_m": "5"}, "position_floor_m"),
+        ({"position_floor_m": True}, "position_floor_m"),
         ({"seed": -1}, "seed"),
         ({"seed": "20261108"}, "seed"),
         ({"output_dir": 7}, "output_dir"),
