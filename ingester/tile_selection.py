@@ -68,8 +68,10 @@ busiest pair, 2026-11-17); the selection does not call it.
 
 The DEM check uses the engine's rule: `engine.grid.run_grid` builds the grid
 for one box plus the engine's 50 m margin, the box being the row's whole
-`lnk_02` box as `terrain.boxes.EdgeBox` (ADR 0008, the stricter check), and
-the comparison of
+`lnk_02` box as `terrain.boxes.EdgeBox` (ADR 0008, the stricter check),
+widened to the 5 m GPS error floor a prepared run writes
+(`engine.prepare.run_config.POSITION_FLOOR_M`, ADR 0009), and the
+comparison of
 `engine.terrain_build.check_covers` is mirrored on the DEM snapshot's bounds,
 read through the engine's own snapshot reader. Nothing here prints, logs or
 puts a coordinate in an error message.
@@ -215,8 +217,9 @@ class Selection:
     Attributes:
         placed: The selected nodes that do not straddle, at their boxes'
             centres: the sites in order, then the receiver.
-        dem_check: Per placed row's `layer_id`, whether its box plus the
-            engine's margin lies inside the DEM (`inside_dem`).
+        dem_check: Per placed row's `layer_id`, whether its box, widened to
+            the prepared run's GPS error floor, plus the engine's margin lies
+            inside the DEM (`inside_dem`).
         dropped: The dropped pairs, in the capture's pair order.
     """
 
@@ -336,8 +339,8 @@ def inside_dem(box: PositionBox, extent: Extent) -> bool:
     0008, the stricter check). The grid is widened to the GPS error floor a
     prepared run writes, `engine.prepare.run_config.POSITION_FLOOR_M` (5 m,
     ADR 0009), as `engine.prepare.extent.outside_extent` widens it, so a box
-    under 10 m across near the DEM edge fails here when prepare would leave
-    it out.
+    under 10 m across near the DEM edge fails here exactly when prepare would
+    leave that site out of the run, or refuse the run for that receiver.
 
     Args:
         box: The box as the engine reads it: an `EndpointBox` in EPSG:26915 metres or an
@@ -347,7 +350,8 @@ def inside_dem(box: PositionBox, extent: Extent) -> bool:
     Returns:
         False exactly when engine.terrain_build.check_covers would refuse a
         run with this box alone at the prepared run's floor, which is when
-        engine.prepare leaves it out.
+        engine.prepare leaves a site out of the run or refuses the run for a
+        receiver.
     """
     grid = run_grid(
         [Endpoint(endpoint_id="check", box=box)],
