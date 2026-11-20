@@ -24,6 +24,7 @@ The environment says where things are; the config says what to compute:
 | `ITM_LIBRARY_PATH` | NTIA's `libitm.so`; needed only when `models` lists `itm` |
 | `ITM_SOURCE_COMMIT` | the NTIA commit the library was built from; needed with `itm` |
 | `ENGINE_GIT_COMMIT` | the engine's commit where there is no git checkout (the image) |
+| `ENGINE_GIT_DIRTY` | `true` or `false`: whether that checkout had changes, where there is no git checkout (the image); `make engine` sets it, and the engine refuses any other value |
 | `LOG_FORMAT` | `console` or `json` |
 
 Exit status: 0 for a finished run; 2 when the environment (an unset `SNAPSHOTS_DIR`), the config or anything it names is refused, with nothing written; 1 for a failure during the run, which leaves `<run_id>.partial/` without a manifest. Nothing deletes a run folder.
