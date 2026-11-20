@@ -86,6 +86,7 @@ from engine.config import SnapshotIds
 from engine.errors import ConfigError
 from engine.grid import run_grid
 from engine.points import Endpoint
+from engine.prepare.run_config import POSITION_FLOOR_M
 from engine.snapshots import resolve_snapshots
 from ingester.link_cells import Edges, LinkBox
 from ingester.link_pairs import (
@@ -332,7 +333,11 @@ def inside_dem(box: PositionBox, extent: Extent) -> bool:
 
     A placed node's box is its whole `lnk_02` box (`PlacedNode.edge_box`), so
     the check covers its four corners, not the square inscribed in it (ADR
-    0008, the stricter check).
+    0008, the stricter check). The grid is widened to the GPS error floor a
+    prepared run writes, `engine.prepare.run_config.POSITION_FLOOR_M` (5 m,
+    ADR 0009), as `engine.prepare.extent.outside_extent` widens it, so a box
+    under 10 m across near the DEM edge fails here when prepare would leave
+    it out.
 
     Args:
         box: The box as the engine reads it: an `EndpointBox` in EPSG:26915 metres or an
@@ -341,9 +346,14 @@ def inside_dem(box: PositionBox, extent: Extent) -> bool:
 
     Returns:
         False exactly when engine.terrain_build.check_covers would refuse a
-        run with this box alone.
+        run with this box alone at the prepared run's floor, which is when
+        engine.prepare leaves it out.
     """
-    grid = run_grid([Endpoint(endpoint_id="check", box=box)], resolution_m=DEM_RESOLUTION_M)
+    grid = run_grid(
+        [Endpoint(endpoint_id="check", box=box)],
+        resolution_m=DEM_RESOLUTION_M,
+        floor_m=POSITION_FLOOR_M,
+    )
     west, south, east, north = extent
     outside = grid.west_m < west or grid.south_m < south
     return not (outside or grid.east_m > east or grid.north_m > north)
@@ -355,8 +365,14 @@ def edge_box(box: LinkBox) -> EdgeBox:
 
 
 def box_extent_m(box: LinkBox) -> Extent:
-    """West, south, east and north of a box's four corners in EPSG:26915 metres."""
-    return edge_box(box).extent_m()
+    """West, south, east and north of a box's four corners in EPSG:26915 metres.
+
+    The floor is 0: `row_state` asks whether the `lnk_02` box as the firmware
+    sent it lies in the tile (Casey, issue #55 comment 6985802330, item 6), and
+    the GPS error floor widens only the engine's draws (ADR 0009), not the box
+    the layer carries.
+    """
+    return edge_box(box).extent_m(floor_m=0.0)
 
 
 def row_state(box: LinkBox, tile: Tile) -> str:
