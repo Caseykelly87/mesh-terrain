@@ -16,5 +16,3 @@ notebooks/.ipynb_checkpoints/
 .claude/worktrees/
 dbt/.user.yml
 .claude/settings.local.json
-# Snapshots, when .env points SNAPSHOTS_DIR into the checkout (.env.example).
-/data/

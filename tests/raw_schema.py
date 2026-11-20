@@ -25,6 +25,7 @@ both checks above still fails (`tests/test_db_role.py`).
 import os
 import re
 import secrets
+import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import NamedTuple
@@ -76,7 +77,10 @@ def role_for_tests() -> RoleForTests | None:
     """
     try:
         settings = get_settings()
-    except ValidationError:
+    except ValidationError as err:
+        # Names only: a validation error's own text carries the input values.
+        names = sorted({str(error["loc"][0]).upper() for error in err.errors() if error["loc"]})
+        warnings.warn(f"no test role: the settings need {', '.join(names)}", stacklevel=2)
         return None
     user, password = settings.warehouse_test_user, settings.warehouse_test_password
     if not user or password is None or user == settings.warehouse_user:

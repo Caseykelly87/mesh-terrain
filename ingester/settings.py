@@ -10,10 +10,16 @@ and the commands that pseudonymise refuse to start without it.
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ingester.keys import parse_hmac_key
+from pipeline.common.settings import (
+    blank_as_none,
+    folder_in_checkout,
+    optional_folder_in_checkout,
+    refuse_blank,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -38,6 +44,15 @@ class IngesterSettings(BaseSettings):
     # they may be unset, and the reduction refuses to start while either is.
     public_capture_dir: Path | None = None
     meshstl_capture_dir: Path | None = None
+
+    _refuse_blank_snapshots_dir = field_validator("snapshots_dir", mode="before")(refuse_blank)
+    _blank_capture_dir_is_unset = field_validator(
+        "public_capture_dir", "meshstl_capture_dir", mode="before"
+    )(blank_as_none)
+    _snapshots_dir_in_checkout = field_validator("snapshots_dir")(folder_in_checkout)
+    _capture_dirs_in_checkout = field_validator("public_capture_dir", "meshstl_capture_dir")(
+        optional_folder_in_checkout
+    )
     # The public broker's credentials are published by Meshtastic; the MeshSTL
     # broker's come from a meshstl.env file outside every checkout, never the repo.
     mqtt_user: str = "meshdev"

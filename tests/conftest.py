@@ -2,10 +2,11 @@
 
 Every test runs with the key removed from the environment and with the
 ingester settings told not to read the repository's .env, so a test can only
-use the invented keys it passes in itself (Casey, 2026-11-13). The pipeline
-settings read no .env either, from before the first test module is imported,
-since pipeline/definitions.py builds its settings at import; every value the
-tests' settings hold comes from the environment, which make exports from .env.
+use the invented keys it passes in itself (Casey, 2026-11-13). Neither
+settings class reads .env from the moment the test role has been read from it,
+before the first test module is imported, since pipeline/definitions.py builds
+its settings at import; every value the tests' settings hold comes from the
+environment, which make exports from .env.
 
 Every warehouse connection the tests open, the dbt runs they start included,
 is made as the test role, which cannot write `raw`, `raw_dev_wh` or
@@ -63,6 +64,7 @@ def pytest_configure(config: pytest.Config) -> None:
     raw_schema.placeholder_environment(patch)
     # After the role is read: the main checkout's .env is where it comes from.
     patch.setitem(Settings.model_config, "env_file", None)
+    patch.setitem(IngesterSettings.model_config, "env_file", None)
     get_settings.cache_clear()
 
 

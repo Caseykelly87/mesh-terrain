@@ -9,10 +9,49 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def blank_as_none(value: object) -> object:
+    """None for an empty or blank string, the value unchanged otherwise.
+
+    An empty folder would otherwise become Path("."), the folder a command
+    happens to start in.
+    """
+    if isinstance(value, str) and not value.strip():
+        return None
+    return value
+
+
+def folder_in_checkout(folder: Path) -> Path:
+    """The folder as given when it is absolute or rooted, else resolved under the checkout.
+
+    make and Compose read a relative folder in .env from the checkout; a
+    command started from another folder must read the same one.
+
+    Args:
+        folder: A folder from the environment or .env, in the host's path form.
+    """
+    return folder if folder.anchor else (REPO_ROOT / folder).resolve()
+
+
+def optional_folder_in_checkout(folder: Path | None) -> Path | None:
+    """folder_in_checkout for a folder that may be unset; None stays None."""
+    return None if folder is None else folder_in_checkout(folder)
+
+
+def refuse_blank(value: object) -> object:
+    """The value unchanged, for a required folder.
+
+    Raises:
+        ValueError: if it is an empty or blank string.
+    """
+    if blank_as_none(value) is None:
+        raise ValueError("is empty; set it to a folder")
+    return value
 
 
 class Settings(BaseSettings):
@@ -62,6 +101,9 @@ class Settings(BaseSettings):
     # a read-only mount of it, in the containers. No default, as for the
     # connection: any default would name one machine's folder.
     snapshots_dir: Path
+
+    _refuse_blank_snapshots_dir = field_validator("snapshots_dir", mode="before")(refuse_blank)
+    _snapshots_dir_in_checkout = field_validator("snapshots_dir")(folder_in_checkout)
 
     # Where the Dagster image puts the NTIA ITM shared library (ADR 0002).
     # terrain/itm.py loads it through ctypes; override for a host-side build.
