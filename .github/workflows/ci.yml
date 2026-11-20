@@ -44,6 +44,24 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --frozen
+      # A check in a worktree may run with no .env at all: .env.example sourced
+      # into the shell and make told to skip its env step (docs/STATUS.md), and
+      # the test role's two lines exported from the main checkout's .env by the
+      # README recipe. The redaction probes failed there while passing below,
+      # so they also run that way, before this job writes its .env, with
+      # invented values in a stand-in for the main checkout's .env.
+      - name: redaction tests as a worktree check with no .env runs them
+        run: |
+          test ! -e .env
+          stand_in="$RUNNER_TEMP/main-checkout.env"
+          for name in WAREHOUSE_TEST_USER WAREHOUSE_TEST_PASSWORD; do
+            value=$(openssl rand -hex 12)
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$name" "$value" >> "$stand_in"
+          done
+          unset WAREHOUSE_TEST_USER WAREHOUSE_TEST_PASSWORD
+          set -a; . ./.env.example; set +a; unset NODE_ID_HMAC_KEY
+          while IFS= read -r line; do export "$line"; done < <(grep -E '^WAREHOUSE_TEST_(USER|PASSWORD)=' "$stand_in" | tr -d '\r') && make -o env test PYTEST_ADDOPTS=tests/test_report_redaction.py
       # The definitions test parses the dbt project, which reads the profile's
       # environment variables; the example values are enough because parse
       # never connects.

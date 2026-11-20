@@ -54,6 +54,11 @@ from test_report_redaction import (
 )
 
 
+def test_b_conftest_holds_the_invented_role():
+    # Without it no test below holds a value, and the leak check passes on nothing.
+    assert raw_schema.role_configured()
+
+
 def test_b_no_environment_variable_holds_a_value():
     assert not raw_schema.environment_holds_the_role()
 
@@ -137,7 +142,7 @@ def assert_probe_ran_and_shows_no_value(output: str) -> None:
     leaked = [value for value in (INVENTED_USER, INVENTED_PASSWORD) if value in output]
     assert leaked == [], "a probe report shows a test role value"
     assert "4 failed" in output, "the probe did not run its failing tests"
-    assert "6 passed" in output, "the probe's unit tests or environment test did not pass"
+    assert "7 passed" in output, "the probe's unit tests, role or environment test did not pass"
     assert report_redaction.PLACEHOLDER in output
 
 
