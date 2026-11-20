@@ -33,8 +33,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 NAMES = ("WAREHOUSE_TEST_USER", "WAREHOUSE_TEST_PASSWORD")
 # What a calling make passes down, which would change what these runs see.
 PASSED_DOWN = {"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "DBT_DEV_TARGET"}
-# The main checkout's .env as the README recipe names it, in Git Bash form.
-MAIN_DOTENV = "/c/Users/Casey/Desktop/GEO/mesh-terrain/.env"
+# The main checkout's .env as the README recipe names it: git's common folder
+# is the main checkout's .git from the main checkout and from any worktree of
+# it, so the line works unchanged in a clone in any folder.
+MAIN_DOTENV = '"$(git rev-parse --path-format=absolute --git-common-dir)/../.env"'
 RECIPE_START = "while IFS= read -r line; do "
 RECIPE_END = "| tr -d '\\r')"
 # Each agent tool call is a new shell, so every copy shows the export joined
@@ -226,14 +228,26 @@ def test_the_printing_check_would_catch_each_form() -> None:
     assert [probe for probe in probes if not PRINTING.search(probe)] == []
 
 
-def test_the_recipe_exports_only_the_two_lines_and_prints_nothing(tmp_path: Path) -> None:
-    """The README recipe on an invented .env: two names exported, no output, no key."""
-    bash = shutil.which("bash")
-    if bash is None:
-        pytest.skip("bash is not installed")
-    (line,) = recipe_lines()["README.md"]
-    main = tmp_path / "main"
+def git_run(*arguments: str, directory: Path) -> None:
+    """git with an invented identity, so a commit needs no configured user."""
+    subprocess.run(
+        ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", *arguments],
+        cwd=directory,
+        capture_output=True,
+        check=True,
+    )
+
+
+@pytest.fixture
+def checkouts(tmp_path: Path) -> dict[str, Path]:
+    """A main checkout whose .env holds invented values and the key, and a worktree of it."""
+    if shutil.which("git") is None:
+        pytest.skip("git is not installed")
+    main = tmp_path / "clone"
     main.mkdir()
+    git_run("init", "--quiet", directory=main)
+    git_run("commit", "--quiet", "--allow-empty", "-m", "start", directory=main)
+    git_run("worktree", "add", "--quiet", str(main / "worktree"), directory=main)
     (main / ".env").write_text(
         "WAREHOUSE_USER=owner\r\nNODE_ID_HMAC_KEY="
         + "ab" * 32
@@ -242,14 +256,27 @@ def test_the_recipe_exports_only_the_two_lines_and_prints_nothing(tmp_path: Path
         encoding="utf-8",
         newline="",
     )
+    return {"main checkout": main, "worktree": main / "worktree"}
+
+
+@pytest.mark.parametrize("where", ["main checkout", "worktree"])
+def test_the_recipe_exports_only_the_two_lines_and_prints_nothing(
+    where: str, checkouts: dict[str, Path]
+) -> None:
+    """The README recipe on an invented .env: two names exported, no output, no key."""
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is not installed")
+    (line,) = recipe_lines()["README.md"]
+    assert MAIN_DOTENV in line
     exported = (
         f'test "$WAREHOUSE_TEST_USER" = {INVENTED_USER} '
         f'&& test "$WAREHOUSE_TEST_PASSWORD" = {INVENTED_PASSWORD} '
         '&& test -z "${NODE_ID_HMAC_KEY+set}" && test -z "${WAREHOUSE_USER+set}"'
     )
-    script = line.replace(MAIN_DOTENV, (main / ".env").as_posix()) + "; " + exported
     result = subprocess.run(
-        [bash, "-c", script],
+        [bash, "-c", line + "; " + exported],
+        cwd=checkouts[where],
         capture_output=True,
         text=True,
         check=False,
