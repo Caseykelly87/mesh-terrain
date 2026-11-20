@@ -42,6 +42,8 @@ Every comment you post on a PR, your findings included, follows the counts-only 
 
 Never run warehouse tests with `-s`, `--capture=no`, `--capture=tee-sys`, `--pdb`, `--trace` or `--full-trace`: output they print is not a pytest report, so the test role's values are not scrubbed from it; a pytest INTERNALERROR stays the one case left (Casey, issue #55 comment 7025664165, item 2).
 
+Security findings stay in the session until fixed, never on GitHub: no PR, issue, comment or commit describes one, or quotes a message that does, until its fix has merged and been applied; report them to the lead only (Casey, 2026-11-19).
+
 ## Writing
 
 Follow `docs/STYLE.md`. Plain sentences, no dashes other than hyphens in words.
