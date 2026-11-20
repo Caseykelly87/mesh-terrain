@@ -205,9 +205,10 @@ def test_the_manifest_records_versions_seed_snapshots_inputs_and_code(
     two_runs: tuple[Path, Path],
 ) -> None:
     manifest = manifest_of(two_runs[0])
-    assert manifest["manifest_version"] == MANIFEST_VERSION == "1.2.0"
+    assert manifest["manifest_version"] == MANIFEST_VERSION == "1.3.0"
     assert manifest["schema_version"] == SCHEMA_VERSION == "1.2.0"
-    assert manifest["engine_version"] == ENGINE_VERSION == "0.2.0"
+    assert manifest["engine_version"] == ENGINE_VERSION == "0.3.0"
+    assert manifest["position_floor_m"] == 5.0
     assert manifest["run_id"] == "fixture"
     assert manifest["seed"] == 20261108
     assert set(manifest["models"]) == {"fspl", "knife_edge", "hata", "p1812"}
@@ -1019,3 +1020,31 @@ def test_a_layer_engine_prepare_did_not_write_is_refused_before_any_write(
     with pytest.raises(ConfigError, match="hand_built.parquet"):
         run_engine(small_config(tmp_path, **{field: str(path)}), fixture_settings())
     assert not (tmp_path / "out").exists()
+
+
+# Casey, issue #55 comment 7042577618: a GPS error floor of position_floor_m under the draws.
+
+
+def boxed_receivers(folder: Path, half_width_m: float) -> Path:
+    layer = gpd.GeoDataFrame(
+        {"rx_id": ["rx-0", "rx-1"], "box_half_width_m": [half_width_m, half_width_m]},
+        geometry=[Point(725_400.0, 4_285_300.0), Point(725_700.0, 4_285_800.0)],
+        crs="EPSG:26915",
+    )
+    return write_synthetic(layer, folder / f"boxed_{half_width_m:g}.parquet")
+
+
+@pytest.mark.parametrize(("half_width_m", "changes"), [(20.0, False), (1.0, True)])
+def test_the_floor_changes_only_boxes_smaller_than_itself(
+    tmp_path: Path, half_width_m: float, changes: bool
+) -> None:
+    receivers = boxed_receivers(tmp_path, half_width_m)
+    hashes = []
+    for floor_m in (0.0, 5.0):
+        folder = tmp_path / f"floor-{floor_m:g}"
+        folder.mkdir()
+        config = small_config(folder, rx_points=str(receivers), position_floor_m=floor_m)
+        run = run_engine(config, fixture_settings())
+        assert manifest_of(run)["position_floor_m"] == floor_m
+        hashes.append(content_hashes(run)["predictions.parquet"])
+    assert (hashes[0] != hashes[1]) is changes
