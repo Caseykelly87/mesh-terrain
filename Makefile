@@ -44,9 +44,10 @@ export ENGINE_GIT_COMMIT := $(shell git rev-parse HEAD 2> /dev/null)
 # The checkout's clean or dirty status, true or false, which make engine passes
 # into the engine container (docker-compose.yml, engine service) for the
 # manifest's engine_git_dirty (Casey, issue #55 comment 6961809084, item 11).
-# Untracked files count and ignored files such as .env do not, as in
-# docker/engine-run.sh. Empty outside a checkout, and the engine then refuses.
-export ENGINE_GIT_DIRTY := $(shell status=$$(git status --porcelain 2> /dev/null) && { [ -n "$$status" ] && echo true || echo false; })
+# Untracked files count, whatever status.showUntrackedFiles says, since the
+# image is built from the working tree; ignored files such as .env do not, as
+# in docker/engine-run.sh. Empty outside a checkout, and the engine then refuses.
+export ENGINE_GIT_DIRTY := $(shell status=$$(git status --porcelain --untracked-files=normal 2> /dev/null) && { [ -n "$$status" ] && echo true || echo false; })
 UV := uv run --frozen
 DBT := $(UV) dbt
 DBT_ARGS := --project-dir dbt --profiles-dir dbt

@@ -3,8 +3,9 @@
 Six manifest fields (manifest_version 1.1.0) trace a run to exact code:
 
 - `engine_git_commit`, `engine_git_dirty`: the checkout's `git rev-parse HEAD`
-  and whether `git status --porcelain` lists anything (tracked changes or
-  untracked files), leaving out the run's own output folder when it lies
+  and whether `git status --porcelain --untracked-files=normal` lists anything
+  (tracked changes or untracked files, whatever `status.showUntrackedFiles`
+  says), leaving out the run's own output folder when it lies
   inside the checkout, so a run written there does not mark the next one
   dirty. Where there is no checkout, as in the image, both come from the
   environment with a warning: `ENGINE_GIT_COMMIT` and `ENGINE_GIT_DIRTY`,
@@ -95,13 +96,19 @@ def collect_provenance(
 def engine_commit(settings: EngineSettings, output_dir: Path | None = None) -> tuple[str, bool]:
     """The engine's commit and whether the checkout differs from it.
 
+    Args:
+        settings: The fallback commit and status, read only where there is no checkout.
+        output_dir: The run's output folder, left out of the dirty check.
+
     Raises:
         ConfigError: when there is no checkout and the environment does not
             give both a 40-character commit and a status of true or false.
     """
     try:
         head = _git("rev-parse", "HEAD").strip()
-        status = _git("status", "--porcelain", "--", ".", *_excluded(output_dir))
+        status = _git(
+            "status", "--porcelain", "--untracked-files=normal", "--", ".", *_excluded(output_dir)
+        )
     except (OSError, subprocess.CalledProcessError):
         return _commit_from_environment(settings)
     return head, bool(status.strip())
