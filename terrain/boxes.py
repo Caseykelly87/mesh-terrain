@@ -152,6 +152,14 @@ class EndpointBox:
         """Distance from the centre to the farthest corner, metres."""
         return self.half_width_m * math.sqrt(2.0)
 
+    def drawn_reach_m(self, floor_m: float) -> float:
+        """Distance from the centre to the farthest corner of the drawn box, metres.
+
+        Args:
+            floor_m: The GPS error floor the draws use, metres.
+        """
+        return self.drawn_half_width_m(floor_m) * math.sqrt(2.0)
+
     def place(self, units: UnitArray, floor_m: float = 0.0) -> list[XY]:
         """Points in the box: each unit scales the drawn half-width on its axis.
 
@@ -283,6 +291,17 @@ class EdgeBox:
     def reach_m(self) -> float:
         """Distance from the centre to the farthest corner, EPSG:26915 metres."""
         return max(math.dist(self.centre_xy_m, corner) for corner in self.corners_xy_m)
+
+    def drawn_reach_m(self, floor_m: float) -> float:
+        """Distance from the centre to the farthest corner of the drawn box, EPSG:26915 metres.
+
+        Args:
+            floor_m: The GPS error floor the draws use, metres.
+        """
+        if floor_m == 0.0:
+            return self.reach_m
+        corners = _corners(self.drawn_edges(floor_m))
+        return max(math.dist(self.centre_xy_m, corner) for corner in corners)
 
     def place(self, units: UnitArray, floor_m: float = 0.0) -> list[XY]:
         """Points between the drawn edges, uniform in latitude and longitude.
