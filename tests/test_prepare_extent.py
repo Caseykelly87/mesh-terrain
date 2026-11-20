@@ -99,3 +99,12 @@ def test_the_check_is_on_bounds_not_values(tmp_path: Path) -> None:
     write_raster_snapshot(tmp_path, "dem-empty", {"dem.tif": (heights, 1.0, (WEST_M, NORTH_M))})
     empty = named(tmp_path, "dem-empty")["dem"]
     assert outside_extent([endpoint("inside", 720_050.0, 4_289_950.0)], empty) == []
+
+
+def test_the_check_uses_the_floor_a_prepared_run_draws_with(dem: NamedSnapshot) -> None:
+    # A 1 m box at 720053: unfloored, 720053 - 1 - 50 = 720002 rounds down to the
+    # DEM edge and passes; under the 5 m floor (ADR 0009), 720053 - 5 - 50 =
+    # 719998 rounds down to 719990, outside, as the engine's own grid would be.
+    small = endpoint("small-box", 720_053.0, half_width_m=1.0)
+    point = endpoint("exact-point", 720_053.0)
+    assert outside_extent([small, point], dem) == ["small-box"]
