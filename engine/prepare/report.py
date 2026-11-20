@@ -36,7 +36,8 @@ class Site:
         role: `both_ends_gateway` or `gateway_only_gateway`.
         reach_m: Distance from the box centre to the farthest corner of the drawn
             box, under the GPS error floor, metres.
-        in_run: Whether its box plus 50 m lies inside the DEM.
+        in_run: Whether its box, widened to the GPS error floor, plus 50 m lies
+            inside the DEM.
     """
 
     site_id: str
@@ -119,8 +120,8 @@ def _site_lines(report: CrossingReport) -> list[str]:
     return [
         "## Sites",
         "",
-        "A site left out has a box that, with the engine's 50 m margin, reaches outside the "
-        "DEM snapshot; it is not in `tx_sites.parquet`.",
+        "A site left out has a box that, widened to the GPS error floor and with the engine's "
+        "50 m margin, reaches outside the DEM snapshot; it is not in `tx_sites.parquet`.",
         "",
         "| site_id | role | extent check |",
         "| --- | --- | --- |",

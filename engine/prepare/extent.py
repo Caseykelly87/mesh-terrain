@@ -22,7 +22,7 @@ from engine.terrain_build import dem_extent, dem_resolution_m, grid_inside
 
 
 def outside_extent(endpoints: Sequence[Endpoint], dem: NamedSnapshot) -> list[str]:
-    """The ids of the endpoints whose box plus 50 m the engine would find outside the DEM.
+    """The ids of the endpoints whose box, widened to the floor, plus 50 m lies outside the DEM.
 
     Args:
         endpoints: Sites and receivers, EPSG:26915.

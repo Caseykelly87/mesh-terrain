@@ -140,7 +140,7 @@ class EndpointBox:
         check_floor(floor_m)
         return max(self.half_width_m, floor_m) if self.has_area else 0.0
 
-    def extent_m(self, margin_m: float = 0.0, floor_m: float = 0.0) -> Extent:
+    def extent_m(self, margin_m: float = 0.0, *, floor_m: float) -> Extent:
         """The drawn box's west, south, east and north edges plus a margin, EPSG:26915 metres.
 
         The half-width and the margin are added first, as the run grid has

@@ -96,7 +96,7 @@ def run_grid(
         raise ValueError("a run grid needs at least one endpoint")
     if not (ALIGN_M / resolution_m).is_integer():
         raise ValueError(f"a {resolution_m} m DEM does not divide the 10 m cell grid")
-    extents = [e.box.extent_m(margin_m, floor_m) for e in endpoints]
+    extents = [e.box.extent_m(margin_m, floor_m=floor_m) for e in endpoints]
     return RunGrid(
         west_m=_down(min(extent[0] for extent in extents)),
         south_m=_down(min(extent[1] for extent in extents)),
