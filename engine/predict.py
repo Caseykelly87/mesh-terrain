@@ -58,6 +58,7 @@ class RunModels:
         models: The run's models; the variant is set per pair.
         run_seed: The config's seed.
         endpoint_draws: Draws for a pair with a position box at either end.
+        position_floor_m: The GPS error floor under the draws, metres (ADR 0009).
         footprints: Building footprints, or None without a buildings snapshot.
         building_pixels: Building pixels of a 1 m DEM's grid, or None without
             footprints or a 1 m DEM.
@@ -67,6 +68,7 @@ class RunModels:
     models: DrawModels
     run_seed: int
     endpoint_draws: int
+    position_floor_m: float
     footprints: Footprints | None
     building_pixels: BuildingPixels | None
 
@@ -177,7 +179,7 @@ def predict_pair(site: Endpoint, receiver: Endpoint, run: RunModels) -> PairPred
     key = link_id(site.endpoint_id, receiver.endpoint_id)
     n_draws = draws_for(site.box, receiver.box, run.endpoint_draws)
     seed = draw_seed(run.run_seed, key)
-    pairs = draw_endpoints(site.box, receiver.box, n_draws, seed)
+    pairs = draw_endpoints(site.box, receiver.box, n_draws, seed, floor_m=run.position_floor_m)
     variant, mean_share = _variant(pairs, run.footprints)
     tx_on, rx_on = _building_draws(pairs, run.building_pixels)
     summary, clutter_m = _sample(
@@ -215,6 +217,7 @@ def _sample(
             quantities,
             run_seed=run.run_seed,
             n_draws=n_draws,
+            floor_m=run.position_floor_m,
         )
     except ZeroLengthPathError:
         # Safe to continue: the pair's row keeps its ids with every draw

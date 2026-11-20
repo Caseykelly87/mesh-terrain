@@ -5,7 +5,8 @@ provenance fields of `engine.provenance` (Casey, PR #32), which make it
 1.1.0, and on the two point layers' input entries their `input_schema_version`
 and `box_form` (`rectangle`, `square` or `point`), which make it 1.2.0
 (ADR 0008, Casey's Q2 (b) on PR #73: a run's manifest says whether its draws
-used rectangles or squares without opening the layers). Every input and
+used rectangles or squares without opening the layers), and the run's
+`position_floor_m`, which makes it 1.3.0 (ADR 0009). Every input and
 artifact carries its file sha256; every artifact also carries its
 `content_sha256` (`engine.hashing`), and Parquet artifacts their row count.
 Input paths are written as the config names them, and profile files as
@@ -111,6 +112,7 @@ def write_run_manifest(
         "created_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "config_sha256": config.config_sha256,
         "seed": config.seed,
+        "position_floor_m": config.position_floor_m,
         "models": model_versions(config.models, provenance),
         **asdict(provenance),
         "snapshots": [

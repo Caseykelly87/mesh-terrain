@@ -140,7 +140,7 @@ def prepare_run(config_path: Path, settings: EngineSettings) -> RunInputs:
     receivers = read_points(config.rx_points, "rx_id")
     require_admissible_layer(config.rx_points)
     observations = None if config.calibration is None else read_observations(config.calibration)
-    grid = _grid(sites + receivers, snapshots)
+    grid = _grid(sites + receivers, snapshots, config.position_floor_m)
     check_sources(snapshots, grid)
     provenance = collect_provenance(config.models, settings, config.output_dir)
     _check_output(config)
@@ -156,9 +156,11 @@ def prepare_run(config_path: Path, settings: EngineSettings) -> RunInputs:
     )
 
 
-def _grid(endpoints: list[Endpoint], snapshots: dict[str, NamedSnapshot]) -> RunGrid:
+def _grid(
+    endpoints: list[Endpoint], snapshots: dict[str, NamedSnapshot], floor_m: float
+) -> RunGrid:
     try:
-        return run_grid(endpoints, dem_resolution_m(snapshots["dem"]))
+        return run_grid(endpoints, dem_resolution_m(snapshots["dem"]), floor_m=floor_m)
     except ValueError as err:
         raise ConfigError(f"snapshot {snapshots['dem'].snapshot_id}: {err}") from err
 
@@ -281,6 +283,7 @@ def predict(
             models=inputs.models,
             run_seed=inputs.config.seed,
             endpoint_draws=inputs.config.endpoint_draws,
+            position_floor_m=inputs.config.position_floor_m,
             footprints=footprints,
             building_pixels=pixels,
         )

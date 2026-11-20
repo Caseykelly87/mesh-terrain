@@ -26,6 +26,8 @@ SITE_PROFILE = "mesh_node"
 """Profile at the gateway sites (Casey, issue #44, decision 2 (a))."""
 RECEIVER_PROFILE = "mesh_node"
 ENDPOINT_DRAWS = 16
+POSITION_FLOOR_M = 5.0
+"""The GPS error floor every prepared run writes (Casey, issue #55 comment 7042577618, ADR 0009)."""
 SEED = 20261108
 OUTPUT_DIR = "/runs"
 SITES_FILE = "tx_sites.parquet"
@@ -84,6 +86,7 @@ def config_text(tile: str) -> str:
         "snapshots:",
         *snapshot_lines,
         f"endpoint_draws: {ENDPOINT_DRAWS}",
+        f"position_floor_m: {POSITION_FLOOR_M}",
         f"seed: {SEED}",
         "calibration: null",
         f"output_dir: {OUTPUT_DIR}",
