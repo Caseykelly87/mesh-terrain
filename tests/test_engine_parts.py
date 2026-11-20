@@ -90,7 +90,9 @@ def test_raster_content_hash_ignores_compression_and_sees_the_cells(tmp_path: Pa
 
 def test_run_grid_covers_every_box_plus_the_margin_on_10_m_edges() -> None:
     grid = run_grid(
-        [endpoint("a", 725_103.2, 4_285_207.9, 20.0), endpoint("b", 725_901.0, 4_285_888.8)], 1.0
+        [endpoint("a", 725_103.2, 4_285_207.9, 20.0), endpoint("b", 725_901.0, 4_285_888.8)],
+        1.0,
+        floor_m=0.0,
     )
     assert (grid.west_m, grid.south_m) == (725_030.0, 4_285_130.0)
     assert (grid.east_m, grid.north_m) == (725_960.0, 4_285_940.0)
@@ -394,8 +396,8 @@ _ = no_logger_caching
 def test_run_grid_covers_every_corner_of_an_edge_box_plus_the_margin() -> None:
     from test_terrain_edge_boxes import TX_CELL
 
-    grid = run_grid([Endpoint(endpoint_id="cell", box=TX_CELL)], 1.0)
-    west, south, east, north = TX_CELL.extent_m()
+    grid = run_grid([Endpoint(endpoint_id="cell", box=TX_CELL)], 1.0, floor_m=0.0)
+    west, south, east, north = TX_CELL.extent_m(floor_m=0.0)
 
     assert grid.west_m <= west - 50.0 < grid.west_m + 10.0
     assert grid.south_m <= south - 50.0 < grid.south_m + 10.0
@@ -433,7 +435,7 @@ def main_grid_west_m(x_m: float, half_width_m: float, margin_m: float = 50.0) ->
     ],
 )
 def test_a_square_box_grid_is_the_grid_main_built(x_m: float, half_width_m: float) -> None:
-    grid = run_grid([endpoint("a", x_m, 4_285_000.0, half_width_m)], 1.0)
+    grid = run_grid([endpoint("a", x_m, 4_285_000.0, half_width_m)], 1.0, floor_m=0.0)
     assert grid.west_m == main_grid_west_m(x_m, half_width_m)
     assert grid.east_m == math.ceil((x_m + (half_width_m + 50.0)) / 10.0) * 10.0
 
