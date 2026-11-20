@@ -12,7 +12,9 @@ from typing import Any
 
 import pyarrow.parquet as pq
 import pytest
+from pydantic import SecretStr
 
+from ingester import reduce as reduce_module
 from ingester.allowlist import TABLES, arrow_schema
 from ingester.link_pairs import require_merged
 from ingester.parquet import content_hash
@@ -26,6 +28,7 @@ from ingester.reduce import (
     ordered_results,
     reduce_capture,
 )
+from ingester.settings import IngesterSettings
 from ingester.sightings import Broker
 from pipeline.common.snapshot import (
     MANIFEST_NAME,
@@ -364,3 +367,74 @@ def test_a_broker_whose_records_all_fall_outside_its_window_is_still_listed(
     manifest = read_manifest(folder)
     assert manifest["outside_window"]["meshstl"] > 0
     assert manifest["brokers"] == [PUBLIC_HOST, REGIONAL_HOST]
+
+
+def command_settings(tmp_path: Path, **folders: Path | None) -> IngesterSettings:
+    """Settings for the reduction command with an invented key and the given capture folders."""
+    return IngesterSettings(
+        _env_file=None,
+        snapshots_dir=tmp_path / "snapshots",
+        node_id_hmac_key=SecretStr(KEY.hex()),
+        **folders,
+    )
+
+
+def record_reductions(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[Source], Path]]:
+    """Replace reduce_capture with one that records its sources and snapshots folder."""
+    calls: list[tuple[list[Source], Path]] = []
+
+    def record(sources: list[Source], root: Path, *args: Any) -> Path:
+        calls.append((sources, root))
+        return root / SNAPSHOT_ID
+
+    monkeypatch.setattr(reduce_module, "reduce_capture", record)
+    return calls
+
+
+@pytest.mark.parametrize(
+    ("unset", "variable"),
+    [("public_capture_dir", "PUBLIC_CAPTURE_DIR"), ("meshstl_capture_dir", "MESHSTL_CAPTURE_DIR")],
+)
+def test_the_command_refuses_a_capture_folder_that_is_not_set(
+    unset: str,
+    variable: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    folders = {
+        "public_capture_dir": tmp_path / "public",
+        "meshstl_capture_dir": tmp_path / "meshstl",
+    }
+    settings = command_settings(tmp_path, **{**folders, unset: None})
+    monkeypatch.setattr(reduce_module, "get_ingester_settings", lambda: settings)
+    calls = record_reductions(monkeypatch)
+    with pytest.raises(SystemExit) as stopped:
+        reduce_module.main([])
+    assert stopped.value.code == 2
+    assert variable in capsys.readouterr().err
+    assert calls == []
+
+
+def test_the_command_reads_its_folders_from_the_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    public, meshstl = tmp_path / "public", tmp_path / "meshstl"
+    settings = command_settings(tmp_path, public_capture_dir=public, meshstl_capture_dir=meshstl)
+    monkeypatch.setattr(reduce_module, "get_ingester_settings", lambda: settings)
+    calls = record_reductions(monkeypatch)
+    reduce_module.main([])
+    ((sources, root),) = calls
+    assert [source.directory for source in sources] == [public, meshstl]
+    assert root == tmp_path / "snapshots"
+
+
+def test_a_flag_names_a_capture_folder_in_place_of_the_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = command_settings(tmp_path, meshstl_capture_dir=tmp_path / "meshstl")
+    monkeypatch.setattr(reduce_module, "get_ingester_settings", lambda: settings)
+    calls = record_reductions(monkeypatch)
+    reduce_module.main(["--public", str(tmp_path / "elsewhere")])
+    ((sources, _),) = calls
+    assert sources[0].directory == tmp_path / "elsewhere"
