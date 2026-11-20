@@ -335,7 +335,8 @@ def inside_dem(box: PositionBox, extent: Extent) -> bool:
     0008, the stricter check).
 
     Args:
-        box: The box as the engine reads it, EPSG:26915 metres.
+        box: The box as the engine reads it: an `EndpointBox` in EPSG:26915 metres or an
+            `EdgeBox` in 1e-7 degrees (EPSG:4326), whose extent is in EPSG:26915 metres.
         extent: The DEM's west, south, east and north edges, from `dem_extent`.
 
     Returns:

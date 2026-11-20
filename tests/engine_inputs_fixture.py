@@ -19,7 +19,9 @@ under the contract's link-hour rules on the merged snapshot
 - C to G3, G3 inside the tile 300 m from its east edge and C east of the
   tile, public, 3 link-hours. With `g3_at_edge`, G3 sends a box that crosses
   the tile's east edge instead. With the DEM `NARROW_DEM_BOUNDS_M`, G3's own
-  box lies inside the tile but its box plus 50 m reaches outside the DEM.
+  box lies inside the tile but its box plus 50 m reaches outside the DEM. With
+  `RECTANGLE_DEM_BOUNDS_M`, G3's inscribed square plus 50 m lies inside the DEM
+  but its whole box does not (the stricter check, ADR 0008).
 - D to E, both east of the tile, public, 1 link-hour. With `busy_outside_pair`,
   6 link-hours, which makes it the busiest pair by link-hours though it does
   not touch the tile.
@@ -96,7 +98,7 @@ NARROW_DEM_BOUNDS_M = (719_774.0, 4_280_000.0, 729_780.0, 4_290_006.0)
 # A square DEM whose north edge, 4 288 190 m, lies between the engine's run grid
 # north for G3's inscribed square (4 288 180 m) and for G3's whole lnk_02 box
 # (4 288 200 m): the square passes the DEM edge check, the box does not (ADR 0008,
-# the stricter check). Every other node's box plus 50 m lies inside it.
+# the stricter check). Every other placed node's box (G1, G2, A) plus 50 m lies inside it.
 RECTANGLE_DEM_BOUNDS_M = (719_994.0, 4_278_178.0, 730_006.0, 4_288_190.0)
 TELEMETRY_APP = 67
 POSITION_APP = 3
