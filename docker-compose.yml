@@ -200,6 +200,10 @@ services:
     environment:
       SNAPSHOTS_DIR: /snapshots
       LOG_FORMAT: json
+      # The host checkout's status, true or false, from the Makefile at run
+      # time, for the manifest's engine_git_dirty (engine/provenance.py). A run
+      # without make leaves it empty and the engine refuses to run.
+      ENGINE_GIT_DIRTY: ${ENGINE_GIT_DIRTY:-}
     volumes:
       - *snapshots-volume
 

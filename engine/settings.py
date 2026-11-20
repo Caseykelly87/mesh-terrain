@@ -4,8 +4,9 @@ These say where things are on this machine or in this image, never what a run
 computes: every run parameter is in the config file (`docs/INTERFACE.md`).
 The engine reads the environment only, not a `.env` file. Under
 `make engine` the container's environment is the `engine` Compose service's
-(`SNAPSHOTS_DIR`, `LOG_FORMAT`) and the image's ENV (`ITM_SOURCE_COMMIT`,
-`ENGINE_GIT_COMMIT`); no `.env` variable reaches its environment. It needs
+(`SNAPSHOTS_DIR`, `LOG_FORMAT`, and `ENGINE_GIT_DIRTY`, which the Makefile
+exports) and the image's ENV (`ITM_SOURCE_COMMIT`, `ENGINE_GIT_COMMIT`); no
+`.env` variable reaches its environment. It needs
 no database, so it does not use `pipeline.common.settings`, whose warehouse
 fields are required.
 """
@@ -31,6 +32,10 @@ class EngineSettings(BaseSettings):
         engine_git_commit: The engine's commit (`ENGINE_GIT_COMMIT`), for a
             place with no git checkout such as the image; a checkout's own
             `git rev-parse HEAD` wins over it.
+        engine_git_dirty: "true" or "false" (`ENGINE_GIT_DIRTY`): whether that
+            checkout had changes, which `make engine` passes into the
+            container; a checkout's own `git status` wins over it. Kept as the
+            raw text so `engine.provenance` can refuse any other value by name.
         log_format: "console" or "json" (`LOG_FORMAT`), as the pipeline's.
     """
 
@@ -40,4 +45,5 @@ class EngineSettings(BaseSettings):
     itm_library_path: Path = Path("/usr/local/lib/libitm.so")
     itm_source_commit: str | None = None
     engine_git_commit: str | None = None
+    engine_git_dirty: str | None = None
     log_format: Literal["console", "json"] = "console"
