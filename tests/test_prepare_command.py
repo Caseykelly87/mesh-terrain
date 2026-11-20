@@ -438,18 +438,22 @@ def test_an_input_marker_other_than_real_or_synthetic_is_refused(tmp_path: Path)
 def test_layers_written_by_ingest_engs_command_are_accepted(tmp_path: Path) -> None:
     # The interface the lead set for both agents (issue #44): ingest-eng's own
     # writer produces the folder, and this command reads it as written.
+    from pyproj import Transformer
+
     from ingester.engine_inputs import write_layers
+    from ingester.link_cells import cell_of
     from ingester.tile_selection import PlacedNode
 
+    to_degrees = Transformer.from_crs(26915, 4326, always_xy=True)
+    # The writer takes each node's lnk_02 box (ADR 0008): a 17-bit cell for a
+    # 182.4 m row and an 18-bit cell for a 91.2 m row, so SITE_C's box plus 50 m
+    # still crosses the DEM's west edge and it is left out, as before.
+    bits = {182.4: 17, 91.2: 18}
+
     def placed(row: tuple, role: str) -> PlacedNode:
-        return PlacedNode(
-            pseudonym=row[0],
-            role=role,
-            easting_m=row[1],
-            northing_m=row[2],
-            half_width_m=row[3],
-            precise_source=False,
-        )
+        longitude, latitude = to_degrees.transform(row[1], row[2])
+        box = cell_of(round(latitude * 1e7), round(longitude * 1e7), bits[row[3]])
+        return PlacedNode(pseudonym=row[0], role=role, box=box, precise_source=False)
 
     folder = tmp_path / "x72y429"
     write_layers(folder, [placed(s, s[4]) for s in SITES], placed(RX_ROW, "both_ends_relayer"))
