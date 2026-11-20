@@ -471,8 +471,8 @@ def test_sample_link_through_the_adapter_matches_direct_calls(
             bare = replace(draw.p1812, clutter_m=np.zeros_like(draw.p1812.distance_m))
             return replace(draw, p1812=bare)
 
-        summary = sample_link("adapter", tx, rx, builder, models, run_seed=RUN_SEED)
-        pairs = draw_endpoints(tx, rx, 16, draw_seed(RUN_SEED, "adapter"))
+        summary = sample_link("adapter", tx, rx, builder, models, run_seed=RUN_SEED, floor_m=0.0)
+        pairs = draw_endpoints(tx, rx, 16, draw_seed(RUN_SEED, "adapter"), floor_m=0.0)
         draws = [builder(tx_xy_m, rx_xy_m) for tx_xy_m, rx_xy_m in pairs]
 
     assert summary.refused_draws == 0
@@ -526,14 +526,16 @@ def test_a_refusal_by_one_model_drops_the_draw_for_every_model(
         return DrawProfiles(ground=ground, p1812=None, dsm_filled_pixels=None)
 
     monkeypatch.setattr("terrain.path_loss.itm_loss", itm_refusing_east)
-    pairs = draw_endpoints(tx, rx, 16, draw_seed(RUN_SEED, "one-refuses"))
+    pairs = draw_endpoints(tx, rx, 16, draw_seed(RUN_SEED, "one-refuses"), floor_m=0.0)
     kept = [
         fspl_db(float(np.hypot(r[0] - t[0], r[1] - t[1])), FREQUENCY_MHZ)
         for t, r in pairs
         if t[0] <= TX_XY_M[0]
     ]
 
-    summary = sample_link("one-refuses", tx, rx, flat_builder, all_models(), run_seed=RUN_SEED)
+    summary = sample_link(
+        "one-refuses", tx, rx, flat_builder, all_models(), run_seed=RUN_SEED, floor_m=0.0
+    )
 
     assert summary.refusals["dem_gap"] == 16 - len(kept)
     assert 0 < summary.refused_draws < 16
@@ -548,6 +550,8 @@ def test_adapter_on_the_real_itm_library(itm_library: ItmLibrary) -> None:
         return DrawProfiles(ground=flat(ground_m=0.0), p1812=None, dsm_filled_pixels=None)
 
     models = all_models(models=("itm",), itm_library=itm_library)
-    summary = sample_link("itm", point, receiver, sea_level, models, run_seed=RUN_SEED, n_draws=1)
+    summary = sample_link(
+        "itm", point, receiver, sea_level, models, run_seed=RUN_SEED, n_draws=1, floor_m=0.0
+    )
 
     assert summary.median("itm_db") == pytest.approx(151.76, abs=0.005)

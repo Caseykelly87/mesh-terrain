@@ -43,8 +43,14 @@ LONGITUDE_LIMIT_I = 1_800_000_000
 """180 degrees in edge units."""
 
 WGS84_A_M = 6_378_137.0
+"""WGS84 semi-major axis, metres, as `pos_01` states it (`ingester/link_cells.py` holds
+the same value for the warehouse side)."""
+
 WGS84_F = 1 / 298.257223563
+"""WGS84 flattening, as `pos_01` states it."""
+
 WGS84_E2 = WGS84_F * (2 - WGS84_F)
+"""WGS84 first eccentricity squared, e^2 = f(2 - f), as `pos_01` states it."""
 
 GEOGRAPHIC_TO_UTM = Transformer.from_crs(4326, 26915, always_xy=True)
 """EPSG:4326 longitude and latitude to EPSG:26915 metres. PROJ names the operation
@@ -88,9 +94,9 @@ def floor_units(latitude_deg: float, floor_m: float) -> tuple[float, float]:
         The floor in 1e-7 degree units on each axis, north-south first.
     """
     phi = math.radians(latitude_deg)
-    sin2 = math.sin(phi) ** 2
-    meridional_m = WGS84_A_M * (1 - WGS84_E2) / (1 - WGS84_E2 * sin2) ** 1.5
-    normal_m = WGS84_A_M / math.sqrt(1 - WGS84_E2 * sin2)
+    sin_squared = math.sin(phi) ** 2
+    meridional_m = WGS84_A_M * (1 - WGS84_E2) / (1 - WGS84_E2 * sin_squared) ** 1.5
+    normal_m = WGS84_A_M / math.sqrt(1 - WGS84_E2 * sin_squared)
     radians_per_unit = UNIT_DEG * math.pi / 180
     return (
         floor_m / (radians_per_unit * meridional_m),
@@ -124,7 +130,7 @@ class EndpointBox:
         """Whether a drawn point can differ from the centre."""
         return self.half_width_m > 0.0
 
-    def drawn_half_width_m(self, floor_m: float = 0.0) -> float:
+    def drawn_half_width_m(self, floor_m: float) -> float:
         """The half-width the draws use: at least the floor, 0 for an exact point.
 
         Raises:
@@ -160,7 +166,7 @@ class EndpointBox:
         """
         return self.drawn_half_width_m(floor_m) * math.sqrt(2.0)
 
-    def place(self, units: UnitArray, floor_m: float = 0.0) -> list[XY]:
+    def place(self, units: UnitArray, floor_m: float) -> list[XY]:
         """Points in the box: each unit scales the drawn half-width on its axis.
 
         Args:
@@ -240,7 +246,7 @@ class EdgeBox:
         """South-west, south-east, north-east and north-west corners, EPSG:26915 metres."""
         return _corners(self.drawn_edges(0.0))
 
-    def drawn_edges(self, floor_m: float = 0.0) -> tuple[float, float, float, float]:
+    def drawn_edges(self, floor_m: float) -> tuple[float, float, float, float]:
         """South, north, west and east edges the draws use, 1e-7 degrees.
 
         An axis whose half-width is below the floor, in metres by `pos_01`'s
@@ -259,12 +265,12 @@ class EdgeBox:
         west, east = float(self.west_i), float(self.east_i)
         if floor_m == 0.0:
             return south, north, west, east
-        centre_ns, centre_ew = (south + north) / 2, (west + east) / 2
-        floor_ns, floor_ew = floor_units(centre_ns * UNIT_DEG, floor_m)
-        if (north - south) / 2 < floor_ns:
-            south, north = centre_ns - floor_ns, centre_ns + floor_ns
-        if (east - west) / 2 < floor_ew:
-            west, east = centre_ew - floor_ew, centre_ew + floor_ew
+        centre_ns_i, centre_ew_i = (south + north) / 2, (west + east) / 2
+        floor_ns_i, floor_ew_i = floor_units(centre_ns_i * UNIT_DEG, floor_m)
+        if (north - south) / 2 < floor_ns_i:
+            south, north = centre_ns_i - floor_ns_i, centre_ns_i + floor_ns_i
+        if (east - west) / 2 < floor_ew_i:
+            west, east = centre_ew_i - floor_ew_i, centre_ew_i + floor_ew_i
         return south, north, west, east
 
     def extent_m(self, margin_m: float = 0.0, floor_m: float = 0.0) -> Extent:
@@ -303,7 +309,7 @@ class EdgeBox:
         corners = _corners(self.drawn_edges(floor_m))
         return max(math.dist(self.centre_xy_m, corner) for corner in corners)
 
-    def place(self, units: UnitArray, floor_m: float = 0.0) -> list[XY]:
+    def place(self, units: UnitArray, floor_m: float) -> list[XY]:
         """Points between the drawn edges, uniform in latitude and longitude.
 
         Units of -1 to 1, the upper end excluded, map onto the half-open
