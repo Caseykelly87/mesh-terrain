@@ -67,7 +67,9 @@ place are still equal on both. Casey keeps that ranking wherever one is needed l
 busiest pair, 2026-11-17); the selection does not call it.
 
 The DEM check uses the engine's rule: `engine.grid.run_grid` builds the grid
-for one box plus the engine's 50 m margin, and the comparison of
+for one box plus the engine's 50 m margin, the box being the row's whole
+`lnk_02` box as `terrain.boxes.EdgeBox` (ADR 0008, the stricter check), and
+the comparison of
 `engine.terrain_build.check_covers` is mirrored on the DEM snapshot's bounds,
 read through the engine's own snapshot reader. Nothing here prints, logs or
 puts a coordinate in an error message.
