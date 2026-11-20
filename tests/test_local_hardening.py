@@ -40,17 +40,32 @@ def example_value(name: str) -> str:
     return match.group(1).strip()
 
 
+# Every Compose file make can pass to docker compose.
+COMPOSE_FILES = ("docker-compose.yml", "docker/compose.ca-bundle.yml")
+
+
+def services() -> list[tuple[str, dict[str, object]]]:
+    found = []
+    for name in COMPOSE_FILES:
+        compose = yaml.safe_load((REPO_ROOT / name).read_text(encoding="utf-8")) or {}
+        found += [
+            (f"{name}:{service}", spec or {})
+            for service, spec in compose.get("services", {}).items()
+        ]
+    return found
+
+
 def published_ports() -> list[tuple[str, object]]:
-    compose = yaml.safe_load((REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
-    return [
-        (service, port)
-        for service, spec in compose["services"].items()
-        for port in spec.get("ports", [])
-    ]
+    return [(service, port) for service, spec in services() for port in spec.get("ports", [])]
 
 
-def test_some_service_publishes_a_port() -> None:
+def test_the_stack_publishes_four_ports() -> None:
     assert len(published_ports()) == 4
+
+
+def test_no_service_shares_the_host_network() -> None:
+    """A service on the host network listens on every interface, with no port to bind."""
+    assert [service for service, spec in services() if spec.get("network_mode") == "host"] == []
 
 
 def test_every_published_port_listens_on_127_0_0_1_only() -> None:
@@ -93,6 +108,39 @@ def test_a_default_value_is_refused_by_name_without_printing_it(name: str) -> No
 
 
 @pytest.mark.parametrize("name", GUARDED)
+@pytest.mark.parametrize("placeholder", GUARDED)
+def test_any_of_the_three_placeholders_is_refused_in_any_variable(
+    name: str, placeholder: str
+) -> None:
+    result = run_check({**INVENTED, name: example_value(placeholder)})
+    assert result.returncode != 0
+    assert name in result.stderr
+
+
+@pytest.mark.parametrize("written", ['"{}"', "'{}'", " {}", "{} ", "\t{}\t"])
+def test_a_quoted_or_padded_placeholder_is_refused(written: str) -> None:
+    value = written.format(example_value("WAREHOUSE_PASSWORD"))
+    assert run_check({**INVENTED, "WAREHOUSE_PASSWORD": value}).returncode != 0
+
+
+@pytest.mark.parametrize("values_pass", [True, False])
+def test_tracing_from_the_environment_prints_no_value(values_pass: bool, tmp_path: Path) -> None:
+    """SHELLOPTS or a BASH_ENV that turns xtrace on would print each value as it is compared."""
+    startup = tmp_path / "startup.sh"
+    startup.write_text("set -x\n", encoding="utf-8")
+    values = INVENTED if values_pass else {**INVENTED, "MINIO_ROOT_USER": ""}
+    result = run_check({**values, "SHELLOPTS": "xtrace", "BASH_ENV": str(startup)})
+    assert (result.returncode == 0) is values_pass
+    output = result.stdout + result.stderr
+    assert [value for value in INVENTED.values() if value in output] == []
+
+
+def test_make_runs_the_check_without_inherited_tracing(tmp_path: Path) -> None:
+    lines = make_dry_run("check-credentials", tmp_path)
+    assert any("env -u BASH_ENV -u SHELLOPTS bash" in line for line in lines)
+
+
+@pytest.mark.parametrize("name", GUARDED)
 def test_an_empty_or_missing_value_is_refused(name: str) -> None:
     assert run_check({**INVENTED, name: ""}).returncode != 0
     missing = {key: value for key, value in INVENTED.items() if key != name}
@@ -131,6 +179,14 @@ def first_line(lines: list[str], text: str) -> int:
 def test_make_up_checks_the_credentials_before_it_starts_anything(tmp_path: Path) -> None:
     lines = make_dry_run("up", tmp_path)
     assert first_line(lines, "check-credentials.sh") < first_line(lines, " up --build")
+
+
+def test_the_rotation_waits_as_long_as_the_health_check_and_says_why_it_stops(
+    tmp_path: Path,
+) -> None:
+    text = "\n".join(make_dry_run("rotate-owner-password", tmp_path))
+    assert "-lt 150 ]" in text
+    assert "did not listen on TCP within 150 s" in text
 
 
 def test_the_rotation_checks_starts_the_warehouse_and_logs_in_over_the_socket(
