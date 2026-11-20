@@ -19,6 +19,7 @@ from prepare_snapshots import named, write_raster_snapshot
 from engine.grid import run_grid
 from engine.points import Endpoint
 from engine.prepare.extent import outside_extent
+from engine.prepare.run_config import POSITION_FLOOR_M
 from engine.snapshots import NamedSnapshot
 from engine.terrain_build import check_sources, dem_resolution_m
 from terrain.draws import EndpointBox
@@ -89,7 +90,7 @@ def test_endpoints_that_pass_make_a_run_extent_the_engine_accepts(dem: NamedSnap
     ]
     passing = [p for p in points if p.endpoint_id not in outside_extent(points, dem)]
     assert [p.endpoint_id for p in passing] == ["a", "b", "c"]
-    check_sources({"dem": dem}, run_grid(passing, dem_resolution_m(dem)))
+    check_sources({"dem": dem}, run_grid(passing, dem_resolution_m(dem), floor_m=POSITION_FLOOR_M))
 
 
 def test_the_check_is_on_bounds_not_values(tmp_path: Path) -> None:
