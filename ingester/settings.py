@@ -14,7 +14,6 @@ from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ingester.keys import parse_hmac_key
-from pipeline.common.settings import DEFAULT_SNAPSHOTS_DIR
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -33,9 +32,14 @@ class IngesterSettings(BaseSettings):
     node_id_hmac_key: SecretStr | None = None
     # Its own field rather than pipeline.common.settings', because the capture and
     # the reduction must start without the warehouse variables that object requires.
-    snapshots_dir: Path = DEFAULT_SNAPSHOTS_DIR
+    # Required there and here: any default would name one machine's folder.
+    snapshots_dir: Path
+    # The folders the reduction reads (ingester.reduce); only it needs them, so
+    # they may be unset, and the reduction refuses to start while either is.
+    public_capture_dir: Path | None = None
+    meshstl_capture_dir: Path | None = None
     # The public broker's credentials are published by Meshtastic; the MeshSTL
-    # broker's come from C:/Users/Casey/mesh-terrain-data/meshstl.env, never the repo.
+    # broker's come from a meshstl.env file outside every checkout, never the repo.
     mqtt_user: str = "meshdev"
     mqtt_password: SecretStr = SecretStr("large4cats")
 
