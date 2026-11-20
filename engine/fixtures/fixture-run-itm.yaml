@@ -21,6 +21,7 @@ snapshots:
   buildings: osm-buildings-synthetic
   p1812_maps: p1812-maps-synthetic
 endpoint_draws: 16
+position_floor_m: 5.0
 seed: 20261108
 calibration: observations.parquet
 output_dir: /runs

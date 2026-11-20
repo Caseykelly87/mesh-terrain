@@ -71,7 +71,10 @@ class RunGrid:
 
 
 def run_grid(
-    endpoints: Sequence[Endpoint], resolution_m: float, margin_m: float = EXTENT_MARGIN_M
+    endpoints: Sequence[Endpoint],
+    resolution_m: float,
+    margin_m: float = EXTENT_MARGIN_M,
+    floor_m: float = 0.0,
 ) -> RunGrid:
     """The grid covering every endpoint box plus the margin, edges on 10 m multiples.
 
@@ -79,6 +82,8 @@ def run_grid(
         endpoints: Every site and receiver of the run, EPSG:26915.
         resolution_m: Pixel size of the DEM in metres; must divide 10 m.
         margin_m: Metres added on every side.
+        floor_m: The GPS error floor the draws use, metres (ADR 0009), so the
+            grid holds every drawn box.
 
     Returns:
         The run grid.
@@ -91,7 +96,7 @@ def run_grid(
         raise ValueError("a run grid needs at least one endpoint")
     if not (ALIGN_M / resolution_m).is_integer():
         raise ValueError(f"a {resolution_m} m DEM does not divide the 10 m cell grid")
-    extents = [e.box.extent_m(margin_m) for e in endpoints]
+    extents = [e.box.extent_m(margin_m, floor_m) for e in endpoints]
     return RunGrid(
         west_m=_down(min(extent[0] for extent in extents)),
         south_m=_down(min(extent[1] for extent in extents)),

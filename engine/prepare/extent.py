@@ -1,6 +1,7 @@
 """Which endpoints the engine would refuse a run for: each box plus 50 m against the DEM.
 
-The engine builds one grid over every site and receiver box plus 50 m,
+The engine builds one grid over every site and receiver box, widened to the
+GPS error floor a prepared run writes (5 m, ADR 0009), plus 50 m,
 rounded out to multiples of 10 m (`engine.grid.run_grid`), and refuses the
 whole run when that grid is not inside the DEM tiles' bounding box
 (`engine.terrain_build.check_covers`, through `dem_extent` and
@@ -15,6 +16,7 @@ from collections.abc import Sequence
 
 from engine.grid import run_grid
 from engine.points import Endpoint
+from engine.prepare.run_config import POSITION_FLOOR_M
 from engine.snapshots import NamedSnapshot
 from engine.terrain_build import dem_extent, dem_resolution_m, grid_inside
 
@@ -38,5 +40,5 @@ def outside_extent(endpoints: Sequence[Endpoint], dem: NamedSnapshot) -> list[st
     return [
         endpoint.endpoint_id
         for endpoint in endpoints
-        if not grid_inside(run_grid([endpoint], resolution_m), extent)
+        if not grid_inside(run_grid([endpoint], resolution_m, floor_m=POSITION_FLOOR_M), extent)
     ]

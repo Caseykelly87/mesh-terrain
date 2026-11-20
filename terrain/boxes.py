@@ -12,6 +12,14 @@ lies inside the box and the turn comes from the conversion. That interpolation
 between a box's own edges is the one piece of arithmetic on degrees, an
 exception to computing in EPSG:26915 that Casey granted on PR #73.
 
+Draws never use a half-width below the GPS error floor (`floor_m`; Casey,
+issue #55 comments 6962700456 and 7042577618, ADR 0009): a square's
+half-width is raised to it, and an edge box is widened about its centre on
+each axis below it, in latitude and longitude with `pos_01`'s WGS84 radii at
+the box-centre latitude, an extension of the same exception Casey granted.
+An exact point (half-width 0) is a model point, not a fix, and stays exact.
+A floor of 0 changes nothing.
+
 This module draws no random numbers; `terrain.draws` does, and passes them in.
 """
 
@@ -34,6 +42,10 @@ LATITUDE_LIMIT_I = 900_000_000
 LONGITUDE_LIMIT_I = 1_800_000_000
 """180 degrees in edge units."""
 
+WGS84_A_M = 6_378_137.0
+WGS84_F = 1 / 298.257223563
+WGS84_E2 = WGS84_F * (2 - WGS84_F)
+
 GEOGRAPHIC_TO_UTM = Transformer.from_crs(4326, 26915, always_xy=True)
 """EPSG:4326 longitude and latitude to EPSG:26915 metres. PROJ names the operation
 "Inverse of NAD83 to WGS 84 (1) + UTM zone 15N", a null datum shift; the
@@ -46,6 +58,44 @@ latitude)."""
 
 Extent = tuple[float, float, float, float]
 """West, south, east and north edges in EPSG:26915 metres."""
+
+
+def check_floor(floor_m: float) -> None:
+    """Refuse a GPS error floor that is negative or not finite.
+
+    Args:
+        floor_m: The floor, metres.
+
+    Raises:
+        ValueError: if it is negative or not finite.
+    """
+    if not (math.isfinite(floor_m) and floor_m >= 0.0):
+        raise ValueError(f"floor_m must be a finite number of at least 0, got {floor_m}")
+
+
+def floor_units(latitude_deg: float, floor_m: float) -> tuple[float, float]:
+    """A floor in edge units, north-south and east-west, by `pos_01`'s WGS84 radii.
+
+    The inverse of `pos_01`'s half-width formula: a unit is 1e-7 x (pi / 180)
+    x M metres north-south and 1e-7 x (pi / 180) x N x cos(phi) metres
+    east-west, with M and N the meridional and normal radii at latitude phi.
+
+    Args:
+        latitude_deg: The latitude the radii are taken at, degrees (EPSG:4326).
+        floor_m: The floor, metres.
+
+    Returns:
+        The floor in 1e-7 degree units on each axis, north-south first.
+    """
+    phi = math.radians(latitude_deg)
+    sin2 = math.sin(phi) ** 2
+    meridional_m = WGS84_A_M * (1 - WGS84_E2) / (1 - WGS84_E2 * sin2) ** 1.5
+    normal_m = WGS84_A_M / math.sqrt(1 - WGS84_E2 * sin2)
+    radians_per_unit = UNIT_DEG * math.pi / 180
+    return (
+        floor_m / (radians_per_unit * meridional_m),
+        floor_m / (radians_per_unit * normal_m * math.cos(phi)),
+    )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -74,17 +124,27 @@ class EndpointBox:
         """Whether a drawn point can differ from the centre."""
         return self.half_width_m > 0.0
 
-    def extent_m(self, margin_m: float = 0.0) -> Extent:
-        """The box's west, south, east and north edges plus a margin, EPSG:26915 metres.
+    def drawn_half_width_m(self, floor_m: float = 0.0) -> float:
+        """The half-width the draws use: at least the floor, 0 for an exact point.
+
+        Raises:
+            ValueError: if the floor is negative or not finite.
+        """
+        check_floor(floor_m)
+        return max(self.half_width_m, floor_m) if self.has_area else 0.0
+
+    def extent_m(self, margin_m: float = 0.0, floor_m: float = 0.0) -> Extent:
+        """The drawn box's west, south, east and north edges plus a margin, EPSG:26915 metres.
 
         The half-width and the margin are added first, as the run grid has
         always done, so a square gives the same grid edges to the last bit.
 
         Args:
             margin_m: Metres added on every side.
+            floor_m: The GPS error floor the draws use, metres.
         """
         x_m, y_m = self.centre_xy_m
-        reach_m = self.half_width_m + margin_m
+        reach_m = self.drawn_half_width_m(floor_m) + margin_m
         return x_m - reach_m, y_m - reach_m, x_m + reach_m, y_m + reach_m
 
     @property
@@ -92,17 +152,22 @@ class EndpointBox:
         """Distance from the centre to the farthest corner, metres."""
         return self.half_width_m * math.sqrt(2.0)
 
-    def place(self, units: UnitArray) -> list[XY]:
-        """Points in the box: each unit scales the half-width on its axis.
+    def place(self, units: UnitArray, floor_m: float = 0.0) -> list[XY]:
+        """Points in the box: each unit scales the drawn half-width on its axis.
 
         Args:
             units: Draw numbers, shape (points, 2).
+            floor_m: The GPS error floor, metres.
 
         Returns:
             Easting and northing of each point, EPSG:26915 metres.
+
+        Raises:
+            ValueError: if the floor is negative or not finite.
         """
-        x_m = self.centre_xy_m[0] + self.half_width_m * units[:, 0]
-        y_m = self.centre_xy_m[1] + self.half_width_m * units[:, 1]
+        half_m = self.drawn_half_width_m(floor_m)
+        x_m = self.centre_xy_m[0] + half_m * units[:, 0]
+        y_m = self.centre_xy_m[1] + half_m * units[:, 1]
         return [(float(x), float(y)) for x, y in zip(x_m, y_m, strict=True)]
 
 
@@ -165,25 +230,48 @@ class EdgeBox:
     @cached_property
     def corners_xy_m(self) -> tuple[XY, XY, XY, XY]:
         """South-west, south-east, north-east and north-west corners, EPSG:26915 metres."""
-        latitudes_i = np.array([self.south_i, self.south_i, self.north_i, self.north_i])
-        longitudes_i = np.array([self.west_i, self.east_i, self.east_i, self.west_i])
-        x_m, y_m = GEOGRAPHIC_TO_UTM.transform(longitudes_i * UNIT_DEG, latitudes_i * UNIT_DEG)
-        south_west, south_east, north_east, north_west = (
-            (float(x), float(y)) for x, y in zip(x_m, y_m, strict=True)
-        )
-        return south_west, south_east, north_east, north_west
+        return _corners(self.drawn_edges(0.0))
 
-    def extent_m(self, margin_m: float = 0.0) -> Extent:
-        """West, south, east and north of the four corners plus a margin, EPSG:26915 metres.
+    def drawn_edges(self, floor_m: float = 0.0) -> tuple[float, float, float, float]:
+        """South, north, west and east edges the draws use, 1e-7 degrees.
+
+        An axis whose half-width is below the floor, in metres by `pos_01`'s
+        radii at the box-centre latitude, is widened about the centre to the
+        floor; the other axis keeps its edges. With a floor of 0 these are the
+        box's own edges.
+
+        Args:
+            floor_m: The GPS error floor, metres.
+
+        Raises:
+            ValueError: if the floor is negative or not finite.
+        """
+        check_floor(floor_m)
+        south, north = float(self.south_i), float(self.north_i)
+        west, east = float(self.west_i), float(self.east_i)
+        if floor_m == 0.0:
+            return south, north, west, east
+        centre_ns, centre_ew = (south + north) / 2, (west + east) / 2
+        floor_ns, floor_ew = floor_units(centre_ns * UNIT_DEG, floor_m)
+        if (north - south) / 2 < floor_ns:
+            south, north = centre_ns - floor_ns, centre_ns + floor_ns
+        if (east - west) / 2 < floor_ew:
+            west, east = centre_ew - floor_ew, centre_ew + floor_ew
+        return south, north, west, east
+
+    def extent_m(self, margin_m: float = 0.0, floor_m: float = 0.0) -> Extent:
+        """West, south, east and north of the drawn box's corners plus a margin, EPSG:26915.
 
         The converted edges bow by millimetres (5 mm on a 16-bit cell), which
         the run grid's 50 m margin covers.
 
         Args:
             margin_m: Metres added on every side.
+            floor_m: The GPS error floor the draws use, metres.
         """
-        eastings_m = [corner[0] for corner in self.corners_xy_m]
-        northings_m = [corner[1] for corner in self.corners_xy_m]
+        corners = self.corners_xy_m if floor_m == 0.0 else _corners(self.drawn_edges(floor_m))
+        eastings_m = [corner[0] for corner in corners]
+        northings_m = [corner[1] for corner in corners]
         return (
             min(eastings_m) - margin_m,
             min(northings_m) - margin_m,
@@ -196,23 +284,41 @@ class EdgeBox:
         """Distance from the centre to the farthest corner, EPSG:26915 metres."""
         return max(math.dist(self.centre_xy_m, corner) for corner in self.corners_xy_m)
 
-    def place(self, units: UnitArray) -> list[XY]:
-        """Points between the edges, uniform in latitude and longitude.
+    def place(self, units: UnitArray, floor_m: float = 0.0) -> list[XY]:
+        """Points between the drawn edges, uniform in latitude and longitude.
 
         Units of -1 to 1, the upper end excluded, map onto the half-open
-        edges: the first column onto longitude, the second onto latitude.
+        edges (`drawn_edges`): the first column onto longitude, the second
+        onto latitude.
 
         Args:
             units: Draw numbers, shape (points, 2).
+            floor_m: The GPS error floor, metres.
 
         Returns:
             Easting and northing of each point, EPSG:26915 metres.
+
+        Raises:
+            ValueError: if the floor is negative or not finite.
         """
+        south, north, west, east = self.drawn_edges(floor_m)
         fraction = (units + 1.0) / 2.0
-        longitude_deg = (self.west_i + fraction[:, 0] * (self.east_i - self.west_i)) * UNIT_DEG
-        latitude_deg = (self.south_i + fraction[:, 1] * (self.north_i - self.south_i)) * UNIT_DEG
+        longitude_deg = (west + fraction[:, 0] * (east - west)) * UNIT_DEG
+        latitude_deg = (south + fraction[:, 1] * (north - south)) * UNIT_DEG
         x_m, y_m = GEOGRAPHIC_TO_UTM.transform(longitude_deg, latitude_deg)
         return [(float(x), float(y)) for x, y in zip(x_m, y_m, strict=True)]
+
+
+def _corners(edges: tuple[float, float, float, float]) -> tuple[XY, XY, XY, XY]:
+    """South-west, south-east, north-east and north-west corners of edges in 1e-7 degrees."""
+    south, north, west, east = edges
+    latitudes_deg = np.array([south, south, north, north]) * UNIT_DEG
+    longitudes_deg = np.array([west, east, east, west]) * UNIT_DEG
+    x_m, y_m = GEOGRAPHIC_TO_UTM.transform(longitudes_deg, latitudes_deg)
+    south_west, south_east, north_east, north_west = (
+        (float(x), float(y)) for x, y in zip(x_m, y_m, strict=True)
+    )
+    return south_west, south_east, north_east, north_west
 
 
 PositionBox = EndpointBox | EdgeBox

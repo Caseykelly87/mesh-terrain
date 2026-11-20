@@ -37,6 +37,7 @@ from terrain.boxes import GEOGRAPHIC_TO_UTM as GEOGRAPHIC_TO_UTM
 from terrain.boxes import EdgeBox as EdgeBox
 from terrain.boxes import EndpointBox as EndpointBox
 from terrain.boxes import PositionBox as PositionBox
+from terrain.boxes import check_floor
 from terrain.cells import CELL_STEP_M, FineLayers, cell_profile
 from terrain.clutter import BoolArray
 from terrain.errors import OutOfExtentError, RefusalReason, RefusedDrawError
@@ -311,34 +312,38 @@ def draw_seed(run_seed: int, link_id: str) -> int:
 
 
 def draw_endpoints(
-    tx: PositionBox, rx: PositionBox, n_draws: int, seed: int
+    tx: PositionBox, rx: PositionBox, n_draws: int, seed: int, *, floor_m: float = 0.0
 ) -> list[tuple[XY, XY]]:
     """Endpoint pairs drawn uniformly inside the two boxes.
 
     Each draw takes four numbers from -1 to 1 from numpy's default generator
     seeded with `seed`, in the order tx easting, tx northing, rx easting, rx
     northing; an edge box reads the first of its two as longitude and the
-    second as latitude (`terrain.boxes`). With one draw the pair is the two
-    box centres.
+    second as latitude (`terrain.boxes`). No box is drawn with a half-width
+    below `floor_m` (`terrain.boxes`, ADR 0009). With one draw the pair is the
+    two box centres.
 
     Args:
         tx: Transmitter box.
         rx: Receiver box.
         n_draws: Number of pairs, at least 1.
         seed: Generator seed (`draw_seed`).
+        floor_m: The GPS error floor, metres; 0 turns it off.
 
     Returns:
         (tx, rx) points in EPSG:26915, metres.
 
     Raises:
-        ValueError: if n_draws is below 1.
+        ValueError: if n_draws is below 1, or the floor is negative or not finite.
     """
+    check_floor(floor_m)
     if n_draws < 1:
         raise ValueError(f"n_draws must be at least 1, got {n_draws}")
     if n_draws == 1:
         return [(tx.centre_xy_m, rx.centre_xy_m)]
     unit = np.random.default_rng(seed).uniform(-1.0, 1.0, size=(n_draws, 4))
-    return list(zip(tx.place(unit[:, 0:2]), rx.place(unit[:, 2:4]), strict=True))
+    tx_points = tx.place(unit[:, 0:2], floor_m)
+    return list(zip(tx_points, rx.place(unit[:, 2:4], floor_m), strict=True))
 
 
 def sample_link(
@@ -351,6 +356,7 @@ def sample_link(
     run_seed: int,
     n_draws: int = DEFAULT_ENDPOINT_DRAWS,
     buildings: BuildingPixels | None = None,
+    floor_m: float = 0.0,
 ) -> DrawSummary:
     """Run the models on every draw of one link and summarise the results.
 
@@ -364,6 +370,7 @@ def sample_link(
         n_draws: Number of draws; 1 uses the box centres.
         buildings: Building pixels of the 1 m grid; None where there is no
             OpenStreetMap snapshot or no 1 m DEM.
+        floor_m: The GPS error floor under the draws, metres; 0 turns it off.
 
     Returns:
         Medians, interquartile ranges, shares, refusal counts and building
@@ -378,7 +385,7 @@ def sample_link(
     """
     _check_building_grid(builder, buildings)
     seed = draw_seed(run_seed, link_id)
-    pairs = draw_endpoints(tx, rx, n_draws, seed)
+    pairs = draw_endpoints(tx, rx, n_draws, seed, floor_m=floor_m)
     tx_on, rx_on = _building_draws(pairs, buildings)
     refusals: dict[RefusalReason, int] = dict.fromkeys(get_args(RefusalReason), 0)
     kept: list[tuple[DrawProfiles, DrawQuantities]] = []

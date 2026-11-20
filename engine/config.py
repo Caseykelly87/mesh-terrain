@@ -41,6 +41,7 @@ CONFIG_FIELDS = (
     "rx_points",
     "snapshots",
     "endpoint_draws",
+    "position_floor_m",
     "seed",
     "calibration",
     "output_dir",
@@ -85,6 +86,8 @@ class RunConfig:
         input_names: Field name to the path as the config wrote it.
         snapshots: Snapshot ids by role.
         endpoint_draws: Draws per pair when either end has a position box.
+        position_floor_m: The GPS error floor under the draws, metres; 0 turns
+            it off (ADR 0009).
         seed: The run seed every draw derives from.
         output_dir: Folder that receives `<run_id>/`.
     """
@@ -103,6 +106,7 @@ class RunConfig:
     input_names: dict[str, str]
     snapshots: SnapshotIds
     endpoint_draws: int
+    position_floor_m: float
     seed: int
     output_dir: Path
 
@@ -140,6 +144,7 @@ def load_config(path: Path, *, profiles_dir: Path = PROFILES_DIR) -> RunConfig:
         input_names=_input_names(fields),
         snapshots=_snapshot_ids(fields["snapshots"]),
         endpoint_draws=_integer_at_least(fields["endpoint_draws"], "endpoint_draws", minimum=1),
+        position_floor_m=_floor(fields["position_floor_m"]),
         seed=_integer_at_least(fields["seed"], "seed", minimum=0),
         output_dir=_folder(folder, fields["output_dir"]),
     )
@@ -240,6 +245,14 @@ def _integer_at_least(value: Any, name: str, *, minimum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ConfigError(f"{name} must be an integer of at least {minimum}, got {value!r}")
     return value
+
+
+def _floor(value: Any) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ConfigError(f"position_floor_m must be a number of at least 0, got {value!r}")
+    if not (math.isfinite(value) and value >= 0.0):
+        raise ConfigError(f"position_floor_m must be a finite number of at least 0, got {value!r}")
+    return float(value)
 
 
 def _folder(folder: Path, value: Any) -> Path:
