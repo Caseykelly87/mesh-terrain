@@ -4,11 +4,13 @@ Every test runs on the synthetic capture and DEM in tests/engine_inputs_fixture.
 none reads the real snapshot.
 """
 
+import math
 import re
 from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
+import numpy as np
 import pyarrow.parquet as pq
 import pytest
 from engine_fixture import no_logger_caching
@@ -19,6 +21,7 @@ from engine_inputs_fixture import (
     NARROW_DEM_BOUNDS_M,
     NODES,
     PARTNERS,
+    RECTANGLE_DEM_BOUNDS_M,
     SNAPSHOT_ID,
     box_centre_m,
     build_capture,
@@ -26,13 +29,16 @@ from engine_inputs_fixture import (
     centre_m,
     every_box,
 )
+from prepare_snapshots import write_raster_snapshot
 from structlog.testing import capture_logs
 
 from engine import positions_marker
-from engine.points import read_points
+from engine.points import box_form, read_points
 from engine.prepare import command as prepare_command
+from engine.prepare.run_config import TILE_SNAPSHOTS
+from engine.prepared import STAMP_FILE, require_admissible_layer
 from ingester import engine_inputs, link_pairs
-from ingester.link_cells import cell_of
+from ingester.link_cells import LinkBox, cell_of
 from ingester.link_pairs import CaptureLinks, MovedPair, PairActivity, SelectionError
 from ingester.tile_selection import (
     FAILS_DEM,
@@ -44,6 +50,7 @@ from ingester.tile_selection import (
     Selection,
     SiteSelection,
 )
+from terrain.boxes import EdgeBox
 
 # The import above activates the autouse fixture for this module.
 _ = no_logger_caching
@@ -59,9 +66,34 @@ SITE_ORDER = ("G1", "G3", "G2")
 SITE_ROLES = ["both_ends_gateway", "gateway_only_gateway", "gateway_only_gateway"]
 
 
-def east_west_half_m(name: str) -> float:
-    """The east-west half of a node's box: Casey's inscribed square (issue #44, 1 (b)), pos_01."""
-    return cell_of(*NODES[name].box()).half_width_ew_m
+# The lnk_02 box's four edges, as the real layers carry them (ADR 0008).
+EDGE_COLUMNS = ["box_south_i", "box_north_i", "box_west_i", "box_east_i"]
+
+
+def link_box(name: str) -> LinkBox:
+    """A node's own lnk_02 box."""
+    return cell_of(*NODES[name].box())
+
+
+def edges_of(name: str) -> list[int]:
+    box = link_box(name)
+    return [box.south_i, box.north_i, box.west_i, box.east_i]
+
+
+def edge_box(name: str) -> EdgeBox:
+    south_i, north_i, west_i, east_i = edges_of(name)
+    return EdgeBox(south_i=south_i, north_i=north_i, west_i=west_i, east_i=east_i)
+
+
+def assert_edges(frame: gpd.GeoDataFrame, names_in_order: tuple[str, ...]) -> None:
+    """Each row carries its node's LinkBox edges as int64 and sits within 1 mm of their centre."""
+    assert "box_half_width_m" not in frame.columns
+    for column in EDGE_COLUMNS:
+        assert str(frame[column].dtype) == "int64", column
+    rows = [[int(value) for value in row] for row in frame[EDGE_COLUMNS].itertuples(index=False)]
+    assert rows == [edges_of(name) for name in names_in_order]
+    for point, name in zip(frame.geometry, names_in_order, strict=True):
+        assert math.dist((point.x, point.y), edge_box(name).centre_xy_m) <= 1e-3
 
 
 def run(
@@ -99,8 +131,8 @@ def test_command_writes_the_layers(
     ]
     sites = gpd.read_parquet(out / "tx_sites_real.parquet")
     receivers = gpd.read_parquet(out / "rx_real.parquet")
-    assert list(sites.columns) == ["site_id", "geometry", "box_half_width_m", "role"]
-    assert list(receivers.columns) == ["rx_id", "geometry", "box_half_width_m"]
+    assert list(sites.columns) == ["site_id", "geometry", *EDGE_COLUMNS, "role"]
+    assert list(receivers.columns) == ["rx_id", "geometry", *EDGE_COLUMNS]
     assert sites.crs.to_epsg() == receivers.crs.to_epsg() == 26915
     assert list(sites["site_id"]) == [pseudonym(name) for name in SITE_ORDER]
     assert list(sites["role"]) == SITE_ROLES
@@ -109,13 +141,12 @@ def test_command_writes_the_layers(
         for row_id, point in zip(frame[column], frame.geometry, strict=True):
             name = next(key for key, node in NODES.items() if node.pseudonym == row_id)
             assert (point.x, point.y) == pytest.approx(centre_m(name), abs=1e-6)
-    assert str(sites["box_half_width_m"].dtype) == "float64"
-    assert list(sites["box_half_width_m"]) == pytest.approx(
-        [east_west_half_m(name) for name in SITE_ORDER], abs=1e-9
-    )
-    assert list(receivers["box_half_width_m"]) == pytest.approx([east_west_half_m("A")], abs=1e-9)
-    assert len(read_points(out / "tx_sites_real.parquet", "site_id")) == 3
-    assert len(read_points(out / "rx_real.parquet", "rx_id")) == 1
+    assert_edges(sites, SITE_ORDER)
+    assert_edges(receivers, ("A",))
+    for layer, id_column, count in (("tx_sites_real", "site_id", 3), ("rx_real", "rx_id", 1)):
+        endpoints = read_points(out / f"{layer}.parquet", id_column)
+        assert len(endpoints) == count
+        assert box_form(endpoints) == "rectangle"
     printed = capsys.readouterr().out
     assert re.search(rf"{pseudonym('G3')} gateway_only_gateway: .*extent pass", printed)
     assert re.search(rf"{pseudonym('G1')} both_ends_gateway: .*extent pass", printed)
@@ -192,7 +223,7 @@ def test_the_counts_line_names_no_pseudonym(
 
 
 def placed(name: str, role: str) -> PlacedNode:
-    return PlacedNode(pseudonym(name), role, *centre_m(name), east_west_half_m(name), False)
+    return PlacedNode(pseudonym(name), role, link_box(name), False)
 
 
 def test_the_counts_line_carries_the_drop_counts_and_no_pseudonym() -> None:
@@ -258,6 +289,12 @@ DEFAULT_TILE_LINE = (
             "dropped gateway-only pair {C} to {G3}: gateway fails the DEM edge check",
             False,
         ),
+        (
+            {},
+            RECTANGLE_DEM_BOUNDS_M,
+            "dropped gateway-only pair {C} to {G3}: gateway fails the DEM edge check",
+            False,
+        ),
     ],
 )
 def test_a_dropped_selected_pair_stops_the_run_before_any_write(
@@ -285,7 +322,7 @@ def test_a_dropped_selected_pair_stops_the_run_before_any_write(
     assert [text for text in lines if text.startswith("dropped")] == [names(line)]
     rule = next(index for index, text in enumerate(lines) if text.startswith(SITE_RULE_LINE))
     assert (lines.index(names(line)) < rule) is before_selection
-    if dem == NARROW_DEM_BOUNDS_M:
+    if dem in (NARROW_DEM_BOUNDS_M, RECTANGLE_DEM_BOUNDS_M):
         pattern = rf"^{pseudonym('G3')} gateway_only_gateway: .*extent fail$"
         assert re.search(pattern, printed, re.M)
     assert "refused, nothing written: selected pairs dropped: gateway-only pair" in printed
@@ -544,11 +581,7 @@ def test_boxes_the_overlap_rule_reads_as_one_place_leave_the_layers_as_they_are(
     receivers = gpd.read_parquet(out / "rx_real.parquet")
     assert list(sites["site_id"]) == [pseudonym(name) for name in SITE_ORDER]
     for frame, names_in_order in ((sites, SITE_ORDER), (receivers, ("A",))):
-        for point, name in zip(frame.geometry, names_in_order, strict=True):
-            assert (point.x, point.y) == pytest.approx(centre_m(name), abs=1e-6)
-        assert list(frame["box_half_width_m"]) == pytest.approx(
-            [east_west_half_m(name) for name in names_in_order], abs=1e-9
-        )
+        assert_edges(frame, names_in_order)
     printed = capsys.readouterr().out
     assert not any(line.startswith("dropped") for line in printed.splitlines())
     assert coordinates_in(printed + repr(events)) == []
@@ -741,16 +774,12 @@ def assert_sites(tmp_path: Path, kept: tuple[str, ...]) -> None:
         "tx_sites_real.parquet",
     ]
     sites = gpd.read_parquet(out / "tx_sites_real.parquet")
-    assert list(sites.columns) == ["site_id", "geometry", "box_half_width_m", "role"]
+    assert list(sites.columns) == ["site_id", "geometry", *EDGE_COLUMNS, "role"]
     assert sites.crs.to_epsg() == 26915
     roles = dict(zip(SITE_ORDER, SITE_ROLES, strict=True))
     assert list(sites["site_id"]) == [pseudonym(name) for name in kept]
     assert list(sites["role"]) == [roles[name] for name in kept]
-    for point, name in zip(sites.geometry, kept, strict=True):
-        assert (point.x, point.y) == pytest.approx(centre_m(name), abs=1e-6)
-    assert list(sites["box_half_width_m"]) == pytest.approx(
-        [east_west_half_m(name) for name in kept], abs=1e-9
-    )
+    assert_edges(sites, kept)
     metadata = pq.read_metadata(out / "tx_sites_real.parquet").metadata
     assert metadata[b"mesh_terrain:positions"] == b"real"
 
@@ -837,6 +866,16 @@ def test_sites_only_writes_the_gateway_of_a_both_ends_pair_its_relayer_drops(
         (
             {},
             NARROW_DEM_BOUNDS_M,
+            ["left out {G3} gateway_only_gateway: fails the DEM edge check"],
+            ("G1", "G2"),
+            ["dropped gateway-only pair {C} to {G3}: gateway fails the DEM edge check"],
+            "nodes selected 3; extent pass 2, fail 1; pairs dropped 1 (straddles the tile "
+            "edge 0, fails the DEM edge check 1, used more than one box in its kept hours 0); "
+            "sites written 2, left out 1",
+        ),
+        (
+            {},
+            RECTANGLE_DEM_BOUNDS_M,
             ["left out {G3} gateway_only_gateway: fails the DEM edge check"],
             ("G1", "G2"),
             ["dropped gateway-only pair {C} to {G3}: gateway fails the DEM edge check"],
@@ -1144,3 +1183,35 @@ def test_sites_only_reports_the_direct_hops_neighbor_info_contradicts(
     assert COUNTS_PASS.replace("pass", "differs") not in printed
     assert_report(tmp_path, printed)
     assert coordinates_in(printed + repr(events)) == []
+
+
+def test_engine_prepare_accepts_the_written_folder_and_the_engine_admits_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The layers pass engine.prepare end to end, and its outputs reach the engine (ADR 0008).
+
+    prepare reads the tile's own DEM and DSM ids, written here as a flat
+    made-up 10 m raster over the tile and beyond it.
+    """
+    snapshots = tmp_path / "snapshots"
+    build_dem(snapshots)
+    build_capture(snapshots)
+    assert run(tmp_path) == 0
+    heights_m = np.full((1200, 1200), 150.0, dtype=np.float32)
+    corner = (719_000.0, 4_291_000.0)
+    ids = TILE_SNAPSHOTS["x72y429"]
+    write_raster_snapshot(snapshots, ids["dem"], {"dem.tif": (heights_m, 10.0, corner)})
+    write_raster_snapshot(snapshots, ids["dsm"], {"dsm.tif": (heights_m + 5.0, 10.0, corner)})
+    folder = tmp_path / "configs" / "x72y429"
+    monkeypatch.setenv("SNAPSHOTS_DIR", str(snapshots))
+    monkeypatch.setattr(prepare_command, "configure_logging", lambda log_format: None)
+    assert prepare_command.main(["x72y429", "--folder", str(folder)]) == 0
+    assert (folder / STAMP_FILE).exists()
+    for name, id_column, real in (
+        ("tx_sites.parquet", "site_id", SITE_ORDER),
+        ("rx_points.parquet", "rx_id", ("A",)),
+    ):
+        require_admissible_layer(folder / name)
+        boxes = {e.endpoint_id: e.box for e in read_points(folder / name, id_column)}
+        for node in real:
+            assert boxes[pseudonym(node)] == edge_box(node)
