@@ -50,16 +50,20 @@ DBT_DEV_TARGET_GUARD = $(if $(filter-out 1,$(words $(DBT_DEV_TARGET)))$(filter-o
 unexport DBT_DEV_TARGET_GUARD DBT_DEV_TARGETS DBT_DEV_TARGET_REFUSAL
 $(if $(filter check dbt-build,$(MAKECMDGOALS)),$(DBT_DEV_TARGET_GUARD))
 
-.PHONY: help env up down nuke rotate-owner-password check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test
+.PHONY: help env up down nuke rotate-owner-password check-credentials check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
 
 help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
 	@echo "make down       stop the stack and remove its containers; the data volumes are kept"
+	@echo "                (up, down and rotate-owner-password are the only start and stop; no"
+	@echo "                service restarts on its own)"
 	@echo "make rotate-owner-password"
 	@echo "                start the warehouse alone and set the owner's password to WAREHOUSE_PASSWORD"
-	@echo "                from .env (README, Credentials); make up refuses the .env.example defaults"
-	@echo "                (up and down are the only start and stop; no service restarts on its own)"
+	@echo "                from .env (README, Credentials)"
+	@echo "make check-credentials"
+	@echo "                refuse an empty owner password or MinIO root credential in .env, or one of"
+	@echo "                the .env.example placeholders; make up and rotate-owner-password run it first"
 	@echo "make nuke       stop the stack and delete every project volume after a typed confirmation"
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
 	@echo "make check [DBT_DEV_TARGET=dev_ta]"
@@ -117,13 +121,15 @@ env:
 	@test -f .env || cp .env.example .env
 
 # The owner password and the MinIO root credentials in .env.example are public,
-# so nothing starts the stack while .env still holds one of them, or an empty
-# value. The script prints only the name of a variable that fails.
-CHECK_CREDENTIALS := bash docker/check-credentials.sh
+# so neither make up nor make rotate-owner-password starts anything while .env
+# holds an empty value or one of those placeholders. The script prints only the
+# name of a variable that fails; it runs with BASH_ENV and SHELLOPTS unset so
+# no inherited tracing prints a value as it is compared.
+check-credentials: env
+	env -u BASH_ENV -u SHELLOPTS bash docker/check-credentials.sh
 
 # Health waiting is a script rather than compose --wait; the script says why.
-up: env
-	$(CHECK_CREDENTIALS)
+up: check-credentials
 	$(COMPOSE) up --build --detach
 	bash docker/wait-for-stack.sh
 
@@ -136,14 +142,17 @@ up: env
 # container's local socket, which the image trusts without a password, as the
 # healthcheck's own login does; so the old password is never needed and the
 # owner cannot be locked out. The bare -e name passes the new value from .env
-# into the container, where psql reads it, so it is on no command line.
+# into the container, where psql reads it, so it is on no command line. The
+# wait allows 150 s, about what the warehouse health check allows a fresh
+# volume (start period plus retries), and says why it stops.
 ROTATE_PSQL = tries=0; until pg_isready -q -h 127.0.0.1; do \
-    tries=$$((tries + 1)); [ $$tries -lt 60 ] || exit 1; sleep 1; done; \
+    tries=$$((tries + 1)); [ $$tries -lt 150 ] || { \
+    echo "make rotate-owner-password: the warehouse did not listen on TCP within 150 s" >&2; \
+    exit 1; }; sleep 1; done; \
     psql -X -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f -
 unexport ROTATE_PSQL
 
-rotate-owner-password: env
-	$(CHECK_CREDENTIALS)
+rotate-owner-password: check-credentials
 	$(COMPOSE) up --detach warehouse
 	$(COMPOSE) exec -T -e WAREHOUSE_PASSWORD warehouse sh -c '$(ROTATE_PSQL)' < docker/warehouse/rotate-owner-password.sql
 

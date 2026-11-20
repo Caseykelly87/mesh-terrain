@@ -77,6 +77,10 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen
       - run: cp .env.example .env
+      # This job starts the warehouse with docker compose directly, so the
+      # credential check does not run: its .env keeps the .env.example
+      # placeholders, which is fine for a warehouse that exists only inside
+      # this job and is never published beyond the runner's 127.0.0.1.
       # Compose builds the warehouse image from the same Dockerfile and init
       # SQL developers use, so CI checks the real artefact rather than a stock
       # service container without h3-pg.
@@ -128,7 +132,8 @@ jobs:
 
   compose-smoke:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # The owner rotation below stops the stack and starts it twice more.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.1
@@ -149,7 +154,9 @@ jobs:
       - name: generate the stack's credentials
         run: |
           for name in WAREHOUSE_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do
-            sed -i "s|^${name}=.*|${name}=$(openssl rand -hex 16)|" .env
+            value=$(openssl rand -hex 16)
+            echo "::add-mask::${value}"
+            sed -i "s|^${name}=.*|${name}=${value}|" .env
           done
       # Casey decided that nothing in this project starts on its own (PR #12),
       # so a restart policy other than "no" fails here. Capture runs are started
@@ -161,6 +168,46 @@ jobs:
           make env
           docker compose --profile '*' config --format json | jq -e '[.services[].restart] | all(. == "no")'
       - run: make up
+      # A new owner password reaches an existing warehouse only through make
+      # rotate-owner-password, so this runs the documented order on the
+      # throwaway stack: make up's wait-for-stack then proves Dagster logs in
+      # with the new value, and a host login proves the new value works and the
+      # old one no longer does. Every value is masked; nothing echoes one.
+      - name: rotate the owner password and log in with the new one
+        run: |
+          old=$(sed -n 's/^WAREHOUSE_PASSWORD=//p' .env)
+          new=$(openssl rand -hex 16)
+          echo "::add-mask::${new}"
+          sed -i "s|^WAREHOUSE_PASSWORD=.*|WAREHOUSE_PASSWORD=${new}|" .env
+          make down
+          make rotate-owner-password
+          make up
+          set -a; . ./.env; set +a
+          OLD_PASSWORD="${old}" uv run --frozen python - <<'PY'
+          import os
+
+          import psycopg
+
+
+          def logs_in(password):
+              try:
+                  psycopg.connect(
+                      host="127.0.0.1",
+                      port=os.environ["WAREHOUSE_PORT"],
+                      user=os.environ["WAREHOUSE_USER"],
+                      password=password,
+                      dbname=os.environ["WAREHOUSE_DB"],
+                      connect_timeout=5,
+                  ).close()
+              except psycopg.OperationalError:
+                  return False
+              return True
+
+
+          assert logs_in(os.environ["WAREHOUSE_PASSWORD"]), "the new owner password was refused"
+          assert not logs_in(os.environ["OLD_PASSWORD"]), "the old owner password still logs in"
+          print("the new owner password logs in; the old one is refused")
+          PY
       # make up passes when the code location fails to import, because the
       # webserver reports the error in its UI and stays healthy. PR #15's
       # ingester import failed that way in the image while every job was green.
