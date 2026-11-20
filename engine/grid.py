@@ -74,7 +74,8 @@ def run_grid(
     endpoints: Sequence[Endpoint],
     resolution_m: float,
     margin_m: float = EXTENT_MARGIN_M,
-    floor_m: float = 0.0,
+    *,
+    floor_m: float,
 ) -> RunGrid:
     """The grid covering every endpoint box plus the margin, edges on 10 m multiples.
 
@@ -83,7 +84,8 @@ def run_grid(
         resolution_m: Pixel size of the DEM in metres; must divide 10 m.
         margin_m: Metres added on every side.
         floor_m: The GPS error floor the draws use, metres (ADR 0009), so the
-            grid holds every drawn box.
+            grid holds every drawn box. No default: every caller says which
+            floor it means, 0 included (Casey, 2026-11-20).
 
     Returns:
         The run grid.

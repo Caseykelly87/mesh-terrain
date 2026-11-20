@@ -274,7 +274,7 @@ class EdgeBox:
             west, east = centre_ew_i - floor_ew_i, centre_ew_i + floor_ew_i
         return south, north, west, east
 
-    def extent_m(self, margin_m: float = 0.0, floor_m: float = 0.0) -> Extent:
+    def extent_m(self, margin_m: float = 0.0, *, floor_m: float) -> Extent:
         """West, south, east and north of the drawn box's corners plus a margin, EPSG:26915.
 
         The converted edges bow by millimetres (5 mm on a 16-bit cell), which
@@ -282,7 +282,8 @@ class EdgeBox:
 
         Args:
             margin_m: Metres added on every side.
-            floor_m: The GPS error floor the draws use, metres.
+            floor_m: The GPS error floor the draws use, metres; no default, so
+                every caller says which floor it means (Casey, 2026-11-20).
         """
         corners = self.corners_xy_m if floor_m == 0.0 else _corners(self.drawn_edges(floor_m))
         eastings_m = [corner[0] for corner in corners]
