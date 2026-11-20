@@ -49,16 +49,33 @@ def git(folder: Path, *arguments: str) -> None:
 
 @pytest.fixture
 def repository(tmp_path: Path) -> Path:
-    """An empty git repository with `.env` ignored through `.git/info/exclude`."""
+    """A git repository with one committed file and `.env` ignored through `.git/info/exclude`."""
     folder = tmp_path / "checkout"
     folder.mkdir()
     git(folder, "init", "--quiet")
     (folder / ".git" / "info" / "exclude").write_text(".env\n", encoding="utf-8")
+    (folder / "tracked.py").write_text("ONE = 1\n", encoding="utf-8")
+    git(folder, "add", "tracked.py")
+    git(
+        folder,
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "-qm",
+        "one",
+    )
     return folder
 
 
 def test_a_clean_checkout_is_false(repository: Path) -> None:
     assert engine_git_dirty(repository) == "[false]"
+
+
+def test_a_modified_tracked_file_is_true(repository: Path) -> None:
+    (repository / "tracked.py").write_text("ONE = 2\n", encoding="utf-8")
+    assert engine_git_dirty(repository) == "[true]"
 
 
 def test_an_ignored_file_alone_is_still_false(repository: Path) -> None:
