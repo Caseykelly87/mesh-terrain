@@ -804,3 +804,17 @@ def test_a_small_box_at_the_dem_edge_fails_under_the_floor_as_prepare_does(
     assert grid_inside(without_floor, engine_dem_extent(dem))
     assert not inside_dem(box, dem_extent(FIXTURE_SNAPSHOTS, SUBTILE_DEM))
     assert outside_extent([endpoint], dem) == ["small"]
+
+
+def test_a_32_bit_cell_just_inside_the_tile_edge_is_in_with_no_floor() -> None:
+    """row_state reads the lnk_02 box as sent, with no GPS floor (ADR 0009 widens draws only).
+
+    A 32-bit cell, about 1 cm across, 3 m inside the tile's west edge is `in`.
+    Widened to the 5 m floor it would reach 2 m past the edge and read `split`.
+    """
+    longitude_i, latitude_i = (
+        round(value * 1e7) for value in _TO_DEGREES.transform(TILE.west_m + 3.0, 4_285_000.0)
+    )
+    cell = cell_of(latitude_i, longitude_i, 32)
+    assert cell.east_i - cell.west_i == 1
+    assert row_state(cell, TILE) == "in"

@@ -35,4 +35,5 @@ def test_a_box_extent_has_no_default_floor(box: EdgeBox | EndpointBox) -> None:
         call()
     with pytest.raises(TypeError, match="floor_m"):
         call(50.0)
-    assert box.extent_m(50.0, floor_m=0.0) == box.extent_m(margin_m=50.0, floor_m=0.0)
+    west, south, east, north = box.extent_m(0.0, floor_m=0.0)
+    assert box.extent_m(50.0, floor_m=0.0) == (west - 50.0, south - 50.0, east + 50.0, north + 50.0)
