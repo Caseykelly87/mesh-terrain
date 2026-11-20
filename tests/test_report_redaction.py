@@ -24,6 +24,7 @@ list empty would show in the failures after it.
 """
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -59,6 +60,8 @@ import raw_schema
 
 import test_dbt_targets as targets
 from test_report_redaction import (
+    INVENTED_PASSWORD,
+    INVENTED_USER,
     test_a_text_report_and_its_sections_lose_both_values as test_a_unit_1,
     test_a_skip_report_keeps_its_shape as test_a_unit_2,
     test_a_longer_value_is_replaced_before_one_it_contains as test_a_unit_3,
@@ -67,8 +70,10 @@ from test_report_redaction import (
 
 
 def test_b_conftest_holds_the_invented_role():
-    # Without it no test below holds a value, and the leak check passes on nothing.
-    assert raw_schema.role_configured()
+    # Without it the tests below hold no value the leak check looks for, and it
+    # passes on nothing. A bool, so a failure's explanation shows neither value.
+    held = [tuple(role) for role in raw_schema._role] == [(INVENTED_USER, INVENTED_PASSWORD)]
+    assert held, "conftest does not hold the invented test role"
 
 
 def test_b_no_environment_variable_holds_a_value():
@@ -154,8 +159,11 @@ def run_probe(tmp_path: Path, *options: str) -> str:
 def assert_probe_ran_and_shows_no_value(output: str) -> None:
     leaked = [value for value in (INVENTED_USER, INVENTED_PASSWORD) if value in output]
     assert leaked == [], "a probe report shows a test role value"
-    assert "4 failed" in output, "the probe did not run its failing tests"
-    assert "7 passed" in output, "the probe's unit tests, role or environment test did not pass"
+    # A word boundary, so 14 failed or 17 passed does not match.
+    assert re.search(r"\b4 failed\b", output), "the probe did not run its failing tests"
+    assert re.search(r"\b7 passed\b", output), (
+        "the probe's unit tests, role or environment test did not pass"
+    )
     assert report_redaction.PLACEHOLDER in output
 
 
