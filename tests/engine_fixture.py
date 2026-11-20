@@ -71,6 +71,7 @@ def fixture_settings(**overrides: Any) -> EngineSettings:
         "itm_library_path": REPO / "no-itm-library-on-this-host.so",
         "itm_source_commit": None,
         "engine_git_commit": None,
+        "engine_git_dirty": None,
     }
     values.update(overrides)
     return EngineSettings(**values)

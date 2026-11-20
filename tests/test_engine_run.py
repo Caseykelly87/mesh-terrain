@@ -205,7 +205,7 @@ def test_the_manifest_records_versions_seed_snapshots_inputs_and_code(
     two_runs: tuple[Path, Path],
 ) -> None:
     manifest = manifest_of(two_runs[0])
-    assert manifest["manifest_version"] == MANIFEST_VERSION == "1.3.0"
+    assert manifest["manifest_version"] == MANIFEST_VERSION == "1.3.1"
     assert manifest["schema_version"] == SCHEMA_VERSION == "1.2.0"
     assert manifest["engine_version"] == ENGINE_VERSION == "0.3.0"
     assert manifest["position_floor_m"] == 5.0
@@ -531,12 +531,15 @@ def test_the_itm_fixture_runs_in_the_image(tmp_path: Path) -> None:
     from engine.settings import EngineSettings
 
     config = small_config(tmp_path, models=["fspl", "itm"])
+    # Only make engine passes ENGINE_GIT_DIRTY; check-itm runs this test in a
+    # dagster-webserver container without it, and the test is about ITM.
     run = run_engine(
         config,
         fixture_settings(
+            engine_git_dirty="false",
             **EngineSettings(snapshots_dir=SNAPSHOTS).model_dump(
                 include={"itm_library_path", "itm_source_commit", "engine_git_commit"}
-            )
+            ),
         ),
     )
     rows = gpd.read_parquet(run / "predictions.parquet")
@@ -848,23 +851,84 @@ def test_a_dem_whose_pixels_do_not_divide_10_m_is_a_refusal(tmp_path: Path) -> N
         run_engine(config, fixture_settings(snapshots_dir=root))
 
 
-def test_the_engine_commit_fallback_logs_a_warning(monkeypatch: pytest.MonkeyPatch) -> None:
-    from structlog.testing import capture_logs
-
+def no_git_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the engine see no git checkout, as in the image."""
     import engine.provenance
 
     def no_git(*arguments: str) -> str:
         raise OSError("git is not installed")
 
     monkeypatch.setattr(engine.provenance, "_git", no_git)
+
+
+def test_the_engine_commit_fallback_logs_a_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    from structlog.testing import capture_logs
+
+    import engine.provenance
+
+    no_git_checkout(monkeypatch)
     with capture_logs() as logs:
         commit, dirty = engine.provenance.engine_commit(
-            fixture_settings(engine_git_commit="a" * 40)
+            fixture_settings(engine_git_commit="a" * 40, engine_git_dirty="false")
         )
-    assert (commit, dirty) == ("a" * 40, None)
+    assert (commit, dirty) == ("a" * 40, False)
     assert any(
         e["event"] == "engine_commit_from_environment" and e["log_level"] == "warning" for e in logs
     )
+
+
+@pytest.mark.parametrize(("value", "dirty"), [("true", True), ("false", False)])
+def test_without_a_checkout_the_dirty_status_comes_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, value: str, dirty: bool
+) -> None:
+    """Casey, issue #55 comment 6961809084, item 11: true or false, never empty."""
+    import engine.provenance
+    from engine.settings import EngineSettings
+
+    no_git_checkout(monkeypatch)
+    monkeypatch.setenv("ENGINE_GIT_COMMIT", "b" * 40)
+    monkeypatch.setenv("ENGINE_GIT_DIRTY", value)
+    settings = EngineSettings(snapshots_dir=SNAPSHOTS)
+    provenance = engine.provenance.collect_provenance(("fspl",), settings)
+    assert provenance.engine_git_commit == "b" * 40
+    assert provenance.engine_git_dirty is dirty
+
+
+@pytest.mark.parametrize("value", [None, "", " ", "True", "FALSE", "1", "0", "yes", "dirty"])
+def test_without_a_checkout_an_unknown_dirty_status_is_refused(
+    monkeypatch: pytest.MonkeyPatch, value: str | None
+) -> None:
+    import engine.provenance
+
+    no_git_checkout(monkeypatch)
+    settings = fixture_settings(engine_git_commit="a" * 40, engine_git_dirty=value)
+    with pytest.raises(ConfigError, match="ENGINE_GIT_DIRTY"):
+        engine.provenance.engine_commit(settings)
+
+
+def test_a_run_without_a_checkout_or_dirty_status_is_refused_before_any_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    no_git_checkout(monkeypatch)
+    config = small_config(tmp_path)
+    with pytest.raises(ConfigError, match="ENGINE_GIT_DIRTY"):
+        run_engine(config, fixture_settings(engine_git_commit="a" * 40))
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize(("status", "dirty"), [("", False), ("?? new_file.py\n", True)])
+def test_in_a_checkout_git_status_decides_and_the_environment_is_not_read(
+    monkeypatch: pytest.MonkeyPatch, status: str, dirty: bool
+) -> None:
+    """A checkout's own status wins over ENGINE_GIT_DIRTY, as its HEAD wins over the commit."""
+    import engine.provenance
+
+    def git(*arguments: str) -> str:
+        return "c" * 40 + "\n" if arguments[0] == "rev-parse" else status
+
+    monkeypatch.setattr(engine.provenance, "_git", git)
+    settings = fixture_settings(engine_git_commit="a" * 40, engine_git_dirty="not read")
+    assert engine.provenance.engine_commit(settings) == ("c" * 40, dirty)
 
 
 def test_the_seed_column_holds_each_pairs_draw_seed(two_runs: tuple[Path, Path]) -> None:
