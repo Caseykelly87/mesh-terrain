@@ -1212,6 +1212,8 @@ def test_engine_prepare_accepts_the_written_folder_and_the_engine_admits_it(
         ("rx_points.parquet", "rx_id", ("A",)),
     ):
         require_admissible_layer(folder / name)
-        boxes = {e.endpoint_id: e.box for e in read_points(folder / name, id_column)}
+        boxes = {
+            endpoint.endpoint_id: endpoint.box for endpoint in read_points(folder / name, id_column)
+        }
         for node in real:
             assert boxes[pseudonym(node)] == edge_box(node)

@@ -750,7 +750,10 @@ def test_the_dem_edge_check_reads_the_whole_box_not_its_inscribed_square() -> No
     box = cell_of(*NODES["G1"].box())
     edges = edge_box_of(box)
     square = EndpointBox(centre_xy_m=edges.centre_xy_m, half_width_m=box.smaller_half_width_m)
-    grid = [run_grid([Endpoint(endpoint_id="x", box=b)], resolution_m=1.0) for b in (square, edges)]
+    grid = [
+        run_grid([Endpoint(endpoint_id="x", box=candidate)], resolution_m=1.0)
+        for candidate in (square, edges)
+    ]
     assert grid[0].north_m < grid[1].north_m
     extent = (grid[1].west_m, grid[1].south_m, grid[1].east_m, grid[0].north_m)
     assert inside_dem(square, extent)
