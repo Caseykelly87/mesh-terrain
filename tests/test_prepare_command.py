@@ -28,6 +28,7 @@ from engine.grid import run_grid
 from engine.points import read_points
 from engine.positions_marker import positions_marker, stamp_positions
 from engine.prepare.command import main
+from engine.prepare.run_config import POSITION_FLOOR_M
 from engine.terrain_build import check_sources, dem_resolution_m
 
 DEM_ID = "3dep-1m-mo-saintlouis-2017-x72y429"
@@ -178,7 +179,9 @@ def test_the_written_layers_make_a_run_extent_the_engine_accepts(
         folder / "rx_points.parquet", "rx_id"
     )
     dem = named(snapshots_dir, DEM_ID)["dem"]
-    check_sources({"dem": dem}, run_grid(endpoints, dem_resolution_m(dem)))
+    check_sources(
+        {"dem": dem}, run_grid(endpoints, dem_resolution_m(dem), floor_m=POSITION_FLOOR_M)
+    )
 
 
 @pytest.mark.usefixtures("env")
@@ -567,7 +570,9 @@ def test_without_real_receivers_the_config_and_extent_pass_the_engines_checks(
     assert config.tx_sites == folder / "tx_sites.parquet"
     endpoints = read_points(config.tx_sites, "site_id") + read_points(config.rx_points, "rx_id")
     dem = named(snapshots_dir, DEM_ID)["dem"]
-    check_sources({"dem": dem}, run_grid(endpoints, dem_resolution_m(dem)))
+    check_sources(
+        {"dem": dem}, run_grid(endpoints, dem_resolution_m(dem), floor_m=POSITION_FLOOR_M)
+    )
 
 
 @pytest.mark.usefixtures("env")
@@ -770,3 +775,19 @@ def test_a_folder_already_holding_a_prepare_stamp_is_refused(tmp_path: Path) -> 
     folder = write_inputs(tmp_path / "x72y429")
     (folder / STAMP_FILE).write_text("{}", encoding="utf-8")
     assert STAMP_FILE in refusal(folder)
+
+
+@pytest.mark.usefixtures("env")
+def test_crossing_reads_the_reach_of_the_box_widened_to_the_floor(tmp_path: Path) -> None:
+    # A 1 m square at both ends draws as a 5 m square (ADR 0009), whose reach is
+    # 5 x sqrt(2) = 7.1 m; its own reach would read 1.4.
+    sites = [(SITE_A, 723_456.7, 4_284_321.9, 1.0, "both_ends_gateway")]
+    folder = write_inputs(tmp_path / "x72y429", sites=sites, receiver=(RX, *RX_ROW[1:3], 1.0))
+    assert run(folder) == 0
+    rows = [
+        line
+        for line in (folder / "crossing.md").read_text(encoding="utf-8").splitlines()
+        if line.startswith(f"| {SITE_A} | both_ends_gateway | {RX} |")
+    ]
+    assert len(rows) == 1
+    assert rows[0].rstrip().endswith("| 7.1 |")
