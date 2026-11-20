@@ -17,7 +17,24 @@ make nuke    # stops the stack and deletes every project volume, after you type 
 
 The stack's data lives in Docker volumes, storage that Docker keeps apart from any container. Today there are two: `mesh-terrain_warehouse-data` holds the warehouse and Dagster databases, `mesh-terrain_minio-data` holds the object store bucket. `make down` leaves them in place, so the next `make up` finds the same tables and files. `make nuke` is the only target that deletes them, and it deletes every volume of the mesh-terrain project, including any added later. It lists the volumes, asks you to type `nuke`, and deletes nothing if you type anything else. `make nuke CONFIRM=nuke` skips the prompt, at a terminal too, so type it only when you mean it. With no terminal to ask on (CI, a script, a pipe) it refuses unless `CONFIRM=nuke` is on the make command line; a `CONFIRM` in your shell environment or in `.env` does not count. It also refuses, deleting nothing, if a container outside the stack still uses one of the volumes. After a nuke, `make up` recreates empty volumes with the schemas and the bucket, and `make check` reloads the dbt seeds. Snapshots (the MQTT capture, downloaded elevation and lidar tiles) are kept in folders on the host under `C:/Users/Casey/mesh-terrain-data/snapshots/`, never in these volumes, so a nuke cannot touch them.
 
-`make up` copies `.env.example` to `.env` if it is missing. Dagster is at http://localhost:3000, the warehouse at localhost:5433 (database `mesh_terrain`, user `mesh`), the object store API at localhost:9000 and its console at localhost:9001 (user `minio`). `make fmt` formats; `make reproduce` will rebuild every asset from the registered snapshots once Phase 1 lands the loader.
+`make up` copies `.env.example` to `.env` if it is missing, and then stops until you have generated the credentials in it (Credentials, below). Dagster is at http://localhost:3000, the warehouse at localhost:5433 (database `mesh_terrain`, user `mesh`), the object store API at localhost:9000 and its console at localhost:9001, each reachable from this machine only: every published port is bound to 127.0.0.1. `make fmt` formats; `make reproduce` will rebuild every asset from the registered snapshots once Phase 1 lands the loader.
+
+### Credentials
+
+`.env.example` holds placeholders for `WAREHOUSE_PASSWORD`, `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`, and anyone can read them in this repository, so never keep them. `make up` and `make rotate-owner-password` refuse to start while `.env` holds one of them or an empty value; the message names the variable, never a value. This Git Bash command writes a new random value for each of the three straight into `.env`, without printing any (run it once per variable you want to change by listing only that name):
+
+```
+for name in WAREHOUSE_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do sed -i "s|^${name}=.*|${name}=$(openssl rand -hex 24)|" .env; done
+```
+
+On a fresh volume Postgres takes `WAREHOUSE_PASSWORD` when it creates the database, and MinIO reads its root user and password from `.env` every time it starts. An existing warehouse keeps the password it was created with, so changing `WAREHOUSE_PASSWORD` later takes these steps, in this order:
+
+1. `make down` stops every container; the volumes are kept.
+2. Generate the new value in `.env` with the command above.
+3. `make rotate-owner-password` starts the warehouse alone and sets the owner's password to the new value. It logs in through the container's local socket, which the image trusts without a password, the same way the warehouse's health check does, so it never needs the old password and cannot lock the owner out. The new value reaches psql inside the container by name, and nothing prints or logs it.
+4. `make up` starts everything else. The Dagster containers and the object store take the new values from `.env` as they start, and the host commands (dbt, the loaders, the tests) read `.env` on every run, so nothing else needs restarting.
+
+If the rotation stops partway, the owner keeps its old password: the change is a single statement in one transaction. Until it succeeds, anything that logs in over the network with the new value from `.env` is refused, Dagster's start in `make up` included. Rerun `make rotate-owner-password` once the cause is fixed (the socket login does not depend on either password), or put the old value back in `.env`.
 
 To run the pre-commit hooks on every commit: `uv run pre-commit install`.
 
