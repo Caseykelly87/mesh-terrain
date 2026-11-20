@@ -309,6 +309,7 @@ jobs:
           test ! -e "$runs/fixture-itm.partial"
           jq -e '.itm_source_commit | test("^[0-9a-f]{40}$")' "$runs/fixture-itm/manifest.json"
           jq -e '.engine_git_commit == env.GITHUB_SHA' "$runs/fixture-itm/manifest.json"
+          jq -e '.engine_git_dirty == false' "$runs/fixture-itm/manifest.json"
       - run: make check
       - if: always()
         run: docker compose logs --no-color dagster-migrate dagster-webserver dagster-daemon minio-bootstrap
