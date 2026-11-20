@@ -47,7 +47,7 @@ The tests, and the dbt builds that `make check` and `make dbt-build` run, connec
 Only the main checkout's `.env` sets the two values; `.env.example` lists the names commented out, with placeholders, so a worktree's `.env` copied from it sets neither. A worktree never gets a copy of the main `.env`, which holds `NODE_ID_HMAC_KEY`. Instead, a check in a worktree starts with a line that exports the two lines of the main checkout's `.env` and nothing else (`grep` reads the file and passes on only lines that start with those two names, and no file is written), joined with `&&` to the make command in one Git Bash command. They must run in the same shell: an export lasts only as long as its shell, and an agent's tool starts a new shell for each call, so an export run on its own is gone before the make command starts. For example:
 
 ```
-while IFS= read -r line; do export "$line"; done < <(grep -E '^WAREHOUSE_TEST_(USER|PASSWORD)=' /c/Users/Casey/Desktop/GEO/mesh-terrain/.env | tr -d '\r') && make check DBT_DEV_TARGET=dev_ta
+while IFS= read -r line; do export "$line"; done < <(grep -E '^WAREHOUSE_TEST_(USER|PASSWORD)=' "$(git rev-parse --path-format=absolute --git-common-dir)/../.env" | tr -d '\r') && make check DBT_DEV_TARGET=dev_ta
 ```
 
 A value from the shell wins over any `.env` that still sets one, and `make check`, `make dbt-build` and `make test-role` stop before running anything when either is missing. In the main checkout itself the `.env` lines are enough. CI sets both in the workflow, with values for its throwaway warehouse only.

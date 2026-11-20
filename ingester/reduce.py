@@ -97,8 +97,6 @@ MESHSTL_WINDOW = (
     datetime(2026, 10, 23, 22, 9, tzinfo=UTC),
     datetime(2026, 10, 24, 22, 9, tzinfo=UTC),
 )
-PUBLIC_DIR = Path("C:/Users/Casey/mesh-terrain-data/spike-capture")
-MESHSTL_DIR = Path("C:/Users/Casey/mesh-terrain-data/meshstl-capture")
 
 
 @dataclass(frozen=True)
@@ -482,14 +480,21 @@ def reduce_capture(
     return finish(partial)
 
 
-def main() -> None:
-    """Reduce the 2026-10-22 archive into its snapshot; needs NODE_ID_HMAC_KEY."""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--public", type=Path, default=PUBLIC_DIR)
-    parser.add_argument("--meshstl", type=Path, default=MESHSTL_DIR)
-    parser.add_argument("--workers", type=int, default=11)
-    args = parser.parse_args()
+def main(argv: list[str] | None = None) -> None:
+    """Reduce the 2026-10-22 archive into its snapshot; needs NODE_ID_HMAC_KEY.
+
+    Args:
+        argv: The command-line arguments; None reads them from sys.argv.
+    """
     settings = get_ingester_settings()
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--public", type=Path, default=settings.public_capture_dir)
+    parser.add_argument("--meshstl", type=Path, default=settings.meshstl_capture_dir)
+    parser.add_argument("--workers", type=int, default=11)
+    args = parser.parse_args(argv)
+    for flag, variable in (("public", "PUBLIC_CAPTURE_DIR"), ("meshstl", "MESHSTL_CAPTURE_DIR")):
+        if getattr(args, flag) is None:
+            parser.error(f"set {variable} in .env or pass --{flag}")
     sources = [
         Source(Broker.PUBLIC, args.public),
         Source(Broker.MESHSTL, args.meshstl, *MESHSTL_WINDOW),

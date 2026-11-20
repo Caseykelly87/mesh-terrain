@@ -210,8 +210,9 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --frozen
-      # .env.example names Casey's snapshots folder. The runner mounts an empty
-      # folder instead, which is enough to check that the mount is read-only.
+      # .env.example names data/snapshots in the checkout, which Docker would
+      # create owned by root on the runner. The runner mounts an empty folder of
+      # its own instead, which is enough to check that the mount is read-only.
       - name: point the snapshot mount at an empty folder
         run: |
           make env
