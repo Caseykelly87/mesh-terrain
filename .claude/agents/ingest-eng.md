@@ -51,6 +51,8 @@ Add only your own lines to the shared sections of `docs/STATUS.md` and never edi
 
 Never run warehouse tests with `-s`, `--capture=no`, `--capture=tee-sys`, `--pdb`, `--trace` or `--full-trace`: output they print is not a pytest report, so the test role's values are not scrubbed from it; a pytest INTERNALERROR stays the one case left (Casey, issue #55 comment 7025664165, item 2).
 
+Security findings stay in the session until fixed, never on GitHub: no PR, issue, comment or commit describes one, or quotes a message that does, until its fix has merged and been applied; report them to the lead only (Casey, 2026-11-19).
+
 ## Stop and ask
 
 - Before any capture run, and before any run against the MeshSTL broker in particular.

@@ -187,6 +187,7 @@ Coverage target: 80 percent on `terrain/`, `engine/` and `ingester/`. No target 
 - Geometry: store SRID 4326, compute in EPSG:26915. Every function that takes coordinates says which CRS it expects in its signature or docstring.
 - SQL: lowercase keywords, one clause per line, CTEs over nested subqueries, `dbt` models under 150 lines or split.
 - Secrets: `.env` locally (gitignored), SSM in cloud. `.env.example` lists every variable with a comment.
+- Security findings stay in the session until fixed, never on GitHub: no PR, issue, comment or commit describes one, or quotes a message that does, until its fix has merged and been applied (Casey, 2026-11-19).
 - Node ids are pseudonymised with a keyed hash (HMAC-SHA-256, `NODE_ID_HMAC_KEY`) at capture or reduction, before anything lands on disk (ADR 0005). No real node id exists in the landing zone or the warehouse.
 - Every input is a snapshot with an id, capture date, source URL, licence and sha256 manifest (contract rule `snp_01`). Nothing reads a file that is not in a registered snapshot's manifest; nothing overwrites a snapshot.
 - SQL from Python is always parameterised; no string formatting into a query, ever.
