@@ -3,14 +3,21 @@
 The colour classes are a pure function and are tested value by value. The
 synthetic-run guard is tested on a tiny run folder written here, with a 4 by 4
 coverage GeoTIFF, two stamped point layers and a manifest; nothing is read
-from a real run. The rendered PNG is checked by eye in the PR, so the one
-end-to-end test below only checks that a paletted PNG with a transparent
-nodata entry is written.
+from a real run. The rendered PNG is checked by eye in the PR; the end-to-end
+tests check only that its pixels are the tested classes, enlarged, and that a
+refused run writes nothing.
+
+`main` configures structlog with logger caching on, which would fix lazy
+loggers for the rest of the session and hide them from a later
+`capture_logs()` in another file (`tests/engine_fixture.py`,
+`no_logger_caching`). The `isolated_logging` fixture keeps caching off while a
+test runs and restores the previous configuration afterwards.
 """
 
 import hashlib
 import importlib.util
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 
@@ -19,13 +26,20 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 import rasterio
+import structlog
+import yaml
+from affine import Affine
 from rasterio.transform import from_origin
+from structlog.testing import capture_logs
 
+from engine.config import load_config
 from engine.positions_marker import stamp_positions
 
 REPO = Path(__file__).resolve().parent.parent
 SCRIPT = REPO / "web" / "figures" / "coverage_png.py"
 COVERAGE_NAME = "coverage_site-a_knife_edge.tif"
+FIXTURE_CONFIG = REPO / "engine" / "fixtures" / "fixture-run.yaml"
+NORTH_UP = from_origin(725_000.0, 4_285_040.0, 10.0, 10.0)
 
 
 def load_script() -> ModuleType:
@@ -41,6 +55,21 @@ figure = load_script()
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.fixture
+def isolated_logging(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    saved = structlog.get_config()
+    configure = figure.configure_logging
+
+    def configure_without_caching(log_format: str) -> None:
+        configure(log_format)
+        structlog.configure(cache_logger_on_first_use=False)
+
+    monkeypatch.setattr(figure, "configure_logging", configure_without_caching)
+    structlog.configure(cache_logger_on_first_use=False)
+    yield
+    structlog.configure(**saved)
 
 
 # Classes: 0 nodata, 1 below 60 dB, 2 for [60, 70), ..., 6 for [100, 110), 7 from 110 up.
@@ -148,7 +177,7 @@ def write_layer(path: Path, marker: str | None) -> Path:
     return path
 
 
-def write_coverage(path: Path, values: np.ndarray) -> Path:
+def write_coverage(path: Path, values: np.ndarray, transform: Affine = NORTH_UP) -> Path:
     profile = {
         "driver": "GTiff",
         "width": values.shape[1],
@@ -156,7 +185,7 @@ def write_coverage(path: Path, values: np.ndarray) -> Path:
         "count": 1,
         "dtype": "float32",
         "crs": "EPSG:26915",
-        "transform": from_origin(725_000.0, 4_285_040.0, 10.0, 10.0),
+        "transform": transform,
         "nodata": -9999.0,
     }
     with rasterio.open(path, "w", **profile) as dst:
@@ -257,17 +286,60 @@ def test_read_coverage_turns_nodata_into_nan(tmp_path: Path) -> None:
     assert np.isnan(values[0, 0]) and values[0, 1] == 55.0
 
 
+@pytest.mark.parametrize(
+    "transform",
+    [
+        Affine(10.0, 0.0, 725_000.0, 0.0, 10.0, 4_285_000.0),
+        Affine(-10.0, 0.0, 725_040.0, 0.0, -10.0, 4_285_040.0),
+        from_origin(725_000.0, 4_285_040.0, 10.0, 20.0),
+        Affine(10.0, 1.0, 725_000.0, 1.0, -10.0, 4_285_040.0),
+    ],
+    ids=["south-up", "east-to-west", "not-square", "rotated"],
+)
+def test_read_coverage_refuses_a_raster_that_is_not_north_up_with_square_cells(
+    tmp_path: Path, transform: Affine
+) -> None:
+    coverage = write_coverage(tmp_path / COVERAGE_NAME, np.ones((2, 2)), transform)
+    with pytest.raises(figure.FigureRefusedError, match="north-up"):
+        figure.read_coverage(coverage)
+
+
+def test_point_layer_names_are_the_paths_the_engine_records_in_the_manifest() -> None:
+    names = figure.point_layer_names(FIXTURE_CONFIG)
+    recorded = load_config(FIXTURE_CONFIG).input_names
+    assert names == {field: recorded[field] for field in ("tx_sites", "rx_points")}
+    assert names == {
+        field: yaml.safe_load(FIXTURE_CONFIG.read_text(encoding="utf-8"))[field] for field in names
+    }
+
+
+@pytest.mark.usefixtures("isolated_logging")
+def test_render_logs_its_start_and_its_end_with_a_duration(tmp_path: Path) -> None:
+    coverage = write_run(tmp_path, "synthetic", "synthetic")
+    with capture_logs() as logs:
+        figure.render(coverage, config_of(tmp_path), tmp_path / "coverage.png")
+    assert [entry["event"] for entry in logs] == ["coverage_png_started", "coverage_png_written"]
+    assert logs[0]["source"] == COVERAGE_NAME and logs[0]["config"] == "run.yaml"
+    assert logs[1]["duration_s"] >= 0.0
+
+
+@pytest.mark.usefixtures("isolated_logging")
 @pytest.mark.filterwarnings("ignore::rasterio.errors.NotGeoreferencedWarning")
-def test_main_writes_a_paletted_png_with_transparent_nodata(tmp_path: Path) -> None:
+def test_main_writes_the_classes_enlarged_with_transparent_nodata(tmp_path: Path) -> None:
     coverage = write_run(tmp_path, "synthetic", "synthetic")
     out = tmp_path / "figure" / "coverage.png"
     assert figure.main([str(coverage), str(config_of(tmp_path)), str(out)]) == 0
+    expected = figure.upscale(
+        figure.class_indices(figure.read_coverage(coverage)), figure.scale_factor(4)
+    )
     with rasterio.open(out) as png:
-        assert png.count == 1 and png.width == 4 * figure.scale_factor(4)
+        assert png.count == 1
+        assert np.array_equal(png.read(1), expected)
         assert png.colormap(1)[0] == (0, 0, 0, 0)
     assert sorted(path.name for path in out.parent.iterdir()) == ["coverage.png"]
 
 
+@pytest.mark.usefixtures("isolated_logging")
 def test_main_refuses_a_real_run_and_writes_nothing(tmp_path: Path) -> None:
     coverage = write_run(tmp_path, "real", "synthetic")
     out = tmp_path / "figure.png"
