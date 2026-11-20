@@ -2,9 +2,11 @@
 
 Every published port listens on 127.0.0.1 only, so nothing on another
 machine reaches the warehouse, Dagster or MinIO. `make up` and
-`make rotate-owner-password` refuse to start while WAREHOUSE_PASSWORD,
-MINIO_ROOT_USER or MINIO_ROOT_PASSWORD in `.env` is empty or still the
-`.env.example` default; the check names the variable, never a value.
+`make rotate-owner-password` depend on `make check-credentials`, which
+refuses while WAREHOUSE_PASSWORD, MINIO_ROOT_USER or MINIO_ROOT_PASSWORD in
+`.env` is empty or equals any of the three `.env.example` placeholders, also
+in quotes or with surrounding whitespace; it names the variable, never a
+value, and prints none even when tracing is inherited.
 `make rotate-owner-password` sets the running owner role's password from
 `.env` through the warehouse container's local socket, which needs no
 password, so it cannot lock the owner out.
