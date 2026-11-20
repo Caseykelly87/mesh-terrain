@@ -4,8 +4,9 @@ Paths between real endpoints are listed one by one with the site's role,
 yes or no and the distance from the path to the nearest tall cell, or the
 section says the run has no real receiver; grid paths are counted per site.
 The file holds no coordinate of any node, real or made up. Box reaches (the
-distance from a box's centre to its farthest corner) are listed because the
-engine's draws move each end inside its box; they come from position
+distance from a box's centre to the farthest corner of the box the draws use,
+widened to the GPS error floor, ADR 0009) are listed because the engine's
+draws move each end inside that box; they come from position
 precision, so the file and the printed summary are read
 locally only and never posted, and issue #44 gets counts only (the lead's
 rule; the repository is public).
@@ -33,7 +34,8 @@ class Site:
     Attributes:
         site_id: Pseudonym.
         role: `both_ends_gateway` or `gateway_only_gateway`.
-        reach_m: Distance from the box centre to its farthest corner, metres.
+        reach_m: Distance from the box centre to the farthest corner of the drawn
+            box, under the GPS error floor, metres.
         in_run: Whether its box plus 50 m lies inside the DEM.
     """
 
@@ -88,8 +90,9 @@ def crossing_markdown(report: CrossingReport) -> str:
         f"same place. A path crosses when the straight line between its site's and its "
         f"receiver's box centres passes within {report.within_m:g} m of a tall cell's square. "
         "The engine draws each end anywhere inside its box, so a drawn path can lie up to the "
-        "larger box reach, the distance from a box's centre to its farthest corner, either "
-        "side of the centre line.",
+        "larger box reach, the distance from a box's centre to the farthest corner of the box "
+        "the draws use, widened to the GPS error floor (ADR 0009), either side of the centre "
+        "line.",
         "",
         "| DEM snapshot | DSM snapshot | tall cells |",
         "| --- | --- | --- |",
@@ -146,7 +149,7 @@ def _real_lines(report: CrossingReport) -> list[str]:
         "## Paths between real endpoints",
         "",
         f"| site_id | role | rx_id | within {report.within_m:g} m | closest distance (m) "
-        "| larger box reach (m) |",
+        "| larger drawn box reach (m) |",
         "| --- | --- | --- | --- | --- | --- |",
         *rows,
     ]

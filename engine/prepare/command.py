@@ -67,6 +67,7 @@ from engine.prepare.crossing import CROSSING_DISTANCE_M, TALL_CELL_M, path_cross
 from engine.prepare.extent import outside_extent
 from engine.prepare.report import CrossingReport, Site, crossing_markdown
 from engine.prepare.run_config import (
+    POSITION_FLOOR_M,
     RECEIVERS_FILE,
     SITES_FILE,
     TILE_SNAPSHOTS,
@@ -390,12 +391,12 @@ def _crossing_report(
             Site(
                 site_id=s.endpoint_id,
                 role=roles[s.endpoint_id],
-                reach_m=s.box.reach_m,
+                reach_m=s.box.drawn_reach_m(POSITION_FLOOR_M),
                 in_run=s.endpoint_id in run_ids,
             )
             for s in sites
         ],
-        receiver_reaches={r.endpoint_id: r.box.reach_m for r in receivers},
+        receiver_reaches={r.endpoint_id: r.box.drawn_reach_m(POSITION_FLOOR_M) for r in receivers},
         real=path_crossings(in_run, receivers, cells),
         grid=path_crossings(in_run, grid, cells),
         real_receivers=real_receivers,
