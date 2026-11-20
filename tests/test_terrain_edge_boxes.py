@@ -87,7 +87,7 @@ def test_corners_are_south_west_south_east_north_east_north_west() -> None:
     ]
     for corner, want in zip(corners, expected, strict=True):
         assert corner == pytest.approx(want, abs=1e-6)
-    west, south, east, north = TX_CELL.extent_m()
+    west, south, east, north = TX_CELL.extent_m(floor_m=0.0)
     assert (west, south) == (min(c[0] for c in corners), min(c[1] for c in corners))
     assert (east, north) == (max(c[0] for c in corners), max(c[1] for c in corners))
 

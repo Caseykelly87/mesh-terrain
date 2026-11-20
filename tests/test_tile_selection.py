@@ -10,6 +10,7 @@ No test reads the real snapshot.
 """
 
 import math
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -22,13 +23,17 @@ from engine_inputs_fixture import (
     FakeNode,
     box_centre_m,
 )
+from pyproj import Transformer
 
 from engine.config import SnapshotIds
 from engine.errors import ConfigError
 from engine.grid import run_grid
 from engine.points import Endpoint
+from engine.prepare.extent import outside_extent
+from engine.prepare.run_config import POSITION_FLOOR_M
 from engine.snapshots import resolve_snapshots
-from engine.terrain_build import check_covers
+from engine.terrain_build import check_covers, grid_inside
+from engine.terrain_build import dem_extent as engine_dem_extent
 from ingester import tile_selection
 from ingester.link_cells import Cell, LinkBox, box_around, cell_of
 from ingester.link_pairs import (
@@ -714,7 +719,9 @@ def test_refuses_a_pair_without_its_box_for_a_node_at_two_places_without_naming_
 
 def _engine_covers(dem_snapshot: object, centre_xy_m: tuple[float, float], half_m: float) -> bool:
     box = EndpointBox(centre_xy_m=centre_xy_m, half_width_m=half_m)
-    grid = run_grid([Endpoint(endpoint_id="x", box=box)], resolution_m=1.0)
+    grid = run_grid(
+        [Endpoint(endpoint_id="x", box=box)], resolution_m=1.0, floor_m=POSITION_FLOOR_M
+    )
     try:
         check_covers(dem_snapshot, grid)  # type: ignore[arg-type]
     except ConfigError:
@@ -751,7 +758,9 @@ def test_the_dem_edge_check_reads_the_whole_box_not_its_inscribed_square() -> No
     edges = edge_box_of(box)
     square = EndpointBox(centre_xy_m=edges.centre_xy_m, half_width_m=box.smaller_half_width_m)
     grid = [
-        run_grid([Endpoint(endpoint_id="x", box=candidate)], resolution_m=1.0)
+        run_grid(
+            [Endpoint(endpoint_id="x", box=candidate)], resolution_m=1.0, floor_m=POSITION_FLOOR_M
+        )
         for candidate in (square, edges)
     ]
     assert grid[0].north_m < grid[1].north_m
@@ -760,3 +769,38 @@ def test_the_dem_edge_check_reads_the_whole_box_not_its_inscribed_square() -> No
     assert not inside_dem(edges, extent)
     placed = PlacedNode(pseudonym("G1"), "both_ends_gateway", box, False)
     assert not inside_dem(placed.edge_box, extent)
+
+
+_TO_DEGREES = Transformer.from_crs(26915, 4326, always_xy=True)
+
+
+def _small_square(easting_m: float, northing_m: float) -> EndpointBox:
+    """A square 4 m across, under the 10 m the 5 m floor widens a box to."""
+    return EndpointBox(centre_xy_m=(easting_m, northing_m), half_width_m=2.0)
+
+
+def _small_cell(easting_m: float, northing_m: float) -> EdgeBox:
+    """A 32-bit cell, 1e-7 degrees on a side, at a point."""
+    longitude_deg, latitude_deg = _TO_DEGREES.transform(easting_m, northing_m)
+    south_i, west_i = round(latitude_deg * 1e7), round(longitude_deg * 1e7)
+    return EdgeBox(south_i=south_i, north_i=south_i + 1, west_i=west_i, east_i=west_i + 1)
+
+
+@pytest.mark.parametrize("make_box", [_small_square, _small_cell], ids=["square", "edges"])
+def test_a_small_box_at_the_dem_edge_fails_under_the_floor_as_prepare_does(
+    make_box: Callable[[float, float], EndpointBox | EdgeBox],
+) -> None:
+    """ADR 0009: the DEM check widens a box under 10 m across to the floor, as prepare's does.
+
+    The subtile DEM's west edge is 725 000 m. A box 52 m east of it passes with
+    no floor (its grid's west edge, 50 m out and rounded down, is 725 000 m)
+    and fails with the 5 m floor (724 990 m). engine.prepare leaves it out.
+    """
+    ids = SnapshotIds(dem=SUBTILE_DEM, dsm=None, canopy=None, buildings=None, p1812_maps=None)
+    dem = resolve_snapshots(ids, FIXTURE_SNAPSHOTS)["dem"]
+    box = make_box(725_052.0, 4_285_500.0)
+    endpoint = Endpoint(endpoint_id="small", box=box)
+    without_floor = run_grid([endpoint], resolution_m=1.0, floor_m=0.0)
+    assert grid_inside(without_floor, engine_dem_extent(dem))
+    assert not inside_dem(box, dem_extent(FIXTURE_SNAPSHOTS, SUBTILE_DEM))
+    assert outside_extent([endpoint], dem) == ["small"]
