@@ -119,7 +119,7 @@ esac
 # not run (Casey, PR #43, 1 (a)). Untracked files count, as engine_git_dirty
 # counts them; ignored files such as .env do not. Last, so every other
 # refusal still shows in a tree that is being edited.
-changes=$(git status --porcelain 2> /dev/null) ||
+changes=$(git status --porcelain --untracked-files=normal 2> /dev/null) ||
     refuse "cannot tell whether the checkout has uncommitted changes: git status failed (not a git checkout?)"
 [ -z "$changes" ] ||
     refuse "the checkout has uncommitted changes, and the run would record HEAD for code it did not run; commit or stash them first:
