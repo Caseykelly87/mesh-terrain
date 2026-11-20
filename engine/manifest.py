@@ -6,7 +6,9 @@ provenance fields of `engine.provenance` (Casey, PR #32), which make it
 and `box_form` (`rectangle`, `square` or `point`), which make it 1.2.0
 (ADR 0008, Casey's Q2 (b) on PR #73: a run's manifest says whether its draws
 used rectangles or squares without opening the layers), and the run's
-`position_floor_m`, which makes it 1.3.0 (ADR 0009). Every input and
+`position_floor_m`, which makes it 1.3.0 (ADR 0009); 1.3.1 records
+`engine_git_dirty` as true or false, never null (Casey, issue #55 comment
+7051712349, Q1 (a)). Every input and
 artifact carries its file sha256; every artifact also carries its
 `content_sha256` (`engine.hashing`), and Parquet artifacts their row count.
 Input paths are written as the config names them, and profile files as

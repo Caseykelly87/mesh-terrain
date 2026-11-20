@@ -13,10 +13,11 @@ ENGINE_VERSION = "0.3.0"
 SCHEMA_VERSION = "1.2.0"
 """Version of the artifact columns (`docs/INTERFACE.md`); 1.2.0 adds `seed` (Casey, PR #42)."""
 
-MANIFEST_VERSION = "1.3.0"
+MANIFEST_VERSION = "1.3.1"
 """Version of the manifest's fields; 1.1.0 adds the code provenance fields, 1.2.0 each
 point layer's `input_schema_version` and `box_form` (ADR 0008, Casey's Q2 (b)), 1.3.0
-`position_floor_m` (ADR 0009)."""
+`position_floor_m` (ADR 0009); 1.3.1 makes `engine_git_dirty` true or false, never null
+(Casey, issue #55 comment 7051712349, Q1 (a))."""
 
 INPUT_SCHEMA_VERSION = "1.1.0"
 """The newest point layer schema the engine reads; 1.0.0 is the id, the geometry and

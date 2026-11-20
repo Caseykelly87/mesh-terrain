@@ -6,8 +6,12 @@ Six manifest fields (manifest_version 1.1.0) trace a run to exact code:
   and whether `git status --porcelain` lists anything (tracked changes or
   untracked files), leaving out the run's own output folder when it lies
   inside the checkout, so a run written there does not mark the next one
-  dirty. Where there is no checkout, as in the image, the commit comes from
-  `ENGINE_GIT_COMMIT` with a warning, and `engine_git_dirty` is null.
+  dirty. Where there is no checkout, as in the image, both come from the
+  environment with a warning: `ENGINE_GIT_COMMIT` and `ENGINE_GIT_DIRTY`,
+  which must be exactly `true` or `false` (`make engine` passes the host
+  checkout's status). Since manifest 1.3.1 `engine_git_dirty` is never null:
+  a run whose status is unknown is refused (Casey, issue #55 comment
+  6961809084, item 11).
 - `itm_library_sha256`, `itm_source_commit`: the sha256 of the file at
   `ITM_LIBRARY_PATH` and the NTIA commit it was built from
   (`ITM_SOURCE_COMMIT`, which the image records); null when the run does not
@@ -41,6 +45,7 @@ from terrain.path_loss import Model
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMIT = re.compile(r"[0-9a-f]{40}")
 PY1812_ARCHIVE = re.compile(r"/archive/([0-9a-f]{40})\.tar\.gz$")
+DIRTY = {"true": True, "false": False}
 
 log = structlog.get_logger(component="engine.provenance")
 
@@ -50,7 +55,7 @@ class Provenance:
     """The code provenance fields of a run manifest; see the module docstring."""
 
     engine_git_commit: str
-    engine_git_dirty: bool | None
+    engine_git_dirty: bool
     itm_library_sha256: str | None
     itm_source_commit: str | None
     py1812_commit: str | None
@@ -87,26 +92,39 @@ def collect_provenance(
     )
 
 
-def engine_commit(
-    settings: EngineSettings, output_dir: Path | None = None
-) -> tuple[str, bool | None]:
-    """The engine's commit and whether the checkout differs from it."""
+def engine_commit(settings: EngineSettings, output_dir: Path | None = None) -> tuple[str, bool]:
+    """The engine's commit and whether the checkout differs from it.
+
+    Raises:
+        ConfigError: when there is no checkout and the environment does not
+            give both a 40-character commit and a status of true or false.
+    """
     try:
         head = _git("rev-parse", "HEAD").strip()
         status = _git("status", "--porcelain", "--", ".", *_excluded(output_dir))
     except (OSError, subprocess.CalledProcessError):
-        if settings.engine_git_commit and COMMIT.fullmatch(settings.engine_git_commit):
-            log.warning(
-                "engine_commit_from_environment",
-                reason="no git checkout",
-                commit=settings.engine_git_commit,
-            )
-            return settings.engine_git_commit, None
+        return _commit_from_environment(settings)
+    return head, bool(status.strip())
+
+
+def _commit_from_environment(settings: EngineSettings) -> tuple[str, bool]:
+    """The commit and status `make engine` passed, where there is no checkout to ask."""
+    commit = settings.engine_git_commit
+    if not commit or not COMMIT.fullmatch(commit):
         raise ConfigError(
             "the engine's commit is unknown: no git checkout, and ENGINE_GIT_COMMIT is not a "
             "40-character commit; the image sets it at build"
-        ) from None
-    return head, bool(status.strip())
+        )
+    dirty = DIRTY.get(settings.engine_git_dirty or "")
+    if dirty is None:
+        raise ConfigError(
+            "the engine's checkout status is unknown: no git checkout, and ENGINE_GIT_DIRTY is "
+            f"{settings.engine_git_dirty!r}, not true or false; make engine passes it"
+        )
+    log.warning(
+        "engine_commit_from_environment", reason="no git checkout", commit=commit, dirty=dirty
+    )
+    return commit, dirty
 
 
 def _excluded(output_dir: Path | None) -> list[str]:
