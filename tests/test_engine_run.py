@@ -622,7 +622,13 @@ def test_the_hata_variant_comes_from_the_samplers_own_draws(two_runs: tuple[Path
     assert len(boxed) == 12
     for _, row in boxed.iterrows():
         seed = draw_seed(20261108, link_id(row["site_id"], row["rx_id"]))
-        pairs = draw_endpoints(sites[row["site_id"]], receivers[row["rx_id"]], 16, seed)
+        pairs = draw_endpoints(
+            sites[row["site_id"]],
+            receivers[row["rx_id"]],
+            16,
+            seed,
+            floor_m=fixture_fields()["position_floor_m"],
+        )
         tx_share = float(np.median([footprints.share_within(t) for t, _ in pairs]))
         rx_share = float(np.median([footprints.share_within(r) for _, r in pairs]))
         assert row["hata_variant"] == hata_variant(tx_share, rx_share)
@@ -912,7 +918,13 @@ def test_building_draws_count_the_samplers_own_endpoint_pairs(two_runs: tuple[Pa
     for _, row in boxed.iterrows():
         seed = draw_seed(20261108, link_id(row["site_id"], row["rx_id"]))
         assert row["seed"] == seed
-        pairs = draw_endpoints(sites[row["site_id"]], receivers[row["rx_id"]], 16, seed)
+        pairs = draw_endpoints(
+            sites[row["site_id"]],
+            receivers[row["rx_id"]],
+            16,
+            seed,
+            floor_m=fixture_fields()["position_floor_m"],
+        )
         assert row["tx_building_draws"] == sum(pixels.contains(t) for t, _ in pairs)
         assert row["rx_building_draws"] == sum(pixels.contains(r) for _, r in pairs)
         partial += 0 < row["rx_building_draws"] < 16

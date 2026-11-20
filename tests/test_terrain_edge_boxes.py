@@ -55,7 +55,7 @@ def as_units(points: list[XY]) -> tuple[np.ndarray, np.ndarray]:
 def ends(
     box_a: EdgeBox | EndpointBox, box_b: EdgeBox | EndpointBox, n: int = MANY
 ) -> tuple[list[XY], list[XY]]:
-    pairs = draw_endpoints(box_a, box_b, n_draws=n, seed=RUN_SEED)
+    pairs = draw_endpoints(box_a, box_b, n_draws=n, seed=RUN_SEED, floor_m=0.0)
     return [tx for tx, _ in pairs], [rx for _, rx in pairs]
 
 
@@ -162,18 +162,18 @@ def test_a_square_end_draws_the_same_points_whatever_the_other_end() -> None:
 
 
 def test_one_draw_is_the_two_centres_and_a_seed_redraws_exactly() -> None:
-    assert draw_endpoints(TX_CELL, RX_CELL, n_draws=1, seed=RUN_SEED) == [
+    assert draw_endpoints(TX_CELL, RX_CELL, n_draws=1, seed=RUN_SEED, floor_m=0.0) == [
         (TX_CELL.centre_xy_m, RX_CELL.centre_xy_m)
     ]
-    assert draw_endpoints(TX_CELL, RX_CELL, 16, seed=7) == draw_endpoints(
-        TX_CELL, RX_CELL, 16, seed=7
+    assert draw_endpoints(TX_CELL, RX_CELL, 16, seed=7, floor_m=0.0) == draw_endpoints(
+        TX_CELL, RX_CELL, 16, seed=7, floor_m=0.0
     )
 
 
 def test_flat_plane_median_equals_the_centre_result() -> None:
     far = cell_box(755_000.0, 4_285_000.0)
     summary = sample_link(
-        "flat", TX_CELL, far, flat_profiles, free_space, run_seed=RUN_SEED, n_draws=16
+        "flat", TX_CELL, far, flat_profiles, free_space, run_seed=RUN_SEED, n_draws=16, floor_m=0.0
     )
     centre_m = math.dist(TX_CELL.centre_xy_m, far.centre_xy_m)
 
@@ -218,7 +218,7 @@ def test_edges_are_checked(edges: tuple[object, ...], message: str) -> None:
 def test_first_edge_box_draw_is_pinned_for_a_fixed_seed() -> None:
     # The first of a box's two draw numbers moves longitude and the second
     # latitude; swapping them moves every edge-box draw by hundreds of metres.
-    first = draw_endpoints(TX_CELL, RX_CELL, n_draws=16, seed=20261108)[0]
+    first = draw_endpoints(TX_CELL, RX_CELL, n_draws=16, seed=20261108, floor_m=0.0)[0]
 
     assert first[0] == pytest.approx((725456.6462583179, 4284488.885814736), abs=1e-6)
     assert first[1] == pytest.approx((727655.2808909145, 4287941.279346285), abs=1e-6)
@@ -227,7 +227,9 @@ def test_first_edge_box_draw_is_pinned_for_a_fixed_seed() -> None:
 def test_the_first_unit_moves_longitude_and_the_second_latitude() -> None:
     south_west, south_east, _, north_west = TX_CELL.corners_xy_m
     almost_one = math.nextafter(1.0, 0.0)
-    corners = TX_CELL.place(np.array([[-1.0, -1.0], [almost_one, -1.0], [-1.0, almost_one]]))
+    corners = TX_CELL.place(
+        np.array([[-1.0, -1.0], [almost_one, -1.0], [-1.0, almost_one]]), floor_m=0.0
+    )
 
     assert corners[0] == pytest.approx(south_west, abs=1e-6)
     assert corners[1] == pytest.approx(south_east, abs=1e-3)

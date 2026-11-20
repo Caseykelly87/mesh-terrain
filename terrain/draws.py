@@ -312,7 +312,7 @@ def draw_seed(run_seed: int, link_id: str) -> int:
 
 
 def draw_endpoints(
-    tx: PositionBox, rx: PositionBox, n_draws: int, seed: int, *, floor_m: float = 0.0
+    tx: PositionBox, rx: PositionBox, n_draws: int, seed: int, *, floor_m: float
 ) -> list[tuple[XY, XY]]:
     """Endpoint pairs drawn uniformly inside the two boxes.
 
@@ -355,8 +355,8 @@ def sample_link(
     *,
     run_seed: int,
     n_draws: int = DEFAULT_ENDPOINT_DRAWS,
+    floor_m: float,
     buildings: BuildingPixels | None = None,
-    floor_m: float = 0.0,
 ) -> DrawSummary:
     """Run the models on every draw of one link and summarise the results.
 
@@ -368,9 +368,9 @@ def sample_link(
         quantities: Runs the models on a draw's profiles.
         run_seed: The run's seed.
         n_draws: Number of draws; 1 uses the box centres.
+        floor_m: The GPS error floor under the draws, metres; 0 turns it off.
         buildings: Building pixels of the 1 m grid; None where there is no
             OpenStreetMap snapshot or no 1 m DEM.
-        floor_m: The GPS error floor under the draws, metres; 0 turns it off.
 
     Returns:
         Medians, interquartile ranges, shares, refusal counts and building

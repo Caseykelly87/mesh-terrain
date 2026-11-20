@@ -87,7 +87,7 @@ def test_draw_seed_mixes_the_run_seed_and_the_link_id() -> None:
 
 
 def test_draws_fall_uniformly_inside_each_box() -> None:
-    draws = draw_endpoints(TX, RX, n_draws=4000, seed=5)
+    draws = draw_endpoints(TX, RX, n_draws=4000, seed=5, floor_m=0.0)
     tx_xy = np.array([tx for tx, _ in draws])
     rx_xy = np.array([rx for _, rx in draws])
 
@@ -100,13 +100,17 @@ def test_draws_fall_uniformly_inside_each_box() -> None:
 
 
 def test_single_draw_mode_is_the_pair_of_box_centres() -> None:
-    assert draw_endpoints(TX, RX, n_draws=1, seed=5) == [(TX.centre_xy_m, RX.centre_xy_m)]
+    assert draw_endpoints(TX, RX, n_draws=1, seed=5, floor_m=0.0) == [
+        (TX.centre_xy_m, RX.centre_xy_m)
+    ]
 
 
 def test_same_seed_reproduces_every_number_exactly() -> None:
-    first = sample_link("link-a", TX, RX, flat_profiles, geometry, run_seed=RUN_SEED)
-    again = sample_link("link-a", TX, RX, flat_profiles, geometry, run_seed=RUN_SEED)
-    other = sample_link("link-a", TX, RX, flat_profiles, geometry, run_seed=RUN_SEED + 1)
+    first = sample_link("link-a", TX, RX, flat_profiles, geometry, run_seed=RUN_SEED, floor_m=0.0)
+    again = sample_link("link-a", TX, RX, flat_profiles, geometry, run_seed=RUN_SEED, floor_m=0.0)
+    other = sample_link(
+        "link-a", TX, RX, flat_profiles, geometry, run_seed=RUN_SEED + 1, floor_m=0.0
+    )
 
     assert first == again
     assert first.seed == draw_seed(RUN_SEED, "link-a")
@@ -127,8 +131,12 @@ def test_zero_size_boxes_give_every_draw_equal_to_a_single_draw(tmp_path: Path) 
 
     with rasterio.open(dem_path) as dem:
         builder = MetroProfileBuilder(dem=dem)
-        many = sample_link("link-z", tx, rx, builder, geometry, run_seed=RUN_SEED, n_draws=16)
-        single = sample_link("link-z", tx, rx, builder, geometry, run_seed=RUN_SEED, n_draws=1)
+        many = sample_link(
+            "link-z", tx, rx, builder, geometry, run_seed=RUN_SEED, n_draws=16, floor_m=0.0
+        )
+        single = sample_link(
+            "link-z", tx, rx, builder, geometry, run_seed=RUN_SEED, n_draws=1, floor_m=0.0
+        )
 
     for name in ("fspl_db", "fresnel"):
         assert many.median(name) == single.median(name)
@@ -145,8 +153,8 @@ def test_single_draw_mode_ignores_the_box_size(tmp_path: Path) -> None:
 
     with rasterio.open(dem_path) as dem:
         builder = MetroProfileBuilder(dem=dem)
-        at_points = sample_link("l", *points, builder, geometry, run_seed=1, n_draws=1)
-        in_boxes = sample_link("l", *boxes, builder, geometry, run_seed=1, n_draws=1)
+        at_points = sample_link("l", *points, builder, geometry, run_seed=1, n_draws=1, floor_m=0.0)
+        in_boxes = sample_link("l", *boxes, builder, geometry, run_seed=1, n_draws=1, floor_m=0.0)
 
     assert in_boxes.median("fresnel") == at_points.median("fresnel")
     assert in_boxes.median("fspl_db") == at_points.median("fspl_db")
@@ -169,8 +177,10 @@ def test_flat_plane_median_equals_the_centre_result(tmp_path: Path) -> None:
 
     with open_layers(paths["dem"], dsm=paths["dsm"], canopy=paths["canopy"]) as layers:
         builder = FineProfileBuilder(layers=layers)
-        centre = sample_link("flat", *points, builder, geometry, run_seed=RUN_SEED, n_draws=1)
-        drawn = sample_link("flat", *boxes, builder, geometry, run_seed=RUN_SEED)
+        centre = sample_link(
+            "flat", *points, builder, geometry, run_seed=RUN_SEED, n_draws=1, floor_m=0.0
+        )
+        drawn = sample_link("flat", *boxes, builder, geometry, run_seed=RUN_SEED, floor_m=0.0)
 
     assert drawn.refused_draws == 0
     assert drawn.median("fspl_db") == pytest.approx(centre.median("fspl_db"), abs=0.02)
@@ -188,13 +198,13 @@ def test_refused_draws_are_counted_by_reason_and_left_out_of_every_median() -> N
     seed = draw_seed(RUN_SEED, "link-r")
     kept = [
         flat_profiles(tx, rx)
-        for tx, rx in draw_endpoints(TX, RX, 16, seed)
+        for tx, rx in draw_endpoints(TX, RX, 16, seed, floor_m=0.0)
         if tx[0] <= TX.centre_xy_m[0]
     ]
     kept_fspl = np.array([fspl_db(d.ground.length_m, FREQUENCY_MHZ) for d in kept])
     kept_los = [los_clear(d.ground, 2.0, 2.0) for d in kept]
 
-    summary = sample_link("link-r", TX, RX, builder, geometry, run_seed=RUN_SEED)
+    summary = sample_link("link-r", TX, RX, builder, geometry, run_seed=RUN_SEED, floor_m=0.0)
 
     assert 0 < summary.refused_draws < 16
     assert summary.refused_draws == 16 - len(kept)
@@ -208,7 +218,7 @@ def test_refused_draws_are_counted_by_reason_and_left_out_of_every_median() -> N
 def test_every_draw_refused_leaves_every_number_null() -> None:
     builder = tx_east_of(-math.inf, reason="clutter_nan")
 
-    summary = sample_link("link-n", TX, RX, builder, geometry, run_seed=RUN_SEED)
+    summary = sample_link("link-n", TX, RX, builder, geometry, run_seed=RUN_SEED, floor_m=0.0)
 
     assert summary.refused_draws == 16
     assert summary.refusals == {**NO_REFUSALS, "clutter_nan": 16}
@@ -228,12 +238,19 @@ def test_a_dem_gap_refuses_the_draw_even_for_free_space(tmp_path: Path) -> None:
     rx = EndpointBox(centre_xy_m=centre_xy_m(100, 550), half_width_m=20.0)
     # The tx end reads the gap whenever it falls west of its pixel's centre.
     expected = sum(
-        t[0] < tx.centre_xy_m[0] for t, _ in draw_endpoints(tx, rx, 16, draw_seed(RUN_SEED, "g"))
+        t[0] < tx.centre_xy_m[0]
+        for t, _ in draw_endpoints(tx, rx, 16, draw_seed(RUN_SEED, "g"), floor_m=0.0)
     )
 
     with open_layers(dem_path, canopy=canopy_path) as layers:
         summary = sample_link(
-            "g", tx, rx, FineProfileBuilder(layers=layers), free_space, run_seed=RUN_SEED
+            "g",
+            tx,
+            rx,
+            FineProfileBuilder(layers=layers),
+            free_space,
+            run_seed=RUN_SEED,
+            floor_m=0.0,
         )
 
     assert 0 < expected < 16
@@ -250,7 +267,9 @@ def building_west_of_tx() -> BuildingPixels:
 
 def test_building_draws_count_the_ends_that_land_on_a_building_pixel() -> None:
     seed = draw_seed(RUN_SEED, "link-b")
-    on_roof = sum(tx[0] < TX.centre_xy_m[0] for tx, _ in draw_endpoints(TX, RX, 16, seed))
+    on_roof = sum(
+        tx[0] < TX.centre_xy_m[0] for tx, _ in draw_endpoints(TX, RX, 16, seed, floor_m=0.0)
+    )
 
     summary = sample_link(
         "link-b",
@@ -260,8 +279,11 @@ def test_building_draws_count_the_ends_that_land_on_a_building_pixel() -> None:
         free_space,
         run_seed=RUN_SEED,
         buildings=building_west_of_tx(),
+        floor_m=0.0,
     )
-    without = sample_link("link-b", TX, RX, flat_profiles, free_space, run_seed=RUN_SEED)
+    without = sample_link(
+        "link-b", TX, RX, flat_profiles, free_space, run_seed=RUN_SEED, floor_m=0.0
+    )
 
     assert 0 < on_roof < 16
     assert summary.tx_building_draws == on_roof
@@ -272,11 +294,20 @@ def test_building_draws_count_the_ends_that_land_on_a_building_pixel() -> None:
 
 def test_building_draws_count_refused_draws_too() -> None:
     seed = draw_seed(RUN_SEED, "link-b")
-    on_roof = sum(tx[0] < TX.centre_xy_m[0] for tx, _ in draw_endpoints(TX, RX, 16, seed))
+    on_roof = sum(
+        tx[0] < TX.centre_xy_m[0] for tx, _ in draw_endpoints(TX, RX, 16, seed, floor_m=0.0)
+    )
     builder = tx_east_of(-math.inf)
 
     summary = sample_link(
-        "link-b", TX, RX, builder, free_space, run_seed=RUN_SEED, buildings=building_west_of_tx()
+        "link-b",
+        TX,
+        RX,
+        builder,
+        free_space,
+        run_seed=RUN_SEED,
+        buildings=building_west_of_tx(),
+        floor_m=0.0,
     )
 
     assert summary.refused_draws == 16
@@ -326,7 +357,7 @@ def test_dsm_filled_pixels_are_summarised_per_link(tmp_path: Path) -> None:
 
     with open_layers(paths["dem"], dsm=paths["dsm"]) as layers:
         summary = sample_link(
-            "f", tx, rx, FineProfileBuilder(layers=layers), free_space, run_seed=1
+            "f", tx, rx, FineProfileBuilder(layers=layers), free_space, run_seed=1, floor_m=0.0
         )
 
     assert summary.dsm_filled_pixels_median == 3.0
@@ -346,14 +377,16 @@ def test_a_draw_that_leaves_the_dem_fails_the_link(tmp_path: Path) -> None:
     rx = EndpointBox(centre_xy_m=centre_xy_m(30, 370, 10.0), half_width_m=0.0)
 
     with rasterio.open(rough_metro_dem(tmp_path)) as dem, pytest.raises(OutOfExtentError):
-        sample_link("o", tx, rx, MetroProfileBuilder(dem=dem), free_space, run_seed=RUN_SEED)
+        sample_link(
+            "o", tx, rx, MetroProfileBuilder(dem=dem), free_space, run_seed=RUN_SEED, floor_m=0.0
+        )
 
 
 def test_a_zero_length_link_raises_for_the_feature_asset_to_catch() -> None:
     point = EndpointBox(centre_xy_m=(721_000.0, 4_289_000.0), half_width_m=0.0)
 
     with pytest.raises(ZeroLengthPathError):
-        sample_link("z", point, point, flat_profiles, free_space, run_seed=RUN_SEED)
+        sample_link("z", point, point, flat_profiles, free_space, run_seed=RUN_SEED, floor_m=0.0)
 
 
 def test_a_nan_quantity_is_a_bug_not_a_refusal() -> None:
@@ -361,7 +394,7 @@ def test_a_nan_quantity_is_a_bug_not_a_refusal() -> None:
         return DrawQuantities(values={"fspl_db": math.nan})
 
     with pytest.raises(ValueError, match="fspl_db"):
-        sample_link("x", TX, RX, flat_profiles, broken, run_seed=RUN_SEED)
+        sample_link("x", TX, RX, flat_profiles, broken, run_seed=RUN_SEED, floor_m=0.0)
 
 
 def test_every_draw_must_report_the_same_quantities() -> None:
@@ -371,7 +404,7 @@ def test_every_draw_must_report_the_same_quantities() -> None:
         return DrawQuantities(values={"b": 1.0})
 
     with pytest.raises(ValueError, match="same quantities"):
-        sample_link("x", TX, RX, flat_profiles, uneven, run_seed=RUN_SEED)
+        sample_link("x", TX, RX, flat_profiles, uneven, run_seed=RUN_SEED, floor_m=0.0)
 
 
 def test_boxes_and_draw_counts_are_checked() -> None:
@@ -380,11 +413,13 @@ def test_boxes_and_draw_counts_are_checked() -> None:
     with pytest.raises(ValueError, match="half_width_m"):
         EndpointBox(centre_xy_m=(0.0, 0.0), half_width_m=math.nan)
     with pytest.raises(ValueError, match="n_draws"):
-        draw_endpoints(TX, RX, n_draws=0, seed=1)
+        draw_endpoints(TX, RX, n_draws=0, seed=1, floor_m=0.0)
 
 
 def test_summary_type_is_exported() -> None:
-    summary = sample_link("t", TX, RX, flat_profiles, free_space, run_seed=RUN_SEED, n_draws=4)
+    summary = sample_link(
+        "t", TX, RX, flat_profiles, free_space, run_seed=RUN_SEED, n_draws=4, floor_m=0.0
+    )
 
     assert isinstance(summary, DrawSummary)
     assert summary.endpoint_draws == 4
@@ -392,7 +427,9 @@ def test_summary_type_is_exported() -> None:
 
 
 def test_a_name_no_kept_draw_reported_is_a_key_error() -> None:
-    summary = sample_link("t", TX, RX, flat_profiles, geometry, run_seed=RUN_SEED, n_draws=4)
+    summary = sample_link(
+        "t", TX, RX, flat_profiles, geometry, run_seed=RUN_SEED, n_draws=4, floor_m=0.0
+    )
 
     with pytest.raises(KeyError, match="not-a-quantity"):
         summary.median("not-a-quantity")
@@ -406,7 +443,7 @@ def test_first_draw_is_pinned_for_a_fixed_seed() -> None:
     # numpy's PCG64 stream and the draw order (tx easting, tx northing, rx
     # easting, rx northing) together decide every draw; a change to either
     # changes every published median.
-    first = draw_endpoints(TX, RX, n_draws=16, seed=20261108)[0]
+    first = draw_endpoints(TX, RX, n_draws=16, seed=20261108, floor_m=0.0)[0]
 
     assert first == (
         (721024.9386824487, 4288971.692172184),
@@ -422,7 +459,9 @@ def test_metro_builder_refuses_an_interior_dem_gap_for_every_model(tmp_path: Pat
     rx = EndpointBox(centre_xy_m=centre_xy_m(30, 370, 10.0), half_width_m=0.0)
 
     with rasterio.open(dem_path) as dem:
-        summary = sample_link("m", tx, rx, MetroProfileBuilder(dem=dem), free_space, run_seed=1)
+        summary = sample_link(
+            "m", tx, rx, MetroProfileBuilder(dem=dem), free_space, run_seed=1, floor_m=0.0
+        )
 
     assert summary.refusals == {**NO_REFUSALS, "dem_gap": 16}
     assert summary.median("fspl_db") is None
@@ -460,9 +499,13 @@ def test_building_mask_must_share_the_builder_dem_grid(tmp_path: Path) -> None:
         off_grid = BuildingPixels(
             mask=np.zeros((200, 1200), dtype=bool), transform=layers.dem.transform
         )
-        summary = sample_link("b", tx, rx, builder, free_space, run_seed=1, buildings=on_grid)
+        summary = sample_link(
+            "b", tx, rx, builder, free_space, run_seed=1, buildings=on_grid, floor_m=0.0
+        )
         with pytest.raises(ValueError, match="grid"):
-            sample_link("b", tx, rx, builder, free_space, run_seed=1, buildings=off_grid)
+            sample_link(
+                "b", tx, rx, builder, free_space, run_seed=1, buildings=off_grid, floor_m=0.0
+            )
 
     assert summary.tx_building_draws == 0
 
@@ -475,7 +518,14 @@ def test_metro_builder_takes_no_building_mask(tmp_path: Path) -> None:
         rx = EndpointBox(centre_xy_m=centre_xy_m(30, 370, 10.0), half_width_m=0.0)
         with pytest.raises(ValueError, match="building draws need the 1 m layers"):
             sample_link(
-                "m", tx, rx, MetroProfileBuilder(dem=dem), free_space, run_seed=1, buildings=mask
+                "m",
+                tx,
+                rx,
+                MetroProfileBuilder(dem=dem),
+                free_space,
+                run_seed=1,
+                buildings=mask,
+                floor_m=0.0,
             )
 
 
