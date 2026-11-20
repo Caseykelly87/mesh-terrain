@@ -16,9 +16,7 @@ output or a warning. conftest replaces both values in every test and
 collection report and in every recorded warning (`tests/report_redaction.py`).
 
 The probes run pytest in a subprocess with invented values, through the real
-`tests/conftest.py` loaded as a plugin; no real value is read. Every setting
-without a default is invented too, so the probe's session never depends on
-a `.env`, which a check in a worktree may run without. Their first
+`tests/conftest.py` loaded as a plugin; no real value is read. Their first
 tests are this module's own unit tests, so a unit test that left the shared
 list empty would show in the failures after it.
 """
@@ -34,21 +32,11 @@ import pytest
 import raw_schema
 import report_redaction
 
-from pipeline.common.settings import Settings
-
 TESTS = Path(__file__).resolve().parent
 INVENTED_USER = "invented_role_51ab"
 INVENTED_PASSWORD = "invented_secret_8c3d"
 NAMES = ("WAREHOUSE_TEST_USER", "WAREHOUSE_TEST_PASSWORD", "WAREHOUSE_USER", "WAREHOUSE_PASSWORD")
 PASSED_DOWN = {"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES", "PYTEST_ADDOPTS"}
-# WAREHOUSE_USER and WAREHOUSE_PASSWORD are among the names dropped above, so
-# without these the probe's settings would take them from the checkout's .env,
-# and with no .env the settings fail and the probe's session holds no role.
-INVENTED_SETTINGS = {
-    name.upper(): f"invented_{name}"
-    for name, field in Settings.model_fields.items()
-    if field.is_required()
-}
 PROBE = """
 import inspect
 import os
@@ -126,7 +114,6 @@ def run_probe(tmp_path: Path, *options: str) -> str:
         for name, value in os.environ.items()
         if name not in PASSED_DOWN and name not in NAMES
     }
-    environment.update(INVENTED_SETTINGS)
     environment.update(
         {
             "WAREHOUSE_TEST_USER": INVENTED_USER,
