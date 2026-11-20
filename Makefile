@@ -92,7 +92,8 @@ help:
 	@echo "make nuke       stop the stack and delete every project volume after a typed confirmation"
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
 	@echo "make test-role  create or update the tests' database role in the running warehouse; it"
-	@echo "                cannot write raw, raw_dev_wh or raw_dev_ta (make up and make check run it)"
+	@echo "                cannot write raw, raw_dev_wh or raw_dev_ta (make check and make dbt-build"
+	@echo "                run it first; make up runs it once both values are set)"
 	@echo "make check [DBT_DEV_TARGET=dev_ta]"
 	@echo "                ruff, mypy, pytest, dbt deps and dbt build against the local stack, on a"
 	@echo "                development target: dev_wh by default (Track B), schemas suffixed _dev_wh and"
@@ -177,12 +178,7 @@ up: check-credentials
 # runs only on a fresh volume, so an existing warehouse gets it too. The bare
 # -e names pass the name and password from make's environment into the
 # container, where psql reads them, so the password is on no command line.
-# pg_isready waits on TCP because the server listens there only once the init
-# scripts of a fresh volume are done; until then the health check can pass
-# against the temporary server that runs them.
-TEST_ROLE_PSQL = tries=0; until pg_isready -q -h 127.0.0.1; do \
-    tries=$$((tries + 1)); [ $$tries -lt 60 ] || exit 1; sleep 1; done; \
-    psql -X -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f -
+# It waits and logs in as make rotate-owner-password does (WAREHOUSE_PSQL).
 TEST_ROLE_REQUIRED = : "$${WAREHOUSE_TEST_USER:?set WAREHOUSE_TEST_USER, see README, Test role}" \
     "$${WAREHOUSE_TEST_PASSWORD:?set WAREHOUSE_TEST_PASSWORD, see README, Test role}"
 # The development dbt targets run as the test role: dbt replaces a view or
@@ -191,12 +187,12 @@ TEST_ROLE_REQUIRED = : "$${WAREHOUSE_TEST_USER:?set WAREHOUSE_TEST_USER, see REA
 # environment, so the recipe text holds only their names.
 DBT_AS_TEST_ROLE = WAREHOUSE_USER="$${WAREHOUSE_TEST_USER:?set WAREHOUSE_TEST_USER, see README, Test role}" \
     WAREHOUSE_PASSWORD="$${WAREHOUSE_TEST_PASSWORD:?set WAREHOUSE_TEST_PASSWORD, see README, Test role}"
-unexport TEST_ROLE_PSQL TEST_ROLE_REQUIRED DBT_AS_TEST_ROLE
+unexport TEST_ROLE_REQUIRED DBT_AS_TEST_ROLE
 
 test-role: env
 	@$(TEST_ROLE_REQUIRED)
 	$(COMPOSE) exec -T -e WAREHOUSE_TEST_USER -e WAREHOUSE_TEST_PASSWORD warehouse \
-	    sh -c '$(TEST_ROLE_PSQL)' < docker/warehouse/test-role.sql
+	    sh -c '$(WAREHOUSE_PSQL)' < docker/warehouse/test-role.sql
 
 # Postgres reads POSTGRES_PASSWORD only when it creates a fresh volume, so a
 # new WAREHOUSE_PASSWORD in .env reaches an existing warehouse only through
@@ -207,19 +203,24 @@ test-role: env
 # container's local socket, which the image trusts without a password, as the
 # healthcheck's own login does; so the old password is never needed and the
 # owner cannot be locked out. The bare -e name passes the new value from .env
-# into the container, where psql reads it, so it is on no command line. The
-# wait allows 150 s, about what the warehouse health check allows a fresh
-# volume (start period plus retries), and says why it stops.
-ROTATE_PSQL = tries=0; until pg_isready -q -h 127.0.0.1; do \
+# into the container, where psql reads it, so it is on no command line.
+#
+# WAREHOUSE_PSQL is the wait and login make test-role uses too. pg_isready
+# waits on TCP because the server listens there only once the init scripts of
+# a fresh volume are done; until then the health check can pass against the
+# temporary server that runs them. The wait allows 150 s, about what the
+# warehouse health check allows a fresh volume (start period plus retries),
+# and says why it stops.
+WAREHOUSE_PSQL = tries=0; until pg_isready -q -h 127.0.0.1; do \
     tries=$$((tries + 1)); [ $$tries -lt 150 ] || { \
-    echo "make rotate-owner-password: the warehouse did not listen on TCP within 150 s" >&2; \
+    echo "make $@: the warehouse did not listen on TCP within 150 s" >&2; \
     exit 1; }; sleep 1; done; \
     psql -X -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f -
-unexport ROTATE_PSQL
+unexport WAREHOUSE_PSQL
 
 rotate-owner-password: check-credentials
 	$(COMPOSE) up --detach warehouse
-	$(COMPOSE) exec -T -e WAREHOUSE_PASSWORD warehouse sh -c '$(ROTATE_PSQL)' < docker/warehouse/rotate-owner-password.sql
+	$(COMPOSE) exec -T -e WAREHOUSE_PASSWORD warehouse sh -c '$(WAREHOUSE_PSQL)' < docker/warehouse/rotate-owner-password.sql
 
 # Keeps the named volumes so stopping never loses data; make nuke deletes them.
 down:
