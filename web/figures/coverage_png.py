@@ -25,6 +25,7 @@ import hashlib
 import json
 import math
 import sys
+import time
 import warnings
 from collections.abc import Sequence
 from pathlib import Path
@@ -147,6 +148,12 @@ def check_listed(entries: list[dict[str, Any]], name: str, path: Path) -> None:
         raise FigureRefusedError(f"{name} has changed since the run")
 
 
+def point_layer_names(config: Path) -> dict[str, str]:
+    """The tx_sites and rx_points paths as the config writes them, the names the manifest lists."""
+    fields = yaml.safe_load(config.read_text(encoding="utf-8"))
+    return {field: str(fields[field]) for field in POINT_LAYER_FIELDS}
+
+
 def check_synthetic_run(coverage: Path, config: Path) -> None:
     """Refuse unless the coverage file comes from a complete run on synthetic positions only.
 
@@ -163,25 +170,26 @@ def check_synthetic_run(coverage: Path, config: Path) -> None:
     if manifest.get("config_sha256") != file_sha256(config):
         raise FigureRefusedError(f"config {config.name} is not the config this run used")
     check_listed(manifest.get("artifacts", []), coverage.name, coverage)
-    fields = yaml.safe_load(config.read_text(encoding="utf-8"))
-    for field in POINT_LAYER_FIELDS:
-        layer = config.parent / fields[field]
-        check_listed(manifest.get("inputs", []), fields[field], layer)
+    for name in point_layer_names(config).values():
+        layer = config.parent / name
+        check_listed(manifest.get("inputs", []), name, layer)
         marker = positions_marker(layer)
         if marker != SYNTHETIC:
-            raise FigureRefusedError(f"{fields[field]} is marked {marker!r}, not {SYNTHETIC!r}")
+            raise FigureRefusedError(f"{name} is marked {marker!r}, not {SYNTHETIC!r}")
 
 
 def read_coverage(path: Path) -> FloatArray:
     """Path loss in dB from a north-up coverage GeoTIFF with square cells; NaN for nodata.
 
     Raises:
-        FigureRefusedError: if the raster is rotated or its cells are not square,
-            either of which would distort the figure.
+        FigureRefusedError: unless columns run west to east and rows north to
+            south with square cells and no rotation; any other raster would come
+            out mirrored, turned or stretched.
     """
     with rasterio.open(path) as source:
         transform = source.transform
-        if transform.b != 0 or transform.d != 0 or abs(transform.a) != abs(transform.e):
+        north_up = transform.a > 0 and transform.e < 0 and transform.b == 0 and transform.d == 0
+        if not north_up or transform.a != -transform.e:
             raise FigureRefusedError(f"{path.name} is not north-up with square cells")
         values: FloatArray = source.read(1, masked=True).astype(np.float64).filled(np.nan)
     return values
@@ -204,6 +212,8 @@ def write_png(indices: IndexArray, path: Path) -> None:
 
 def render(coverage: Path, config: Path, out: Path) -> None:
     """Check the run, classify the coverage, enlarge it and write the PNG."""
+    started = time.perf_counter()
+    log.info("coverage_png_started", source=coverage.name, config=config.name, path=str(out))
     check_synthetic_run(coverage, config)
     indices = class_indices(read_coverage(coverage))
     counts = np.bincount(indices.ravel(), minlength=len(EDGES_DB) + 2)
@@ -218,6 +228,7 @@ def render(coverage: Path, config: Path, out: Path) -> None:
         nodata_cells=int(counts[NODATA_INDEX]),
         class_cells=[int(count) for count in counts[1:]],
         scale=factor,
+        duration_s=round(time.perf_counter() - started, 3),
     )
 
 
