@@ -115,9 +115,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import geopandas as gpd
+import pandas as pd
 import pyarrow.parquet as pq
 import structlog
 
+from engine.points import EDGE_COLUMNS
 from ingester.link_pairs import (
     CaptureLinks,
     SelectionError,
@@ -317,7 +319,8 @@ def _print_selection(selection: Selection, printed: set[DropEnd]) -> list[str]:
     for node in selection.placed:
         inside = selection.dem_check[node.layer_id]
         line = (
-            f"{node.layer_id} {node.role}: box half-width {node.half_width_m:.1f} m, "
+            f"{node.layer_id} {node.role}: box half-widths {node.box.half_width_ns_m:.0f} m "
+            f"north-south and {node.box.half_width_ew_m:.0f} m east-west, "
             f"precise source {str(node.precise_source).lower()}, box plus 50 m inside the DEM "
             f"(engine rule): extent {'pass' if inside else 'fail'}"
         )
@@ -386,15 +389,17 @@ def _check_targets(out: Path, report: bool = False) -> list[Path]:
 
 
 def _frame(nodes: list[PlacedNode], id_column: str, with_role: bool) -> gpd.GeoDataFrame:
-    columns: dict[str, list[object]] = {id_column: [node.layer_id for node in nodes]}
+    """A layer: each node at its box centre with the box's four edges (ADR 0008)."""
+    columns: dict[str, object] = {id_column: [node.layer_id for node in nodes]}
     geometry = gpd.points_from_xy(
         [node.easting_m for node in nodes], [node.northing_m for node in nodes]
     )
-    columns["box_half_width_m"] = [float(node.half_width_m) for node in nodes]
+    for column, edge in zip(EDGE_COLUMNS, ("south_i", "north_i", "west_i", "east_i"), strict=True):
+        columns[column] = pd.Series([getattr(node.box, edge) for node in nodes], dtype="int64")
     if with_role:
         columns["role"] = [node.role for node in nodes]
     frame = gpd.GeoDataFrame(columns, geometry=geometry, crs=f"EPSG:{LAYER_EPSG}")
-    order = [id_column, "geometry", "box_half_width_m", *(["role"] if with_role else [])]
+    order = [id_column, "geometry", *EDGE_COLUMNS, *(["role"] if with_role else [])]
     return frame[order]
 
 

@@ -79,21 +79,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import rasterio
-from pyproj import Transformer
 
 from engine.config import SnapshotIds
 from engine.errors import ConfigError
 from engine.grid import run_grid
 from engine.points import Endpoint
 from engine.snapshots import resolve_snapshots
-from ingester.link_cells import UNIT_DEG, Edges, LinkBox
+from ingester.link_cells import Edges, LinkBox
 from ingester.link_pairs import (
     CaptureLinks,
     MovedPair,
     PairActivity,
     SelectionError,
 )
-from terrain.draws import EndpointBox
+from terrain.boxes import EdgeBox, PositionBox
 
 LAYER_EPSG = 26915
 BOTH_ENDS_GATEWAY = "both_ends_gateway"
@@ -125,7 +124,6 @@ PAIRS_TOUCHED = 3
 # The grid's pixel size does not move its edges, which lie on 10 m multiples
 # whatever the size; 1 m is the test tile DEM's.
 DEM_RESOLUTION_M = 1.0
-_TO_METRES = Transformer.from_crs(4326, LAYER_EPSG, always_xy=True)
 
 Extent = tuple[float, float, float, float]
 """West, south, east, north in EPSG:26915 metres."""
@@ -153,26 +151,36 @@ class Tile:
 
 @dataclass(frozen=True)
 class PlacedNode:
-    """A selected node at the centre of its box.
+    """A selected node with the `lnk_02` box its pairs used, placed at the box's centre.
 
     Attributes:
         pseudonym: The node's pseudonym as stored in the snapshot.
         role: `both_ends_gateway`, `gateway_only_gateway` or `both_ends_relayer`.
-        easting_m: Box centre easting, EPSG:26915 metres.
-        northing_m: Box centre northing, EPSG:26915 metres.
-        half_width_m: The box's smaller half-width in metres: the inscribed square
-            (Casey, issue #44, 1 (b)), by `pos_01`'s WGS84 formula.
+        box: The `lnk_02` box, whose four edges the layer row carries (ADR 0008).
         precise_source: Whether the node is a precise MeshSTL source (`pos_04`).
         row_id: The layer row's id when it is not the pseudonym (`site_row_ids`).
     """
 
     pseudonym: str
     role: str
-    easting_m: float
-    northing_m: float
-    half_width_m: float
+    box: LinkBox
     precise_source: bool
     row_id: str | None = None
+
+    @property
+    def edge_box(self) -> EdgeBox:
+        """The box as the engine reads it from the layer's four edges."""
+        return edge_box(self.box)
+
+    @property
+    def easting_m(self) -> float:
+        """Box centre easting, EPSG:26915 metres (`EdgeBox.centre_xy_m`)."""
+        return self.edge_box.centre_xy_m[0]
+
+    @property
+    def northing_m(self) -> float:
+        """Box centre northing, EPSG:26915 metres (`EdgeBox.centre_xy_m`)."""
+        return self.edge_box.centre_xy_m[1]
 
     @property
     def layer_id(self) -> str:
@@ -317,43 +325,35 @@ def dem_extent(root: Path, snapshot_id: str) -> Extent:
     )
 
 
-def inside_dem(centre_xy_m: tuple[float, float], half_width_m: float, extent: Extent) -> bool:
+def inside_dem(box: PositionBox, extent: Extent) -> bool:
     """Whether the engine's run grid for one box lies inside the DEM extent.
 
+    A placed node's box is its whole `lnk_02` box (`PlacedNode.edge_box`), so
+    the check covers its four corners, not the square inscribed in it (ADR
+    0008, the stricter check).
+
     Args:
-        centre_xy_m: Box centre in EPSG:26915 metres.
-        half_width_m: Box half-width in metres.
+        box: The box as the engine reads it, EPSG:26915 metres.
         extent: The DEM's west, south, east and north edges, from `dem_extent`.
 
     Returns:
         False exactly when engine.terrain_build.check_covers would refuse a
         run with this box alone.
     """
-    box = EndpointBox(centre_xy_m=centre_xy_m, half_width_m=half_width_m)
     grid = run_grid([Endpoint(endpoint_id="check", box=box)], resolution_m=DEM_RESOLUTION_M)
     west, south, east, north = extent
     outside = grid.west_m < west or grid.south_m < south
     return not (outside or grid.east_m > east or grid.north_m > north)
 
 
-def _project(box: LinkBox) -> tuple[float, float]:
-    """A box's centre, the midpoint of its edges, in EPSG:26915 metres."""
-    latitude_deg, longitude_deg = box.centre_deg
-    easting_m, northing_m = _TO_METRES.transform(longitude_deg, latitude_deg)
-    return float(easting_m), float(northing_m)
+def edge_box(box: LinkBox) -> EdgeBox:
+    """A `lnk_02` box as the engine's `EdgeBox`, its four edges unchanged (ADR 0008)."""
+    return EdgeBox(south_i=box.south_i, north_i=box.north_i, west_i=box.west_i, east_i=box.east_i)
 
 
 def box_extent_m(box: LinkBox) -> Extent:
     """West, south, east and north of a box's four corners in EPSG:26915 metres."""
-    eastings, northings = [], []
-    for latitude_i in (box.south_i, box.north_i):
-        for longitude_i in (box.west_i, box.east_i):
-            easting_m, northing_m = _TO_METRES.transform(
-                longitude_i * UNIT_DEG, latitude_i * UNIT_DEG
-            )
-            eastings.append(float(easting_m))
-            northings.append(float(northing_m))
-    return min(eastings), min(northings), max(eastings), max(northings)
+    return edge_box(box).extent_m()
 
 
 def row_state(box: LinkBox, tile: Tile) -> str:
@@ -661,12 +661,8 @@ SiteRow = tuple[str, str, str, LinkBox]
 
 def _place(links: CaptureLinks, row: SiteRow) -> PlacedNode:
     row_id, node, role, box = row
-    easting_m, northing_m = _project(box)
     precise = links.nodes[node].precise_source if node in links.nodes else False
-    return PlacedNode(
-        node, role, easting_m, northing_m, box.smaller_half_width_m, precise,
-        None if row_id == node else row_id,
-    )  # fmt: skip
+    return PlacedNode(node, role, box, precise, None if row_id == node else row_id)
 
 
 def count_differences(
@@ -815,10 +811,7 @@ def select_nodes(links: CaptureLinks, tile: Tile, expect_pairs: int, extent: Ext
 
 
 def _dem_check(placed: Sequence[PlacedNode], extent: Extent) -> dict[str, bool]:
-    return {
-        node.layer_id: inside_dem((node.easting_m, node.northing_m), node.half_width_m, extent)
-        for node in placed
-    }
+    return {node.layer_id: inside_dem(node.edge_box, extent) for node in placed}
 
 
 @dataclass(frozen=True)
