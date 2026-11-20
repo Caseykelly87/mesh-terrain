@@ -17,7 +17,8 @@ issue #55 comments 6962700456 and 7042577618, ADR 0009): a square's
 half-width is raised to it, and an edge box is widened about its centre on
 each axis below it, in latitude and longitude with `pos_01`'s WGS84 radii at
 the box-centre latitude, an extension of the same exception Casey granted.
-An exact point (half-width 0) is a model point, not a fix, and stays exact.
+An exact point (half-width 0) is a model point, not a fix, and stays exact
+(terrain-rf-eng's proposal on PR #89, awaiting Casey).
 A floor of 0 changes nothing.
 
 This module draws no random numbers; `terrain.draws` does, and passes them in.
