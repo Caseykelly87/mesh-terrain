@@ -16,6 +16,3 @@ infra
 web
 arcgis
 tests
-# Snapshots, when .env points SNAPSHOTS_HOST_DIR into the checkout: real data
-# never enters a build context.
-data

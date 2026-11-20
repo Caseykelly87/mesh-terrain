@@ -480,24 +480,38 @@ def reduce_capture(
     return finish(partial)
 
 
+def capture_folder(
+    parser: argparse.ArgumentParser, flag: str, given: str | None, setting: Path | None
+) -> Path:
+    """The folder a flag names, else the setting; an empty flag counts as unset.
+
+    Raises:
+        SystemExit: through parser.error, exit 2, when neither names a folder.
+    """
+    folder = setting if given is None else (Path(given) if given.strip() else None)
+    if folder is None:
+        parser.error(f"set {flag.upper()}_CAPTURE_DIR in .env or pass --{flag}")
+    return folder
+
+
 def main(argv: list[str] | None = None) -> None:
     """Reduce the 2026-10-22 archive into its snapshot; needs NODE_ID_HMAC_KEY.
 
     Args:
         argv: The command-line arguments; None reads them from sys.argv.
     """
-    settings = get_ingester_settings()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--public", type=Path, default=settings.public_capture_dir)
-    parser.add_argument("--meshstl", type=Path, default=settings.meshstl_capture_dir)
+    parser.add_argument("--public", help="the public capture folder; default PUBLIC_CAPTURE_DIR")
+    parser.add_argument("--meshstl", help="the MeshSTL capture folder; default MESHSTL_CAPTURE_DIR")
     parser.add_argument("--workers", type=int, default=11)
+    # Parsed before the settings are built, so --help needs none of them.
     args = parser.parse_args(argv)
-    for flag, variable in (("public", "PUBLIC_CAPTURE_DIR"), ("meshstl", "MESHSTL_CAPTURE_DIR")):
-        if getattr(args, flag) is None:
-            parser.error(f"set {variable} in .env or pass --{flag}")
+    settings = get_ingester_settings()
+    public = capture_folder(parser, "public", args.public, settings.public_capture_dir)
+    meshstl = capture_folder(parser, "meshstl", args.meshstl, settings.meshstl_capture_dir)
     sources = [
-        Source(Broker.PUBLIC, args.public),
-        Source(Broker.MESHSTL, args.meshstl, *MESHSTL_WINDOW),
+        Source(Broker.PUBLIC, public),
+        Source(Broker.MESHSTL, meshstl, *MESHSTL_WINDOW),
     ]
     folder = reduce_capture(
         sources, settings.snapshots_dir, DEFAULT_INFO, settings.hmac_key(), args.workers
