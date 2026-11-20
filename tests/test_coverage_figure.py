@@ -116,7 +116,7 @@ def test_legend_table_lists_colours_and_labels_in_class_order() -> None:
     assert lines[2] == "| `#fde725` | below 60 |"
     assert lines[-2] == "| `#440154` | 110 or more |"
     assert lines[-1] == "| none (transparent) | no value |"
-    assert "–" not in legend and "—" not in legend
+    assert "\u2013" not in legend and "\u2014" not in legend
 
 
 def test_web_readme_carries_the_legend_table() -> None:
@@ -200,24 +200,22 @@ def test_guard_admits_a_run_whose_point_layers_are_synthetic(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(("sites", "receivers"), [("real", "synthetic"), ("synthetic", "real")])
-def test_guard_refuses_a_layer_marked_real(
-    tmp_path: Path, sites: str, receivers: str
-) -> None:
+def test_guard_refuses_a_layer_marked_real(tmp_path: Path, sites: str, receivers: str) -> None:
     coverage = write_run(tmp_path, sites, receivers)
-    with pytest.raises(figure.FigureRefused, match="synthetic"):
+    with pytest.raises(figure.FigureRefusedError, match="synthetic"):
         figure.check_synthetic_run(coverage, config_of(tmp_path))
 
 
 def test_guard_refuses_a_layer_without_a_marker(tmp_path: Path) -> None:
     coverage = write_run(tmp_path, "synthetic", None)
-    with pytest.raises(figure.FigureRefused, match="synthetic"):
+    with pytest.raises(figure.FigureRefusedError, match="synthetic"):
         figure.check_synthetic_run(coverage, config_of(tmp_path))
 
 
 def test_guard_refuses_a_run_without_a_manifest(tmp_path: Path) -> None:
     coverage = write_run(tmp_path, "synthetic", "synthetic")
     (coverage.parent / "manifest.json").unlink()
-    with pytest.raises(figure.FigureRefused, match="manifest"):
+    with pytest.raises(figure.FigureRefusedError, match="manifest"):
         figure.check_synthetic_run(coverage, config_of(tmp_path))
 
 
@@ -225,7 +223,7 @@ def test_guard_refuses_a_config_the_run_did_not_use(tmp_path: Path) -> None:
     coverage = write_run(tmp_path, "synthetic", "synthetic")
     config = config_of(tmp_path)
     config.write_text(config.read_text(encoding="utf-8") + "# edited\n", encoding="utf-8")
-    with pytest.raises(figure.FigureRefused, match="config"):
+    with pytest.raises(figure.FigureRefusedError, match="config"):
         figure.check_synthetic_run(coverage, config)
 
 
@@ -234,21 +232,21 @@ def test_guard_refuses_a_layer_changed_after_the_run(tmp_path: Path) -> None:
     receivers = tmp_path / "config" / "receivers.parquet"
     pq.write_table(pa.table({"site_id": ["a", "b"]}), receivers)
     stamp_positions(receivers, "synthetic")
-    with pytest.raises(figure.FigureRefused, match="receivers.parquet"):
+    with pytest.raises(figure.FigureRefusedError, match="receivers.parquet"):
         figure.check_synthetic_run(coverage, config_of(tmp_path))
 
 
 def test_guard_refuses_a_coverage_file_the_manifest_does_not_list(tmp_path: Path) -> None:
     coverage = write_run(tmp_path, "synthetic", "synthetic")
     other = write_coverage(coverage.with_name("coverage_site-b_fspl.tif"), np.ones((2, 2)))
-    with pytest.raises(figure.FigureRefused, match="coverage_site-b_fspl.tif"):
+    with pytest.raises(figure.FigureRefusedError, match="coverage_site-b_fspl.tif"):
         figure.check_synthetic_run(other, config_of(tmp_path))
 
 
 def test_guard_refuses_a_coverage_file_changed_after_the_run(tmp_path: Path) -> None:
     coverage = write_run(tmp_path, "synthetic", "synthetic")
     write_coverage(coverage, np.ones((2, 2)))
-    with pytest.raises(figure.FigureRefused, match=COVERAGE_NAME):
+    with pytest.raises(figure.FigureRefusedError, match=COVERAGE_NAME):
         figure.check_synthetic_run(coverage, config_of(tmp_path))
 
 
@@ -259,6 +257,7 @@ def test_read_coverage_turns_nodata_into_nan(tmp_path: Path) -> None:
     assert np.isnan(values[0, 0]) and values[0, 1] == 55.0
 
 
+@pytest.mark.filterwarnings("ignore::rasterio.errors.NotGeoreferencedWarning")
 def test_main_writes_a_paletted_png_with_transparent_nodata(tmp_path: Path) -> None:
     coverage = write_run(tmp_path, "synthetic", "synthetic")
     out = tmp_path / "figure" / "coverage.png"
