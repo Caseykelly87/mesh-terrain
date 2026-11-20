@@ -152,8 +152,12 @@ jobs:
           docker compose up --build --detach --wait --wait-timeout 300 warehouse
           while IFS= read -r line; do export "$line"; done < <(grep -E '^WAREHOUSE_TEST_(USER|PASSWORD)=' "$stand_in" | tr -d '\r') && make -o env check DBT_DEV_TARGET=dev_ta
           test ! -e .env
+      # Compose reads the whole file even to stop it, and with no .env it needs
+      # the .env.example values again, since each step starts a new shell.
       - if: always()
-        run: docker compose down --volumes --remove-orphans
+        run: |
+          set -a; . ./.env.example; set +a
+          docker compose down --volumes --remove-orphans
 
   # A job of its own because the PDAL image is 821 MB compressed; in parallel
   # it adds about a minute of pull without lengthening the stack smoke test.
