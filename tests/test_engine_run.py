@@ -931,6 +931,27 @@ def test_in_a_checkout_git_status_decides_and_the_environment_is_not_read(
     assert engine.provenance.engine_commit(settings) == ("c" * 40, dirty)
 
 
+def test_in_a_checkout_an_untracked_file_is_dirty_when_git_is_set_to_hide_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`status.showUntrackedFiles=no` must not hide a file the run would use (INTERFACE)."""
+    import engine.provenance
+
+    def git(*arguments: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *arguments], check=True, capture_output=True)
+
+    git("init", "--quiet")
+    (tmp_path / "tracked.py").write_text("", encoding="utf-8")
+    git("add", "tracked.py")
+    git("-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "one")
+    git("config", "status.showUntrackedFiles", "no")
+    (tmp_path / "untracked.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(engine.provenance, "REPO_ROOT", tmp_path)
+    commit, dirty = engine.provenance.engine_commit(fixture_settings())
+    assert re.fullmatch(r"[0-9a-f]{40}", commit)
+    assert dirty is True
+
+
 def test_the_seed_column_holds_each_pairs_draw_seed(two_runs: tuple[Path, Path]) -> None:
     """Casey on PR #42: predictions.parquet gets the per-pair seed, as link_terrain does."""
     import pyarrow.parquet as pq
