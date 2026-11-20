@@ -143,6 +143,14 @@ jobs:
           make env
           mkdir -p "$RUNNER_TEMP/snapshots"
           sed -i "s|^SNAPSHOTS_HOST_DIR=.*|SNAPSHOTS_HOST_DIR=$RUNNER_TEMP/snapshots|" .env
+      # make up refuses the .env.example defaults for the owner password and
+      # the MinIO root credentials, so this job generates its own for its
+      # throwaway stack; the log shows the commands, not the values.
+      - name: generate the stack's credentials
+        run: |
+          for name in WAREHOUSE_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do
+            sed -i "s|^${name}=.*|${name}=$(openssl rand -hex 16)|" .env
+          done
       # Casey decided that nothing in this project starts on its own (PR #12),
       # so a restart policy other than "no" fails here. Capture runs are started
       # by hand and are not Compose services (ADR 0005 item 1), so nothing is

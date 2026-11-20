@@ -50,12 +50,15 @@ DBT_DEV_TARGET_GUARD = $(if $(filter-out 1,$(words $(DBT_DEV_TARGET)))$(filter-o
 unexport DBT_DEV_TARGET_GUARD DBT_DEV_TARGETS DBT_DEV_TARGET_REFUSAL
 $(if $(filter check dbt-build,$(MAKECMDGOALS)),$(DBT_DEV_TARGET_GUARD))
 
-.PHONY: help env up down nuke check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test
+.PHONY: help env up down nuke rotate-owner-password check check-itm check-definitions check-pdal check-p1812 pdal engine fmt reproduce load capture dbt-deps dbt-build dbt-build-real dbt-debug lint test
 .PHONY: p1812-maps dem-1m osm-snapshot canopy dsm register-snapshot
 
 help:
 	@echo "make up         start PostGIS, MinIO and Dagster and wait for health checks"
 	@echo "make down       stop the stack and remove its containers; the data volumes are kept"
+	@echo "make rotate-owner-password"
+	@echo "                start the warehouse alone and set the owner's password to WAREHOUSE_PASSWORD"
+	@echo "                from .env (README, Credentials); make up refuses the .env.example defaults"
 	@echo "                (up and down are the only start and stop; no service restarts on its own)"
 	@echo "make nuke       stop the stack and delete every project volume after a typed confirmation"
 	@echo "                (make nuke CONFIRM=nuke skips the prompt; without a terminal it is required)"
@@ -113,10 +116,36 @@ help:
 env:
 	@test -f .env || cp .env.example .env
 
+# The owner password and the MinIO root credentials in .env.example are public,
+# so nothing starts the stack while .env still holds one of them, or an empty
+# value. The script prints only the name of a variable that fails.
+CHECK_CREDENTIALS := bash docker/check-credentials.sh
+
 # Health waiting is a script rather than compose --wait; the script says why.
 up: env
+	$(CHECK_CREDENTIALS)
 	$(COMPOSE) up --build --detach
 	bash docker/wait-for-stack.sh
+
+# Postgres reads POSTGRES_PASSWORD only when it creates a fresh volume, so a
+# new WAREHOUSE_PASSWORD in .env reaches an existing warehouse only through
+# this target (README, Credentials). It starts the warehouse alone, so Dagster
+# does not try the new password first, waits until the server listens on TCP
+# (only the final server does, after any init scripts), and runs
+# docker/warehouse/rotate-owner-password.sql through psql over the
+# container's local socket, which the image trusts without a password, as the
+# healthcheck's own login does; so the old password is never needed and the
+# owner cannot be locked out. The bare -e name passes the new value from .env
+# into the container, where psql reads it, so it is on no command line.
+ROTATE_PSQL = tries=0; until pg_isready -q -h 127.0.0.1; do \
+    tries=$$((tries + 1)); [ $$tries -lt 60 ] || exit 1; sleep 1; done; \
+    psql -X -q -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -f -
+unexport ROTATE_PSQL
+
+rotate-owner-password: env
+	$(CHECK_CREDENTIALS)
+	$(COMPOSE) up --detach warehouse
+	$(COMPOSE) exec -T -e WAREHOUSE_PASSWORD warehouse sh -c '$(ROTATE_PSQL)' < docker/warehouse/rotate-owner-password.sql
 
 # Keeps the named volumes so stopping never loses data; make nuke deletes them.
 down:

@@ -4,6 +4,10 @@
 # Fixed so image, network and volume names do not depend on the checkout folder.
 name: mesh-terrain
 
+# Every published port is bound to 127.0.0.1: the stack serves this machine
+# only, and a bare port would also listen on every other network interface.
+# tests/test_local_hardening.py fails on a published port without it.
+
 x-dagster-environment: &dagster-environment
   # Inside the Compose network the containers reach the warehouse and the
   # object store by service name on the internal ports, not the host ports.
@@ -53,7 +57,7 @@ services:
       POSTGRES_DB: ${WAREHOUSE_DB}
       DAGSTER_PG_DB: ${DAGSTER_PG_DB}
     ports:
-      - "${WAREHOUSE_PORT}:5432"
+      - "127.0.0.1:${WAREHOUSE_PORT}:5432"
     volumes:
       - warehouse-data:/var/lib/postgresql/data
     healthcheck:
@@ -82,8 +86,8 @@ services:
       MINIO_API_PORT_NUMBER: "9000"
       MINIO_CONSOLE_PORT_NUMBER: "9001"
     ports:
-      - "${MINIO_API_PORT}:9000"
-      - "${MINIO_CONSOLE_PORT}:9001"
+      - "127.0.0.1:${MINIO_API_PORT}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT}:9001"
     volumes:
       - minio-data:/bitnami/minio/data
     # The image declares /certs as a volume, so each new container would leave
@@ -133,7 +137,7 @@ services:
     volumes:
       - *snapshots-volume
     ports:
-      - "${DAGSTER_PORT}:3000"
+      - "127.0.0.1:${DAGSTER_PORT}:3000"
     restart: "no"
     depends_on:
       dagster-migrate:
