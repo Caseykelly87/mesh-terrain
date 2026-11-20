@@ -5,10 +5,13 @@ against its manifest), finds its pairs under the contract's link-hour rules on
 the merged snapshot (`ingester.link_rules`, `ingester.link_pairs`), selects
 the tile's nodes (`ingester.tile_selection`) and writes two GeoParquet layers
 in EPSG:26915 with the columns the lead agreed for the x72y429 run (issue
-#44): `tx_sites_real.parquet` (`site_id`, `geometry`, `box_half_width_m`,
-`role`) and `rx_real.parquet` (`rx_id`, `geometry`, `box_half_width_m`), each
-node at the centre of the box its pairs' counted receipts used, with that
-box's smaller half-width (the inscribed square). Both files carry the
+#44): `tx_sites_real.parquet` (`site_id`, `geometry`, `box_south_i`,
+`box_north_i`, `box_west_i`, `box_east_i`, `role`) and `rx_real.parquet`
+(`rx_id`, `geometry` and the same four edges). Each row carries the `lnk_02`
+box its pairs' counted receipts used, as its four half-open edges in 1e-7
+degrees, int64, `LinkBox`'s edges unchanged, and its point is the box centre
+`terrain.boxes.EdgeBox.centre_xy_m` gives, which the engine checks to 1 mm
+(ADR 0008). There is no `box_half_width_m` column. Both files carry the
 key `mesh_terrain:positions` with the value `real` in their Parquet metadata
 (Casey, issue #44, 4 (a)); the engine admits a `real` layer only when a
 `prepared.json` beside it, in engine.prepare's format, lists its current
