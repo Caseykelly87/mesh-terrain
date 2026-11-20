@@ -16,6 +16,7 @@ from pipeline.common.settings import Settings
 # Read when this module is collected, before any fixture runs, as
 # pipeline/definitions.py builds its settings when it is imported.
 PIPELINE_ENV_FILE_AT_COLLECTION = Settings.model_config.get("env_file")
+INGESTER_ENV_FILE_AT_COLLECTION = IngesterSettings.model_config.get("env_file")
 
 
 def test_the_environment_holds_no_key() -> None:
@@ -41,3 +42,7 @@ def test_the_pipeline_settings_read_no_dotenv_while_tests_are_collected() -> Non
 
 def test_the_pipeline_settings_read_no_dotenv_while_a_test_runs() -> None:
     assert Settings.model_config.get("env_file") is None
+
+
+def test_the_ingester_settings_read_no_dotenv_while_tests_are_collected() -> None:
+    assert INGESTER_ENV_FILE_AT_COLLECTION is None

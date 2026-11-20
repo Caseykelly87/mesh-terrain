@@ -392,28 +392,50 @@ def record_reductions(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[Source
 
 
 @pytest.mark.parametrize(
-    ("unset", "variable"),
-    [("public_capture_dir", "PUBLIC_CAPTURE_DIR"), ("meshstl_capture_dir", "MESHSTL_CAPTURE_DIR")],
+    ("flag", "variable"), [("public", "PUBLIC_CAPTURE_DIR"), ("meshstl", "MESHSTL_CAPTURE_DIR")]
 )
+@pytest.mark.parametrize("how", ["unset", "empty variable", "empty flag"])
 def test_the_command_refuses_a_capture_folder_that_is_not_set(
-    unset: str,
+    flag: str,
     variable: str,
+    how: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    folders = {
-        "public_capture_dir": tmp_path / "public",
-        "meshstl_capture_dir": tmp_path / "meshstl",
-    }
-    settings = command_settings(tmp_path, **{**folders, unset: None})
-    monkeypatch.setattr(reduce_module, "get_ingester_settings", lambda: settings)
+    """An empty folder would otherwise be Path("."), the folder the command started in."""
+    monkeypatch.setenv("SNAPSHOTS_DIR", str(tmp_path / "snapshots"))
+    for name in ("PUBLIC_CAPTURE_DIR", "MESHSTL_CAPTURE_DIR"):
+        monkeypatch.setenv(name, str(tmp_path / name.lower()))
+    arguments = []
+    if how == "unset":
+        monkeypatch.delenv(variable)
+    elif how == "empty variable":
+        monkeypatch.setenv(variable, "")
+    else:
+        arguments = [f"--{flag}", ""]
+    monkeypatch.setattr(
+        reduce_module, "get_ingester_settings", lambda: IngesterSettings(_env_file=None)
+    )
     calls = record_reductions(monkeypatch)
     with pytest.raises(SystemExit) as stopped:
-        reduce_module.main([])
+        reduce_module.main(arguments)
     assert stopped.value.code == 2
     assert variable in capsys.readouterr().err
     assert calls == []
+
+
+def test_help_needs_no_settings(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("SNAPSHOTS_DIR", raising=False)
+    monkeypatch.setattr(
+        reduce_module, "get_ingester_settings", lambda: IngesterSettings(_env_file=None)
+    )
+    with pytest.raises(SystemExit) as stopped:
+        reduce_module.main(["--help"])
+    assert stopped.value.code == 0
+    assert "PUBLIC_CAPTURE_DIR" in capsys.readouterr().out
 
 
 def test_the_command_reads_its_folders_from_the_settings(
