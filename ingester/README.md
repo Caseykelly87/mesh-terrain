@@ -19,7 +19,7 @@ Modules:
 - `link_pairs.py`: the pairs of a capture snapshot under `link_rules`, each with the box its counted receipts used at each end over its kept hours (Casey, issue #44, 2026-11-17; issue #55 comment 6985802330, item 2, (b)); the pairs whose kept hours used more than one box at an end, with those boxes, for `tile_selection` to drop after the counts check; the kept pairs whose hours not kept show another box, to report; and every node's boxes, the ones its pairs with one box per end used.
 - `tile_selection.py`: the tile's sites and receiver from those pairs by tile membership, each node at the one box its pairs used, the busiest-pair ranking kept for later use, the DEM extent check by the engine's rule, the pairs dropped for a node that straddles the tile edge or fails that check, and the sites alone for a run with no real receiver (`select_sites`).
 - `engine_inputs.py`: the command that writes the real site and receiver layers for an engine run on one USGS 1 m tile, or with `--sites-only` the site layer alone (below).
-- `settings.py`: `NODE_ID_HMAC_KEY`, `SNAPSHOTS_DIR` and the MQTT credentials, read once. `SNAPSHOTS_DIR` is also in `pipeline/common/settings.py` with the same default; the ingester keeps its own field so the capture and reduction start without the warehouse variables.
+- `settings.py`: `NODE_ID_HMAC_KEY`, `SNAPSHOTS_DIR`, the reduction's `PUBLIC_CAPTURE_DIR` and `MESHSTL_CAPTURE_DIR`, and the MQTT credentials, read once. `SNAPSHOTS_DIR` is also in `pipeline/common/settings.py`; both refuse it unset, since any default would name one machine's folder. The ingester keeps its own field so the capture and reduction start without the warehouse variables.
 
 `NODE_ID_HMAC_KEY` is 32 random bytes written as 64 hex characters. Casey generates it with `python -c "import secrets; print(secrets.token_hex(32))"` and a copy is kept off this machine by Casey. It is read once, never logged, and the reduction and the capture command refuse to start without it.
 
@@ -47,7 +47,7 @@ Run:
     - the `schema` default read at run time (`inspect.signature`, `__kwdefaults__`);
     - an alias or variable holding an ALLOWED match later used as SQL: ALLOWED counts matches, not uses.
   - The scan is capped (Casey, issue #55, 2026-11-17, item 4): a gap found later goes into this list, not into new code. The test role every test connects as, with no privilege on `raw`, `raw_dev_wh` or `raw_dev_ta` (Casey, issue #55 comment 6961809084, item 10, and PR #64 comment 6968763718, item 5), is the guard for everything the scan cannot see. The watched names are `tests/raw_schema.py` `REAL_SCHEMAS`: `raw`, `raw_dev_wh` and `raw_dev_ta`.
-- Reduction: `uv run --frozen python -I -m ingester.reduce`. It ran once, on 2026-11-14, and cannot run again: its input archive was deleted that day.
+- Reduction: `uv run --frozen python -I -m ingester.reduce`, reading the archive folders from `PUBLIC_CAPTURE_DIR` and `MESHSTL_CAPTURE_DIR` or `--public` and `--meshstl`. It ran once, on 2026-11-14, and cannot run again: its input archive was deleted that day.
 - Load: `uv run --frozen python -m ingester.load <snapshot id>`.
 - Capture and gate: `docs/adr/0003-spike/README.md`.
 - Engine inputs for a tile, from a checkout (it runs the spike scripts under `docs/adr/0003-spike/`), in Git Bash:
