@@ -72,7 +72,9 @@ overlaps() {
 [ -d "$SNAPSHOTS_HOST_DIR" ] || refuse "SNAPSHOTS_HOST_DIR $SNAPSHOTS_HOST_DIR is not an existing folder"
 
 # Outside a git checkout (an exported tarball) the current folder stands in
-# for both, since make runs from the project folder.
+# for both, since make runs from the project folder, so these checks still
+# run; the uncommitted-changes check at the end then refuses the run, because
+# git status fails there.
 checkout=$(resolve_dir "$(git rev-parse --show-toplevel 2> /dev/null || pwd)")
 common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2> /dev/null || echo "$checkout/.git")
 main_checkout=$(resolve_dir "$(dirname "$common_dir")")

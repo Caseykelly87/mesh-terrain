@@ -107,7 +107,9 @@ help:
 	@echo "                sources in raw_dev_wh; dev_ta for Track A, suffix _dev_ta; prod is refused."
 	@echo "                The tests and the build connect as the test role"
 	@echo "make check-itm  load the ITM library in the Dagster image, reproduce the ADR 0002 figure"
-	@echo "                and run tests/test_itm.py and tests/test_path_loss.py there, failing on a skip"
+	@echo "                and run tests/test_itm.py, tests/test_path_loss.py and"
+	@echo "                tests/test_engine_run.py::test_the_itm_fixture_runs_in_the_image there,"
+	@echo "                failing on a skip"
 	@echo "make check-p1812 [FIXTURE=<folder> EXPECT_DB=<dB>]"
 	@echo "                P.1812 on a flat 10 km path from the ITU map snapshot in SNAPSHOTS_DIR, whose"
 	@echo "                files must match their pins, expecting 149.48 dB; FIXTURE names another map"
@@ -387,10 +389,11 @@ unexport require
 
 # The terrain snapshot commands (pipeline/terrain_snapshots/README.md). They
 # run on the host, like load, because the DSM command calls make pdal from the
-# checkout and Compose mounts the snapshots folder read-only. Behind Norton the
-# downloads need SSL_CERT_FILE and the DSM's lidar reads need CA_BUNDLE_PATH,
-# both from .env. Each writes a snapshot, which is permanent, so none runs
-# without Casey's yes on its checklist; make -n prints the command instead.
+# checkout and Compose mounts the snapshots folder read-only. Behind an
+# antivirus or proxy that re-signs HTTPS, the downloads need SSL_CERT_FILE and
+# the DSM's lidar reads need CA_BUNDLE_PATH, both from .env. Each writes a
+# snapshot, which is permanent, so none runs without Casey's yes on its
+# checklist; make -n prints the command instead.
 TERRAIN_SNAPSHOT := $(UV) python -m pipeline.terrain_snapshots
 SNAPSHOT_ROOT = $(if $(call typed,ROOT),--root '$(call typed,ROOT)')
 

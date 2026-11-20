@@ -31,7 +31,7 @@ services:
       # PDAL's HTTP client (arbiter, used by readers.ept) takes a CA file only
       # from CURL_CAINFO, CURL_CA_INFO or ARBITER_CA_INFO; it reads
       # CURL_CA_BUNDLE as a CA directory, and with that alone the EPT read
-      # fails on Norton's certificate.
+      # fails on the certificate of an antivirus or proxy that re-signs HTTPS.
       CURL_CA_INFO: /run/secrets/ca_bundle
       # GDAL's /vsicurl/ ignores CURL_CA_INFO. GDAL_CURL_CA_BUNDLE is its own
       # name for the setting, which arbiter does not read.
