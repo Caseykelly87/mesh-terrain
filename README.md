@@ -1,114 +1,135 @@
 # mesh-terrain
 
-How much of the variation in Meshtastic LoRa link quality across the St. Louis metro is explained by terrain, and what explains the rest. A batch pipeline takes a single Meshtastic MQTT capture from 2026-10-22 to 2026-10-25, models it in PostGIS with dbt and Dagster, derives terrain features from USGS 3DEP elevation and lidar data, and tests standard radio propagation models against observed link quality. Every input is a dated, immutable snapshot; nothing is collected on a schedule. A reusable path-loss engine comes out of the same work (`docs/INTERFACE.md`). The plan, data model and phases are in `docs/PLAN.md`; where the project actually stands is in `docs/STATUS.md`.
+Can public Meshtastic radio data tell us which radio propagation model best predicts link quality over real terrain? This project captured public mesh traffic across the St. Louis metro from 2026-10-22 to 2026-10-25, built a pipeline and a terrain-aware path-loss engine to answer that, and found that passive public data cannot answer it. The pipeline, the engine and the reasons are the result. [`docs/findings.md`](docs/findings.md) has the findings; this page says what was built and how to run it.
 
-## Quick start
+Meshtastic is an open-source mesh network of small LoRa radios (low-power, long-range radios in the 915 MHz band). Some nodes, called gateways, forward the packets they hear to an internet MQTT broker, a message server that other programs subscribe to; the public broker can be read by anyone, and the MeshSTL community broker by its members. Each forwarded packet carries the received signal strength (RSSI) and signal-to-noise ratio (SNR) of the last radio hop. A propagation model predicts how much signal is lost between two points (the path loss); comparing predictions with those readings is the test.
 
-Requirements: Docker (Compose v2), GNU Make, [uv](https://docs.astral.sh/uv/) 0.13, Python 3.12 (uv installs it if missing).
+## What was built
+
+The diagram has two lanes: the snapshot lane, where a person starts each capture or download, and the batch lane, which builds everything else from the snapshots. Dagster, the orchestrator, can run the batch lane's warehouse steps; the make targets also run them from the host.
+
+```mermaid
+flowchart LR
+  subgraph capture [Snapshot lane, started by hand]
+    A[MQTT brokers] --> B[make capture:<br/>decode, keyed-hash node ids in memory]
+    B --> D[(immutable snapshot<br/>Parquet + sha256 manifest)]
+    T[USGS 3DEP, lidar, OSM,<br/>canopy, ITU maps] --> U[terrain snapshot commands] --> V[(terrain snapshots)]
+  end
+  subgraph batch [Batch lane]
+    D --> E[raw loader] --> F[(PostGIS raw)] --> G[dbt: staging, core<br/>link rules in SQL]
+    D --> H[engine_inputs:<br/>link rules in Python]
+    H --> I[engine.prepare] --> J[path-loss engine<br/>5 models over endpoint draws]
+    V --> H
+    V --> I
+    V --> J
+    J --> K[(run folder: predictions,<br/>coverage rasters, manifest)]
+  end
+  L[contract +<br/>56-case conformance fixture] -.tests.-> G
+  L -.tests.-> H
+```
+
+- **Capture and pseudonymisation.** `make capture` records one MQTT capture on demand; nothing is scheduled. It decodes the packets (protobuf, a binary message format) and replaces every node id with a keyed hash (HMAC-SHA-256) in memory, before anything is written to disk (ADR 0005; an ADR is a decision record in `docs/adr/`). The one capture snapshot so far was reduced from the Phase 1 spike's raw archive, which held real ids until it was deleted on 2026-11-14 (ADR 0003); no real node id exists in the snapshot or the warehouse. Each input, capture or terrain download, is an immutable snapshot with a sha256 manifest.
+- **A contract and a conformance fixture.** A link-hour is one directed radio link, from the node that last transmitted a packet to the gateway that heard it, in one clock hour. The rules for building link-hours (which radio hop a reading belongs to, which positions count, when a link-hour is kept) are written once in [`docs/data-quality-contract.md`](docs/data-quality-contract.md), which holds 33 rules, each named by an id such as `lnk_02`. The link and position rules among them are pinned by a hand-worked fixture of 56 cases.
+- **Two implementations.** The link rules run in SQL (dbt models in PostGIS) and in Python (`ingester/link_rules.py`). Both pass the fixture. On the real capture, with one failing staging test excluded, they keep the same link-hours and pairs; they differ slightly at the receipt level, recorded in the findings.
+- **Warehouse.** PostgreSQL 17 with PostGIS 3.5 and h3-pg (the H3 hexagonal grid in SQL), dbt for models and tests, Dagster for orchestration (ADR 0001). The tests connect as a role that cannot write the raw schemas at all.
+- **Path-loss engine.** One command and one config file take up to five terrain snapshots, transmitter sites and receiver points, and write predictions, coverage rasters and a manifest. It runs five models: free space, knife-edge diffraction over the terrain profile, Okumura-Hata, the Longley-Rice Irregular Terrain Model (ITM, built from NTIA's public-domain reference code) and ITU-R P.1812. A real position is a box, not a point, so each link is predicted over random draws of both endpoints inside their boxes (16 in the runs so far), with a GPS error floor set in the config (5 m either side of the centre in the runs so far; ADR 0009). The contract is [`docs/INTERFACE.md`](docs/INTERFACE.md).
+- **Provenance.** Every engine run's manifest records the code commit and whether the checkout was clean, the sha256 of every input layer and terrain snapshot manifest, the model library hashes, the seed and the versions of the manifest, the engine and the output columns. A run from a clean checkout (`make engine` refuses any other) can be traced to exactly what produced it.
+- **Privacy.** Node ids are pseudonymised before anything lands in a snapshot. Precise positions from the community broker are never published. The engine admits a point layer only if it is marked synthetic, or marked real and listed by the preparation step with a matching sha256; this stops accidents, not a deliberate bypass. Run outputs from real data stay on the owner's machine; what is published from real data is counts and one coarse statement, described below.
+- **Security.** Every published port is bound to this machine only. `make up` refuses to start the stack with placeholder credentials. Real credentials are generated per machine and never committed; the test role's two values are kept out of test reports. The details are in [`docs/operations.md`](docs/operations.md).
+
+## Run it on synthetic data
+
+You need Docker with Compose v2, GNU Make, [uv](https://docs.astral.sh/uv/) 0.13 (it installs Python 3.12 if missing), Git and `openssl`. On Windows, run everything from Git Bash (Running on Windows, below). These are the steps a fresh clone of the repository ran, with its own Compose project name: `make up` took about 4 minutes building the images, `make check` about 25 minutes.
 
 ```
-make up      # builds and starts PostGIS with h3-pg, the object store and Dagster, waits for health checks,
-             # then creates or updates the tests' database role once its two values are set
-             # (make test-role; see Test role below)
-make check   # ruff, mypy, make test-role, pytest, dbt deps and dbt build against the local stack
-make down    # stops the stack and removes its containers; the data is kept
-make nuke    # stops the stack and deletes every project volume, after you type "nuke"
+git clone https://github.com/Caseykelly87/mesh-terrain.git
+cd mesh-terrain
+cp .env.example .env
+# generate the stack's credentials in .env without printing them
+for name in WAREHOUSE_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do sed -i "s|^${name}=.*|${name}=$(openssl rand -hex 24)|" .env; done
+# a database role for the tests, with a distinctive name
+sed -i "s|^# WAREHOUSE_TEST_USER=.*|WAREHOUSE_TEST_USER=tester_$(openssl rand -hex 6)|; s|^# WAREHOUSE_TEST_PASSWORD=.*|WAREHOUSE_TEST_PASSWORD=$(openssl rand -hex 24)|" .env
+# the data folder lives beside the checkout, never inside it
+mkdir -p ../mesh-terrain-data/snapshots ../mesh-terrain-data/runs
+make up       # builds and starts PostGIS, the object store and Dagster
+make check    # lint, types, about 1 850 tests and the dbt build, all on synthetic data
+make engine CONFIG=engine/fixtures/fixture-run.yaml SNAPSHOTS_HOST_DIR="$PWD/tests/fixtures/snapshots"
+make down     # stops the stack; the data is kept
 ```
 
-`make up` and `make down` are the way to start and stop the stack; the one other start is `make rotate-owner-password`, which starts the warehouse alone (Credentials, below). Every Compose service has `restart: "no"`, so opening Docker Desktop or restarting the machine starts nothing; run `make up` again. Start with `make up`, not `docker compose up`, `docker start` or the Docker Desktop buttons, which skip `make check-credentials` and the health and exit-code checks in `docker/wait-for-stack.sh`. Stop with `make down`, which removes the containers so the next `make up` starts fresh containers.
+The engine run writes `../mesh-terrain-data/runs/fixture/`: predictions, coverage rasters, a run report and a manifest recording the commit it ran from.
 
-The stack's data lives in Docker volumes, storage that Docker keeps apart from any container. Today there are two: `mesh-terrain_warehouse-data` holds the warehouse and Dagster databases, `mesh-terrain_minio-data` holds the object store bucket. `make down` leaves them in place, so the next `make up` finds the same tables and files. `make nuke` is the only target that deletes them, and it deletes every volume of the mesh-terrain project, including any added later. It lists the volumes, asks you to type `nuke`, and deletes nothing if you type anything else. `make nuke CONFIRM=nuke` skips the prompt, at a terminal too, so type it only when you mean it. With no terminal to ask on (CI, a script, a pipe) it refuses unless `CONFIRM=nuke` is on the make command line; a `CONFIRM` in your shell environment or in `.env` does not count. It also refuses, deleting nothing, if a container outside the stack still uses one of the volumes. After a nuke, `make up` recreates empty volumes with the schemas and the bucket, and `make check` reloads the dbt seeds. Snapshots (the MQTT capture, downloaded elevation and lidar tiles) are kept in folders on the host under the folder `SNAPSHOTS_HOST_DIR` names in `.env`, outside the repository, never in these volumes, so a nuke cannot touch them.
+Notes:
+- Ports 5433, 9000, 9001 and 3000 must be free; every one is bound to this machine only.
+- Behind an antivirus or proxy that re-signs HTTPS, set `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `CA_BUNDLE_PATH` in `.env` to its CA bundle (Running on Windows, below).
+- A second copy of the project on the same Docker host needs its own `COMPOSE_PROJECT_NAME` in `.env`, and must never run `make nuke`, which always acts on the `mesh-terrain` project's volumes.
 
-`make up` copies `.env.example` to `.env` if it is missing, and then stops until you have generated the credentials in it (Credentials, below). Dagster is at http://localhost:3000, the warehouse at localhost:5433 (database `mesh_terrain`, user `mesh`, the owner of every schema), the object store API at localhost:9000 and its console at localhost:9001, each reachable from this machine only: every published port is bound to 127.0.0.1. `make fmt` formats; `make reproduce` will rebuild every asset from the registered snapshots once Phase 1 lands the loader.
+The committed fixture run draws this coverage map: predicted knife-edge path loss at 906.875 MHz from one synthetic site over a synthetic 1 km terrain tile. Nothing in it is real.
+
+![Predicted path loss from a synthetic site](docs/img/coverage-fixture.png)
+
+| Colour | Path loss, dB |
+| --- | --- |
+| yellow `#fde725` | below 60 |
+| light green `#90d743` | 60 to 70 |
+| green `#35b779` | 70 to 80 |
+| teal `#21918c` | 80 to 90 |
+| blue `#31688e` | 90 to 100 |
+| indigo `#443983` | 100 to 110 |
+| dark purple `#440154` | 110 or more |
+| transparent | no value |
+
+Free space at this frequency loses about 92 dB at 1 km, so the darkest cells are where the synthetic terrain blocks the path. How the figure is made, and the check that refuses a run whose site or receiver layer is not synthetic: [`web/README.md`](web/README.md), whose caption table this copies.
 
 ### Credentials
 
-`.env.example` holds placeholders for `WAREHOUSE_PASSWORD`, `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD`, and anyone can read them in this repository, so never keep them. `make up` and `make rotate-owner-password` first run `make check-credentials`, which refuses to go on while any of the three variables in `.env` is empty or equals any of the three placeholders, also when it is written in quotes or with spaces around it; the message names the variable, never a value. `make check-credentials` also runs on its own. This Git Bash command writes a new random value for each of the three straight into `.env`, without printing any; to change only some of them, list only those names after `in`:
-
-```
-for name in WAREHOUSE_PASSWORD MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do sed -i "s|^${name}=.*|${name}=$(openssl rand -hex 24)|" .env; done
-```
-
-On a fresh volume Postgres takes `WAREHOUSE_PASSWORD` when it creates the database, and MinIO reads its root user and password from `.env` every time it starts. An existing warehouse keeps the password it was created with, so changing `WAREHOUSE_PASSWORD` later takes these steps, in this order:
-
-1. `make down` stops every container; the volumes are kept.
-2. Generate the new value in `.env` with the command above.
-3. `make rotate-owner-password` starts the warehouse alone and sets the owner's password to the new value. It logs in through the container's local socket, which the image trusts without a password, the same way the warehouse's health check does, so it never needs the old password and cannot lock the owner out. The new value reaches psql inside the container by name, and nothing prints or logs it.
-4. `make up` starts everything else. The Dagster containers and the object store take the new values from `.env` as they start, and the host commands (dbt, the loaders, the tests) read `.env` on every run, so nothing else needs restarting.
-
-If the rotation stops partway, the owner keeps its old password: the change is a single statement in one transaction. Until it succeeds, anything that logs in over the network with the new value from `.env` is refused, Dagster's start in `make up` included. Rerun `make rotate-owner-password` once the cause is fixed (the socket login does not depend on either password), or put the old value back in `.env`.
-
-To run the pre-commit hooks on every commit: `uv run pre-commit install`.
+`.env.example` holds placeholders for the warehouse owner's password and the object store's root user and password, which anyone can read in this repository, so never keep them. `make up` refuses to start while any of them is empty or a placeholder; the command in the steps above generates all three. Changing a password later, and how the owner's password is rotated without locking it out: [`docs/operations.md`](docs/operations.md), Credentials.
 
 ### Test role
 
-The tests, and the dbt builds that `make check` and `make dbt-build` run, connect as a second role, named by `WAREHOUSE_TEST_USER` and `WAREHOUSE_TEST_PASSWORD`, never as `mesh`. It has no privilege at all on `raw`, `raw_dev_wh` or `raw_dev_ta`, so any write a test sends there fails with "permission denied" (`tests/test_db_role.py` sends each form), and it holds none on the real `staging`, `core`, `analytics` or `features` either. It may create schemas, which the tests' throwaway `test_load_` and `test_fixture_` schemas need, and it owns the development build schemas such as `staging_dev_wh`, because dbt replaces a view only as its owner. `make test-role` applies `docker/warehouse/test-role.sql` to the running warehouse; `make check` and `make dbt-build` run it first, and `make up` runs it once both values are set, so an existing volume gets the role as well as a new one. A new checkout can run `make up` before setting them; it says the role was not created, and the first `make check` with the values set creates it. Everything else connects as `mesh`: `make dbt-build-real`, `make dbt-debug`, `make load`, `make register-snapshot` and Dagster.
-
-Only the main checkout's `.env` sets the two values; `.env.example` lists the names commented out, with placeholders, so a worktree's `.env` copied from it sets neither. A worktree never gets a copy of the main `.env`, which holds `NODE_ID_HMAC_KEY`. Instead, a check in a worktree starts with a line that exports the two lines of the main checkout's `.env` and nothing else (`grep` reads the file and passes on only lines that start with those two names, and no file is written), joined with `&&` to the make command in one Git Bash command. They must run in the same shell: an export lasts only as long as its shell, and an agent's tool starts a new shell for each call, so an export run on its own is gone before the make command starts. For example:
+The tests and the development dbt builds connect as a second database role, named by `WAREHOUSE_TEST_USER` and `WAREHOUSE_TEST_PASSWORD`, which cannot write the raw schemas. Only the main checkout's `.env` sets them. A check in a git worktree takes those two values from the main checkout's `.env` and nothing else, in the same command as make, so they are never printed or copied:
 
 ```
 while IFS= read -r line; do export "$line"; done < <(grep -E '^WAREHOUSE_TEST_(USER|PASSWORD)=' "$(git rev-parse --path-format=absolute --git-common-dir)/../.env" | tr -d '\r') && make check DBT_DEV_TARGET=dev_ta
 ```
 
-A value from the shell wins over any `.env` that still sets one, and `make check`, `make dbt-build` and `make test-role` stop before running anything when either is missing. In the main checkout itself the `.env` lines are enough. CI sets both in the workflow, with values for its throwaway warehouse only.
+The rest, including what can still show a value and why: [`docs/operations.md`](docs/operations.md), Test role.
 
-Casey asked that the two values never appear in a transcript or log (issue #55 comment 7017280290, item 2). What holds: the export line prints nothing, so never add `echo`, `env`, `printenv`, `set -x` or the like around it; no make recipe expands either value, so `make -n` and make's echo of a recipe show only the names; `make dbt-debug` runs as `mesh`, because `dbt debug` prints the user it connects as; no test message names the role; `tests/conftest.py` keeps the values in `tests/raw_schema.py` and puts placeholders in the environment, so only `tests/test_dbt_fixture_build.py`, `tests/test_dbt_targets.py` and `tests/test_terrain_snapshots_registry.py`, whose code under test connects with credentials from the environment (dbt, and the registry's own lookup), see them there, while they run; conftest also replaces both values in every pytest report and in the warnings summary, so a failure shows neither at `-vv`, with `-l` or `--showlocals`, in a chained error, in captured output or in a warning; and `test-role.sql` prints neither value, raises only fixed messages naming the failed step, and turns off statement, CONTEXT, slow-statement and sampled logging for its own transaction. What can still show a value:
+## Real versus synthetic
 
-1. the role's name, never the password, in the server log's line for a refused login (`password authentication failed for user`, or `role ... does not exist`), written whenever anything logs in as the role with a wrong or stale password or before the role exists. Postgres has no setting that leaves the user out. `make check` and `make dbt-build` run `make test-role` first, so through make this needs the password to change mid-run; a `pytest` or `dbt` started by hand does not refresh the role first. dbt started by hand then also prints the server's line and writes it to its log file, `dbt/logs/dbt.log` (gitignored, on disk until deleted);
-2. both values in `pg_stat_activity`, which holds the text of the statement that hands them to `test-role.sql`'s DO blocks from the moment it starts until the next statement starts, visible to superusers (`mesh`, Dagster's connection) and to members of `pg_read_all_stats` or `pg_monitor` (none today); no log keeps it;
-3. both values in Docker's daemon log, which records what `docker compose exec -e` sends only when daemon debug logging is on (it is off here);
-4. CI's own fixed values for its throwaway warehouse, visible in `.github/workflows/ci.yml` and CI's logs; the real password is generated and used nowhere else (Casey, issue #55 comment 7018635302, item 4);
-5. for Casey to decide: anything printed outside a test report, a collection report or the warnings summary is not scrubbed. That happens with `-s`, `--capture=no`, `--capture=tee-sys`, `--pdb`, `--trace`, a Ctrl-C under `--full-trace` (it prints each frame's arguments, `connect_or_skip`'s connection keywords included) and an INTERNALERROR (it prints arguments, and locals with `-l`). Never run warehouse tests with `-s`, `--capture=no`, `--capture=tee-sys`, `--pdb`, `--trace` or `--full-trace`.
-
-Every occurrence of either value in a pytest report is replaced, wherever it appears, so a short or common role name would also be replaced inside unrelated text such as paths and column names; choose a distinctive role name, eight characters or more.
-
-The terrain inputs are snapshots: dated folders under `SNAPSHOTS_DIR`, each with a sha256 manifest, never changed once written. One make target writes each, on the host: `make p1812-maps` (the ITU-R P.1812 maps), `make dem-1m` (the USGS 1 m elevation tile x72y429), `make osm-snapshot DATE=2026-11-01` (OpenStreetMap buildings and water), `make canopy` (the canopy height tile) and `make dsm OSM_SNAPSHOT=<id> SCRATCH=<dir>` (the lidar surface, built through the PDAL container). `make register-snapshot ID=<id>` records a finished one in the warehouse; the DSM needs its OpenStreetMap snapshot written and registered first. A write is permanent, so `make -n <target>` prints the command without running it. `make check-p1812` then checks the map files against their pinned sha256 values, runs P.1812 on a flat 10 km path from them and expects 149.48 dB. `pipeline/terrain_snapshots/README.md` describes each command.
-
-`make engine CONFIG=<file>` runs the path-loss engine once, with no network, in the engine image, built from the Dagster Dockerfile, the one place the ITM library is built. It checks the config and the folders first, refuses a checkout with uncommitted changes (the run records the commit it ran), and builds only when every check passes. The container reads the snapshots read-only and writes the run under `RUNS_HOST_DIR`, so the config's `output_dir` must be `/runs` or a folder below it, and it sees the config's folder, so keep each config, with the point layers it names, in a folder of its own; `engine/fixtures/fixture-run-itm.yaml` is a complete example on synthetic data. `engine/README.md` describes the config and what a run writes.
-
-## Data credits
-
-Elevation and lidar: USGS 3DEP (public domain). Canopy height: High Resolution Canopy Height Maps by WRI and Meta, version 2, released under CC BY 4.0 on the AWS Open Data registry and under the DINOv3 licence by its authors; both apply and both are carried into every map that uses it. Buildings and roads: © OpenStreetMap contributors (ODbL). Boundary: US Census TIGER. Meshtastic packet data: a single capture from 2026-10-22 to 2026-10-25 from the public broker and the MeshSTL regional broker under their terms of use, held privately; only aggregated, pseudonymised derivatives are published.
-
-## Layout
-
-| Path | Purpose |
+| Real, kept on the owner's machine | In this repository |
 | --- | --- |
-| `ingester/` | On-demand MQTT capture command, decoder and reduction to snapshot Parquet (Phase 1) |
-| `pipeline/` | Dagster code location: settings, logging, dbt assets, later loaders and features |
-| `dbt/` | dbt project: staging, core and analytics models and tests |
-| `terrain/` | Pure terrain and propagation functions (Phase 3) |
-| `docker/` | Dockerfiles, database init SQL, the bucket bootstrap and the scripts behind the make targets |
-| `infra/` | Terraform for the cloud phase (Phase 6) |
-| `web/`, `arcgis/` | MapLibre site and ArcGIS Pro deliverable (Phase 5) |
-| `docs/` | Plan, style guide, data-quality contract, ADRs, status |
+| The MQTT capture, 2026-10-22 to 2026-10-25, pseudonymised | Every test fixture and the conformance fixture, all synthetic |
+| Terrain snapshots: USGS 3DEP, lidar, OpenStreetMap, canopy height, ITU maps (public sources, downloaded by make targets) | The engine fixture run and the coverage map above, synthetic |
+| Engine runs on real positions | The metro boundary seed, real public Census data |
 
-Orchestration is Dagster rather than Airflow; ADR 0001 records the trade-off (asset lineage and a light local footprint over the more common line on job postings).
+Published from real data: counts (the funnel in the findings) and one coarse statement about the one link checked, which names no node, place, time or value.
 
-The Dagster image also carries the Irregular Terrain Model (ITM), the radio propagation model the project tests in Phase 3, as a shared library at `/usr/local/lib/libitm.so`. It is compiled in a build stage of `docker/dagster/Dockerfile` from the reference C++ sources published by NTIA (the National Telecommunications and Information Administration), which are public domain; NTIA asks to be acknowledged and for modifications to be recorded, and the two build-time edits are listed in that Dockerfile and in `docs/adr/0002-itm-spike/README.md`. `terrain/itm.py` (Phase 3) loads the library through `ctypes` from the path in the `ITM_LIBRARY_PATH` setting, and `make check-itm` proves the library in the built image still gives the figure the spike measured, then runs `tests/test_itm.py` and `tests/test_path_loss.py` inside the image. Their tests that call the library skip on any machine without it; in the image a skip fails the check. ADR 0002 records why the library was chosen over SPLAT.
+## Limits
+
+- A single capture from 2026-10-22 to 2026-10-25, in one metro.
+- 8 pairs with a kept link-hour, and one link-hour inside the terrain tile built at 1 m resolution.
+- Public positions are blurred to boxes of about plus or minus 364 m at best; transmit power and antennas are unknown; packets too weak to decode are never seen.
+- The engine is tested against published reference values and a synthetic fixture, not against a controlled measurement. A drive test with known radios is the first item on the roadmap ([`docs/ROADMAP.md`](docs/ROADMAP.md)).
+
+## Where to look
+
+| Path | What |
+| --- | --- |
+| [`docs/findings.md`](docs/findings.md) | The result |
+| [`docs/PLAN.md`](docs/PLAN.md) | The original plan, phases and data model |
+| [`docs/STATUS.md`](docs/STATUS.md) | Where the project actually stands |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | What comes next |
+| [`docs/adr/`](docs/adr/) | One file per decision |
+| [`docs/operations.md`](docs/operations.md) | Running the stack day to day: credentials, the test role, the snapshot and engine targets, Windows |
+| `ingester/`, `pipeline/`, `dbt/`, `terrain/`, `engine/`, `web/` | Each has a README |
+
+How the work was organised and reviewed: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Running on Windows
 
-Install Git for Windows, Docker Desktop with the WSL 2 backend, GNU Make (`choco install make`) and uv (`winget install astral-sh.uv`). Run every command from Git Bash, not PowerShell: the Makefile forces `SHELL := bash` and the recipes use POSIX syntax. Use `uv run <tool>`, never `.venv/Scripts/<tool>` directly, so the lock file is respected.
+Use Git Bash, Docker Desktop with the WSL 2 backend, GNU Make and uv; never PowerShell for make. Line endings, file sharing, the warehouse port, and the CA bundle needed behind an antivirus or proxy that re-signs HTTPS: [`docs/operations.md`](docs/operations.md), Running on Windows.
 
-Line endings: `.gitattributes` forces LF on checkout for every text file, which matters because the init SQL, the bucket bootstrap and the Dockerfiles are read inside Linux containers. If a script fails with `\r: command not found`, the file was saved with CRLF; `git add --renormalize .` fixes it.
+## Data credits
 
-Docker Desktop shares `C:\Users` by default. If the repository lives elsewhere, add its drive under Settings, Resources, File sharing, or the bootstrap script mount in `docker-compose.yml` will fail.
-
-Host port 5433 is used for the warehouse because 5432 is commonly taken by another local Postgres; change `WAREHOUSE_PORT` in `.env` if 5433 is taken too.
-
-HTTPS interception: antivirus products that scan TLS re-sign every certificate. uv is told to trust the Windows certificate store through `UV_SYSTEM_CERTS`, set in the Makefile. Python itself is not, so `dbt deps` fails with `CERTIFICATE_VERIFY_FAILED` until you export the scanner's root certificate (its subject names the product, which replaces `<scanner name>` below) and add two lines to `.env`:
-
-```
-# PowerShell, once
-$c = Get-ChildItem Cert:\CurrentUser\Root | Where-Object { $_.Subject -like "*<scanner name>*" } | Select-Object -First 1
-Export-Certificate -Cert $c -FilePath "$env:USERPROFILE\.certs\scanner-root.cer" -Type CERT
-# Git Bash, once (uv sync first so the certifi bundle exists)
-uv sync
-openssl x509 -inform der -in ~/.certs/scanner-root.cer -out ~/.certs/scanner-root.pem
-cat .venv/Lib/site-packages/certifi/cacert.pem ~/.certs/scanner-root.pem > ~/.certs/ca-bundle.pem
-```
-
-Then in `.env`: `SSL_CERT_FILE=C:/Users/<you>/.certs/ca-bundle.pem` and `REQUESTS_CA_BUNDLE=C:/Users/<you>/.certs/ca-bundle.pem`. The stack's running containers are unaffected. For the image builds, also set `CA_BUNDLE_PATH=C:/Users/<you>/.certs/ca-bundle.pem`. The make targets then pass the bundle to the builds as a BuildKit secret. It is mounted only for the steps that download over HTTPS (uv, `dbt deps`, the ITM `curl`, the warehouse's apt and `git clone`) and is never stored in an image. A bare `docker compose build` does not pass it; run `make up` instead.
-
-The one container that reaches the internet while it runs is the PDAL one, which streams USGS lidar. With `CA_BUNDLE_PATH` set, `make pdal` mounts the bundle read-only into it and points PDAL's HTTP client (`CURL_CA_INFO`) and GDAL's (`GDAL_CURL_CA_BUNDLE`) at it. Without the bundle the lidar read fails on the certificate after about four minutes of retries.
+Elevation and lidar: USGS 3DEP (public domain). Canopy height: High Resolution Canopy Height Maps by WRI and Meta, version 2, released under CC BY 4.0 on the AWS Open Data registry and under the DINOv3 licence by its authors; both apply and both are carried into every map that uses it. Buildings and roads: © OpenStreetMap contributors (ODbL). Boundary: US Census TIGER. ITM: NTIA's reference implementation (public domain). Meshtastic packet data: a single capture from 2026-10-22 to 2026-10-25 from the public broker and the MeshSTL regional broker under their terms of use, held privately; only aggregated, pseudonymised derivatives are published.
