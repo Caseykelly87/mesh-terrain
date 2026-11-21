@@ -65,3 +65,9 @@ def test_the_user_folder_check_sees_every_form_and_passes_the_placeholder() -> N
         "~/.cache/uv": False,
     }
     assert {probe: bool(USER_FOLDER.search(probe)) for probe in probes} == probes
+
+
+def test_a_file_that_is_not_utf8_text_is_skipped(tmp_path: Path) -> None:
+    figure = tmp_path / "figure.png"
+    figure.write_bytes(bytes([0x89, 0x50, 0x4E, 0x47, 0xFF, 0xFE]))
+    assert text_lines(figure) == []
