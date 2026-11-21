@@ -25,14 +25,16 @@ PASSED_DOWN = {"MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES"}
 PROBE = "probe: env\n\t@echo probe ran\n"
 
 
-def make_in(folder: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+def make_in(
+    folder: Path, *arguments: str, environment: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """make with the checkout's Makefile and a probe goal, run in folder."""
     make = shutil.which("make")
     if make is None:
         pytest.skip("make is not installed")
     probe = folder / "probe.mk"
     probe.write_text(PROBE, encoding="utf-8")
-    environment = {k: v for k, v in os.environ.items() if k not in PASSED_DOWN}
+    shell = {k: v for k, v in os.environ.items() if k not in PASSED_DOWN}
     return subprocess.run(
         [make, "--no-print-directory", "-f", str(REPO_ROOT / "Makefile"), "-f", str(probe)]
         + list(arguments),
@@ -40,7 +42,7 @@ def make_in(folder: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
-        env=environment,
+        env={**shell, **(environment or {})},
     )
 
 
@@ -76,3 +78,25 @@ def test_an_existing_dotenv_is_left_alone(fresh_checkout: Path) -> None:
     result = make_in(fresh_checkout, "probe")
     assert result.returncode == 0, result.stderr
     assert (fresh_checkout / ".env").read_text(encoding="utf-8") == "LOG_FORMAT=console\n"
+
+
+@pytest.mark.parametrize("goal", ["test", "dbt-deps", "dbt-build", "dbt-debug", "dbt-build-real"])
+def test_each_goal_that_reads_the_environment_runs_the_env_step_first(
+    goal: str, fresh_checkout: Path
+) -> None:
+    """Even under -k or -j, where a sibling of a stopped env step still runs, as in make check."""
+    role = {"WAREHOUSE_TEST_USER": "invented_user_5a3c", "WAREHOUSE_TEST_PASSWORD": "invented_9b"}
+    result = make_in(fresh_checkout, "-n", goal, environment=role)
+    assert result.returncode == 0, result.stderr
+    lines = result.stdout.splitlines()
+    env_step = next(i for i, line in enumerate(lines) if "test -f .env" in line)
+    command = next(i for i, line in enumerate(lines) if " pytest " in line or " dbt " in line)
+    assert env_step < command
+
+
+def test_the_env_step_says_to_run_make_again_and_names_make_up_for_credentials(
+    fresh_checkout: Path,
+) -> None:
+    result = make_in(fresh_checkout, "probe")
+    assert "run make again" in result.stderr
+    assert "make up" in result.stderr
