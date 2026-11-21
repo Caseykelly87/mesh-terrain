@@ -27,9 +27,12 @@ def tracked_text_files() -> list[Path]:
     git = shutil.which("git")
     if git is None:
         pytest.skip("git is not installed")
-    listed = subprocess.run(
-        [git, "ls-files", "-z"], cwd=REPO_ROOT, capture_output=True, check=True
-    ).stdout.decode("utf-8")
+    listing = subprocess.run(
+        [git, "ls-files", "-z"], cwd=REPO_ROOT, capture_output=True, check=False
+    )
+    if listing.returncode != 0:
+        pytest.skip("not a git checkout, so there is no list of tracked files")
+    listed = listing.stdout.decode("utf-8")
     return [
         REPO_ROOT / name
         for name in listed.split("\0")
@@ -39,12 +42,19 @@ def tracked_text_files() -> list[Path]:
     ]
 
 
+def text_lines(path: Path) -> list[str]:
+    """The file's lines, or none for a file that is missing or not UTF-8 text, such as a figure."""
+    try:
+        return path.read_text(encoding="utf-8").splitlines()
+    except (FileNotFoundError, UnicodeDecodeError):
+        return []
+
+
 def test_no_tracked_file_names_a_user_folder() -> None:
     named = [
         f"{path.relative_to(REPO_ROOT).as_posix()}:{number}"
         for path in tracked_text_files()
-        if path.is_file()
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        for number, line in enumerate(text_lines(path), 1)
         if USER_FOLDER.search(line)
     ]
     assert named == []

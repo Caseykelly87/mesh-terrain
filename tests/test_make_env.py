@@ -1,4 +1,4 @@
-"""make reads .env once, when it starts, so a .env that its env step creates is not read by that run.
+"""make reads .env when it starts, so a .env that its env step creates is not read by that run.
 
 A first `make check` in a checkout without .env used to create it and go on
 with none of its variables exported, and every test that builds the settings
