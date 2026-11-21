@@ -1,6 +1,6 @@
 # Findings
 
-Every number on this page is a count or a fixed setting. No node id, position, place smaller than the metro, time, distance or measured value from the real capture appears here, under the project's rule that issues and public pages carry counts only (Casey, issue #55 comment 6985802330, item 10).
+Every number on this page is a count or a fixed setting. No node id, position, place smaller than the metro, time, distance or measured value from the real capture appears here, under the project's rule that real-data outcomes are stated publicly only as Casey approves; Casey approved publishing these counts and the one sentence about the one-link check (issue #55 comment 7051712349).
 
 ## The question
 
@@ -12,7 +12,7 @@ The short answer: passive public mesh data cannot rank propagation models. This 
 
 1. A single capture from 2026-10-22 to 2026-10-25, from the public Meshtastic broker and the MeshSTL community broker, reduced to an immutable snapshot with every node id replaced by a keyed hash (ADR 0005).
 2. Link rules written once as a contract (`docs/data-quality-contract.md`) and implemented twice, in Python and in SQL. Both pass the same conformance fixture: 56 hand-worked cases, each with the outcome the contract requires.
-3. A terrain-aware path-loss engine (`docs/INTERFACE.md`) with five models: free space; knife-edge, which adds the diffraction loss of the hills on the terrain profile; Okumura-Hata, an empirical formula from city measurements; the Longley-Rice Irregular Terrain Model (ITM); and ITU-R P.1812, which also reads the height of buildings and trees along the path. A public position is a box, not a point, so each link is predicted over random draws of both endpoints inside their boxes, 16 draws in these runs, with each box at least 5 m either side of its centre (ADR 0009).
+3. A terrain-aware path-loss engine (`docs/INTERFACE.md`) with five models: free space; knife-edge, which adds the diffraction loss of the hills on the terrain profile; Okumura-Hata, an empirical formula from city measurements; the Longley-Rice Irregular Terrain Model (ITM); and ITU-R P.1812, which also reads the height of buildings and trees along the path. Every real position is a box, not a point, so each link is predicted over random draws of both endpoints inside their boxes, 16 draws in these runs, with each box at least 5 m either side of its centre (ADR 0009).
 4. A comparison rule written down before any prediction was seen (PR #92).
 
 ## The data funnel
@@ -38,14 +38,14 @@ Positions explain all of the drop between the third and fourth rows. A position 
 | --- | --- |
 | All position rows | 321 147 |
 | A coordinate missing (`pos_01`) | 1 393 |
-| Precision outside 15 to 32 bits, or none given (`pos_01`) | 225 962 |
+| Precision outside 15 to 32 bits, or none given (`pos_01`; see Position blur) | 225 962 |
 | At 0, 0 (`pos_03`) | 58 |
 | Outside the St. Louis metro area (`pos_02`) | 91 078 |
 | Usable | 2 656 |
 | Usable, after merging copies of one broadcast heard at several gateways | 1 939, from 64 nodes |
 | Of those, flagged precise under `pos_04` (20 bits or finer, with a copy from the MeshSTL broker) | 85 |
 
-The counts come from a local counting script, kept outside git, that calls the Python link rules exactly as the engine's input step does. The SQL counts in the comparison below come from the warehouse build described there.
+The receipt, link-hour and pair counts come from the Python link rules, called by a local script kept outside git exactly as the engine's input step calls them; the position split comes from the same tests as `read_position` in `ingester/link_rules.py`, applied by that script in the same order. The SQL counts in the comparison below come from the warehouse build described there.
 
 ## Why the data cannot rank models
 
@@ -53,23 +53,23 @@ Four things stand between a gateway's reading and a model's prediction, and pass
 
 Position blur. A position's precision is the number of bits of latitude and longitude the node keeps; fewer bits mean a bigger box. The public broker forwards positions at 10 to 16 bits, and 16 bits is about plus or minus 364 m north to south. The link rules accept 15 to 32 bits. On a link of a few kilometres, a few hundred metres of blur can move the terrain profile enough to change which hills block the path, so the engine reports the spread over its endpoint draws rather than one number.
 
-Unknown transmitters and antennas. Nobody records a node's transmit power, antenna gain (dBi, gain relative to an ideal antenna that radiates equally in all directions) or cable loss. The comparison rule takes ranges for each: transmit power 17 to 30 dBm from the firmware and radio limits; transmitter antenna minus 5 to plus 3 dBi and gateway antenna minus 5 to plus 8 dBi, the upper ends from vendor and community antenna figures and the minus 5 dBi lower end judgement; cable loss up to 1 dB at the transmitter and 3 dB at the gateway, partly judgement. Together they spread the predicted RSSI for a single path loss over about 38 dB. A model would have to be wrong by more than that before the data could show it.
+Unknown transmitters and antennas. Nobody records a node's transmit power, antenna gain (dBi, gain relative to an ideal antenna that radiates equally in all directions) or cable loss. The comparison rule takes ranges for each: transmit power 17 to 30 dBm from the firmware and radio limits; transmitter antenna minus 5 to plus 3 dBi and gateway antenna minus 5 to plus 8 dBi, the upper ends from vendor and community antenna figures and the minus 5 dBi lower end judgement; cable loss up to 1 dB at the transmitter and 3 dB at the gateway, partly judgement. Together they spread the predicted RSSI for a single path loss over about 38 dB. With the rule's 5 dB allowance at each end, an error in a model's loss can hide anywhere inside a window about 48 dB wide, before the spread over the endpoint draws, and where the true settings sit inside it nobody recorded.
 
 Survivorship bias. A packet too weak to decode never reaches the broker, so it is never counted. Weak links are seen only on their good minutes, and the measured signal leans strong. The bias is largest where models disagree most, on long or obstructed paths.
 
-Too few pairs. After the link rules, 8 pairs in the capture have a kept link-hour with both ends positioned: at most 8 paths. A ranking needs many independent paths across different terrain; 8 in one metro cannot separate model error from the luck of each location.
+Too few pairs. After the link rules, 8 pairs in the capture have a kept link-hour with both ends positioned, none heard in both directions: 8 paths. A ranking needs many independent paths across different terrain; 8 in one metro cannot separate model error from the luck of each location.
 
 A further open point: LoRa can decode packets below the noise floor (the background radio noise), where SNR is negative. Whether such a receipt's RSSI is the signal alone or the signal plus noise depends on the radio chip, which the data does not record. The comparison rule brackets both readings rather than choosing.
 
 ## The one-link check
 
-One link-hour lay inside the terrain tile built at 1 m resolution, with both ends positioned and enough packets to pass the rules. The engine predicted its path loss with all five models. Each model's predicted RSSI range spans the transmitter, antenna and cable ranges above, plus half the interquartile range of its loss over the endpoint draws. The measured interval runs from a noise-corrected signal estimate minus 5 dB to the median RSSI plus 5 dB. A model is consistent when the two overlap.
+One link-hour lay inside the terrain tile built at 1 m resolution, with both ends positioned and enough packets to pass the rules. The engine predicted its path loss with all five models. Each model's predicted RSSI range spans the transmitter, antenna and cable ranges above, plus half the interquartile range (the spread of the middle half) of its loss over the endpoint draws. The measured interval runs from a noise-corrected signal estimate minus 5 dB to the median RSSI plus 5 dB. A model is consistent when the two overlap.
 
 Under the rule fixed in advance, free-space loss was inconsistent with the measured link: the link lost more than open air would explain. Knife-edge, Okumura-Hata, ITM and P.1812 were not ruled out, and one link-hour of four packets cannot separate them.
 
 ## Two implementations
 
-The link rules exist twice, in Python (`ingester/link_rules.py`) and in SQL (dbt models in the PostGIS warehouse), written independently from the contract and checked against the same fixture. On the real capture, with one failing staging test excluded, both keep the same 124 link-hours: every key (relayer, gateway, clock hour) is in both, and none is in only one. They agree at every link level:
+The link rules exist twice, in Python (`ingester/link_rules.py`) and in SQL (models built with dbt, a tool that runs SQL transformations and their tests, in the PostGIS warehouse), written independently from the contract and checked against the same fixture. On the real capture, with one failing staging test excluded, both keep the same 124 link-hours: every key (relayer, gateway, clock hour) is in both, and none is in only one. They agree at every link level:
 
 | Level | SQL | Python |
 | --- | --- | --- |
