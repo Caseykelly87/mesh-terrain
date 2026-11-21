@@ -6,7 +6,7 @@ Meshtastic is an open-source mesh network of small LoRa radios (low-power, long-
 
 ## What was built
 
-The diagram has two lanes: the snapshot lane, where a person starts each capture or download, and the batch lane, which builds everything else from the snapshots. Dagster, the orchestrator, runs the batch lane's warehouse steps.
+The diagram has two lanes: the snapshot lane, where a person starts each capture or download, and the batch lane, which builds everything else from the snapshots. Dagster, the orchestrator, can run the batch lane's warehouse steps; the make targets also run them from the host.
 
 ```mermaid
 flowchart LR
@@ -34,7 +34,7 @@ flowchart LR
 - **Warehouse.** PostgreSQL 17 with PostGIS 3.5 and h3-pg (the H3 hexagonal grid in SQL), dbt for models and tests, Dagster for orchestration (ADR 0001). The tests connect as a role that cannot write the raw schemas at all.
 - **Path-loss engine.** One command and one config file take up to five terrain snapshots, transmitter sites and receiver points, and write predictions, coverage rasters and a manifest. It runs five models: free space, knife-edge diffraction over the terrain profile, Okumura-Hata, the Longley-Rice Irregular Terrain Model (ITM, built from NTIA's public-domain reference code) and ITU-R P.1812. A real position is a box, not a point, so each link is predicted over random draws of both endpoints inside their boxes (16 in the runs so far), with a GPS error floor set in the config (5 m either side of the centre in the runs so far; ADR 0009). The contract is [`docs/INTERFACE.md`](docs/INTERFACE.md).
 - **Provenance.** Every engine run's manifest records the code commit and whether the checkout was clean, the sha256 of every input layer and terrain snapshot manifest, the model library hashes, the seed and the versions of the manifest, the engine and the output columns. A run from a clean checkout (`make engine` refuses any other) can be traced to exactly what produced it.
-- **Privacy.** Node ids are pseudonymised at the source. Precise positions from the community broker are never published. The engine admits a point layer only if it is marked synthetic, or marked real and listed by the preparation step with a matching sha256; this stops accidents, not a deliberate bypass. Run outputs from real data stay on the owner's machine; what is published from real data is counts and one coarse statement, described below.
+- **Privacy.** Node ids are pseudonymised before anything lands in a snapshot. Precise positions from the community broker are never published. The engine admits a point layer only if it is marked synthetic, or marked real and listed by the preparation step with a matching sha256; this stops accidents, not a deliberate bypass. Run outputs from real data stay on the owner's machine; what is published from real data is counts and one coarse statement, described below.
 - **Security.** Every published port is bound to this machine only. `make up` refuses to start the stack with placeholder credentials. Real credentials are generated per machine and never committed; the test role's two values are kept out of test reports. The details are in [`docs/operations.md`](docs/operations.md).
 
 ## Run it on synthetic data
