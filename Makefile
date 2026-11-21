@@ -159,9 +159,18 @@ help:
 # the run that created it: every variable in it would be missing from the
 # recipes, and the tests and dbt would fail on settings they cannot see. So a
 # run that had to create it stops here and the next run reads it. make env on
-# its own only creates it.
+# its own only creates it. Every goal that reads .env's values depends on env
+# itself, not only through check, so make -k or -j, which go on with the other
+# prerequisites of a goal whose env step stopped, still skip it.
 env:
-	@test -f .env || { cp .env.example .env; 	    if [ -n "$(filter-out env,$(MAKECMDGOALS))" ]; then 	        echo "make: created .env from .env.example; this run could not read it, so set its values (README, Credentials) and run make again" >&2; 	        exit 1; 	    fi; }
+	@test -f .env || { \
+	    cp .env.example .env; \
+	    if [ -n "$(filter-out env,$(MAKECMDGOALS))" ]; then \
+	        echo "make: created .env from .env.example, which this run could not read; run make again" >&2; \
+	        echo "(make up also needs its credentials generated first: README, Credentials)" >&2; \
+	        exit 1; \
+	    fi; \
+	}
 
 # The owner password and the MinIO root credentials in .env.example are public,
 # so neither make up nor make rotate-owner-password starts anything while .env
@@ -254,10 +263,10 @@ lint:
 	$(UV) ruff format --check .
 	$(UV) mypy
 
-test:
+test: env
 	$(UV) pytest --cov --cov-report=term-missing
 
-dbt-deps:
+dbt-deps: env
 	$(DBT) deps $(DBT_ARGS)
 
 # As the owner, not the test role: dbt debug prints the connection's user, and
