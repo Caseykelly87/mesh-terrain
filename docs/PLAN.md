@@ -2,6 +2,8 @@
 
 Restated 2026-11-08 after Casey rescoped the project: batch analysis on dated, immutable snapshots, plus a reusable terrain-aware path-loss engine. There is no continuous or scheduled ingestion, now or planned.
 
+What comes after this plan's first phases, queued when the wrap-up closed them at release v0.1.0, is in `docs/ROADMAP.md`.
+
 ## Objective
 
 Answer one question with a number: how much of the variation in observed Meshtastic link quality across the St. Louis metro is explained by terrain-based propagation prediction, and what explains the rest. No hardware, no driving; every input is public.
