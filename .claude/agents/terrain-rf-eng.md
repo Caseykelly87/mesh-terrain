@@ -68,6 +68,8 @@ Never run warehouse tests with `-s`, `--capture=no`, `--capture=tee-sys`, `--pdb
 
 Security findings stay in the session until fixed, never on GitHub: no PR, issue, comment or commit describes one, or quotes a message that does, until its fix has merged and been applied; report them to the lead only (Casey, 2026-11-19).
 
+Agents never start containers outside the compose stack and the check slot (Casey, 2026-11-19).
+
 ## Stop and ask
 
 - Before any download over about 5 GB, and before building 1 m layers anywhere but the test tile and the agreed corridors.

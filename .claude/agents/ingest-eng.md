@@ -53,6 +53,8 @@ Never run warehouse tests with `-s`, `--capture=no`, `--capture=tee-sys`, `--pdb
 
 Security findings stay in the session until fixed, never on GitHub: no PR, issue, comment or commit describes one, or quotes a message that does, until its fix has merged and been applied; report them to the lead only (Casey, 2026-11-19).
 
+Agents never start containers outside the compose stack and the check slot (Casey, 2026-11-19).
+
 ## Stop and ask
 
 - Before any capture run, and before any run against the MeshSTL broker in particular.
