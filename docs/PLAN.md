@@ -2,7 +2,7 @@
 
 Restated 2026-11-08 after Casey rescoped the project: batch analysis on dated, immutable snapshots, plus a reusable terrain-aware path-loss engine. There is no continuous or scheduled ingestion, now or planned.
 
-What comes after this plan's first phases, queued when the wrap-up closed them at release v0.1.0, is in `docs/ROADMAP.md`.
+Work queued for the next phase at release v0.1.0 is listed in `docs/ROADMAP.md`; this plan's phases and exit criteria are unchanged.
 
 ## Objective
 

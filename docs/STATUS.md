@@ -233,4 +233,4 @@ No Track B unit runs during the wrap-up. The lead's `make dbt-build-real` (wrap-
 1. `analytics.mart_data_quality`, Phase 2's funnel: the hours the one-box test drops (`lnk_02`) and the Q4 count `lnk_01_direct_hop_contradicted` as a row (Casey, PR #72, Q1), counts only on anything public; then the Phase 2 exit check.
 2. The Phase 2 Dagster dbt assets, where the target a lead run uses is settled (Casey, issue #55 comment 6960283869, item 11).
 
-Queued for Track B: `docs/ROADMAP.md`, Warehouse.
+Queued for Track B: `docs/ROADMAP.md`, Warehouse, and the features loader under Engine.
