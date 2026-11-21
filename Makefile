@@ -159,9 +159,10 @@ help:
 # the run that created it: every variable in it would be missing from the
 # recipes, and the tests and dbt would fail on settings they cannot see. So a
 # run that had to create it stops here and the next run reads it. make env on
-# its own only creates it. Every goal that reads .env's values depends on env
-# itself, not only through check, so make -k or -j, which go on with the other
-# prerequisites of a goal whose env step stopped, still skip it.
+# its own only creates it. The goals check runs that read .env's values
+# (test-role, test, dbt-build) and the other dbt goals depend on env
+# themselves, not only through check, so make -k or -j, which go on with the
+# other prerequisites of a goal whose env step stopped, still skip them.
 env:
 	@test -f .env || { \
 	    cp .env.example .env; \

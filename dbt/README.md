@@ -30,7 +30,7 @@ How it works:
 
 ## Running
 
-From the repository root with the stack up and the `.env` variables exported: `make dbt-build` (Track B's `dev_wh`), `make dbt-build DBT_DEV_TARGET=dev_ta` (Track A), or `uv run dbt build --project-dir dbt --profiles-dir dbt --target <target>`; without `--target` dbt uses `dev_wh` when `DBT_TARGET` is unset. On a fresh worktree run `make dbt-deps` first (`docs/STATUS.md`, Environment notes).
+From the repository root with the stack up and the `.env` variables exported: `make dbt-build` (Track B's `dev_wh`), `make dbt-build DBT_DEV_TARGET=dev_ta` (Track A), or `uv run dbt build --project-dir dbt --profiles-dir dbt --target <target>`; without `--target` dbt uses `dev_wh` when `DBT_TARGET` is unset. On a fresh worktree run `make -o env dbt-deps` first (`docs/STATUS.md`, Environment notes).
 
 ## Fixture build
 
