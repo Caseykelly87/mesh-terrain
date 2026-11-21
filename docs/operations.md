@@ -1,6 +1,6 @@
 # Operations
 
-How to run the stack day to day: starting and stopping it, credentials, the database role the tests use, the terrain snapshot targets, the engine target, and the notes for Windows. Moved from the README when it was rewritten for a first-time reader; the wording is unchanged except where noted.
+How to run the stack day to day: starting and stopping it, credentials, the database role the tests use, the terrain snapshot targets, the engine target, and the notes for Windows. Moved from the README when it was rewritten for a first-time reader. The wording is unchanged except: the section headings; the worktree recipe line, which stays in the README (Test role), so this file points to it; the `make reproduce` sentence, brought up to date; and an `engine/` row in the layout table.
 
 ## Starting, stopping and the volumes
 
@@ -17,7 +17,7 @@ make nuke    # stops the stack and deletes every project volume, after you type 
 
 The stack's data lives in Docker volumes, storage that Docker keeps apart from any container. Today there are two: `mesh-terrain_warehouse-data` holds the warehouse and Dagster databases, `mesh-terrain_minio-data` holds the object store bucket. `make down` leaves them in place, so the next `make up` finds the same tables and files. `make nuke` is the only target that deletes them, and it deletes every volume of the mesh-terrain project, including any added later. It lists the volumes, asks you to type `nuke`, and deletes nothing if you type anything else. `make nuke CONFIRM=nuke` skips the prompt, at a terminal too, so type it only when you mean it. With no terminal to ask on (CI, a script, a pipe) it refuses unless `CONFIRM=nuke` is on the make command line; a `CONFIRM` in your shell environment or in `.env` does not count. It also refuses, deleting nothing, if a container outside the stack still uses one of the volumes. After a nuke, `make up` recreates empty volumes with the schemas and the bucket, and `make check` reloads the dbt seeds. Snapshots (the MQTT capture, downloaded elevation and lidar tiles) are kept in folders on the host under the folder `SNAPSHOTS_HOST_DIR` names in `.env`, outside the repository, never in these volumes, so a nuke cannot touch them.
 
-`make up` copies `.env.example` to `.env` if it is missing, and then stops until you have generated the credentials in it (Credentials, below). Dagster is at http://localhost:3000, the warehouse at localhost:5433 (database `mesh_terrain`, user `mesh`, the owner of every schema), the object store API at localhost:9000 and its console at localhost:9001, each reachable from this machine only: every published port is bound to 127.0.0.1. `make fmt` formats; `make reproduce` will rebuild every asset from the registered snapshots once Phase 1 lands the loader.
+`make up` copies `.env.example` to `.env` if it is missing, and then stops until you have generated the credentials in it (Credentials, below). Dagster is at http://localhost:3000, the warehouse at localhost:5433 (database `mesh_terrain`, user `mesh`, the owner of every schema), the object store API at localhost:9000 and its console at localhost:9001, each reachable from this machine only: every published port is bound to 127.0.0.1. `make fmt` formats; `make reproduce` is a stub today; the unit that makes it rebuild raw and run dbt build from the registered snapshots is in `docs/ROADMAP.md`.
 
 ## Credentials
 
@@ -56,7 +56,11 @@ Casey asked that the two values never appear in a transcript or log (issue #55 c
 
 Every occurrence of either value in a pytest report is replaced, wherever it appears, so a short or common role name would also be replaced inside unrelated text such as paths and column names; choose a distinctive role name, eight characters or more.
 
+## Terrain snapshots
+
 The terrain inputs are snapshots: dated folders under `SNAPSHOTS_DIR`, each with a sha256 manifest, never changed once written. One make target writes each, on the host: `make p1812-maps` (the ITU-R P.1812 maps), `make dem-1m` (the USGS 1 m elevation tile x72y429), `make osm-snapshot DATE=2026-11-01` (OpenStreetMap buildings and water), `make canopy` (the canopy height tile) and `make dsm OSM_SNAPSHOT=<id> SCRATCH=<dir>` (the lidar surface, built through the PDAL container). `make register-snapshot ID=<id>` records a finished one in the warehouse; the DSM needs its OpenStreetMap snapshot written and registered first. A write is permanent, so `make -n <target>` prints the command without running it. `make check-p1812` then checks the map files against their pinned sha256 values, runs P.1812 on a flat 10 km path from them and expects 149.48 dB. `pipeline/terrain_snapshots/README.md` describes each command.
+
+## The engine
 
 `make engine CONFIG=<file>` runs the path-loss engine once, with no network, in the engine image, built from the Dagster Dockerfile, the one place the ITM library is built. It checks the config and the folders first, refuses a checkout with uncommitted changes (the run records the commit it ran), and builds only when every check passes. The container reads the snapshots read-only and writes the run under `RUNS_HOST_DIR`, so the config's `output_dir` must be `/runs` or a folder below it, and it sees the config's folder, so keep each config, with the point layers it names, in a folder of its own; `engine/fixtures/fixture-run-itm.yaml` is a complete example on synthetic data. `engine/README.md` describes the config and what a run writes.
 
@@ -68,6 +72,7 @@ The terrain inputs are snapshots: dated folders under `SNAPSHOTS_DIR`, each with
 | `pipeline/` | Dagster code location: settings, logging, dbt assets, later loaders and features |
 | `dbt/` | dbt project: staging, core and analytics models and tests |
 | `terrain/` | Pure terrain and propagation functions (Phase 3) |
+| `engine/` | The path-loss engine: one command, one config, a run folder with a manifest (`docs/INTERFACE.md`) |
 | `docker/` | Dockerfiles, database init SQL, the bucket bootstrap and the scripts behind the make targets |
 | `infra/` | Terraform for the cloud phase (Phase 6) |
 | `web/`, `arcgis/` | MapLibre site and ArcGIS Pro deliverable (Phase 5) |
