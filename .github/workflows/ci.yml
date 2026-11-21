@@ -168,6 +168,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      # A run whose env step has to create .env stops, since make read no
+      # .env when it started, so the file is made in a step of its own.
+      - run: make env
       - run: make check-pdal
       # On Linux a container that runs as root leaves root-owned files the
       # snapshot command cannot rename or hash, so the owner is checked.

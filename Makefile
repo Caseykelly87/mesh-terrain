@@ -5,8 +5,8 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 # .env is exported into every recipe, except NODE_ID_HMAC_KEY, so dbt and pytest
-# on the host see the same variables Compose uses. The file is created from
-# .env.example by `make up`.
+# on the host see the same variables Compose uses. The env step creates it
+# from .env.example when it is missing (see env, below).
 #
 # The test role's name and password are the exception: a worktree gets them
 # from the shell, which exports only those two lines of the main checkout's
@@ -155,8 +155,13 @@ help:
 	@echo "                dbt build on the target prod: reads the real raw schema and builds the real"
 	@echo "                staging, core and analytics schemas"
 
+# make reads .env when it starts, so a .env this step creates is not read by
+# the run that created it: every variable in it would be missing from the
+# recipes, and the tests and dbt would fail on settings they cannot see. So a
+# run that had to create it stops here and the next run reads it. make env on
+# its own only creates it.
 env:
-	@test -f .env || cp .env.example .env
+	@test -f .env || { cp .env.example .env; 	    if [ -n "$(filter-out env,$(MAKECMDGOALS))" ]; then 	        echo "make: created .env from .env.example; this run could not read it, so set its values (README, Credentials) and run make again" >&2; 	        exit 1; 	    fi; }
 
 # The owner password and the MinIO root credentials in .env.example are public,
 # so neither make up nor make rotate-owner-password starts anything while .env
